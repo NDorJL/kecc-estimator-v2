@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "kecc-vite",
+      "runtimeExecutable": "/usr/local/bin/npm",
+      "runtimeArgs": ["run", "preview"],
+      "port": 5173
+    }
+  ]
+}
