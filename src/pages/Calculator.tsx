@@ -9,10 +9,12 @@ import {
   type ServiceDefinition,
   type FrequencyDiscount,
 } from '@/lib/pricing'
-import type { LineItem } from '@/types'
+import type { LineItem, CompanySettings } from '@/types'
 import { useServices } from '@/lib/services-context'
 import { useQuoteContext } from '@/lib/quote-context'
 import { useLocation } from 'wouter'
+import { useQuery } from '@tanstack/react-query'
+import { apiGet } from '@/lib/queryClient'
 import {
   Accordion,
   AccordionContent,
@@ -38,10 +40,56 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { ShoppingCart, Trash2, Tag, TrendingUp, Send, ChevronRight, Plus } from 'lucide-react'
+import {
+  ShoppingCart, Trash2, Tag, TrendingUp, Send, ChevronRight, Plus,
+  Droplets, Leaf, Sparkles, Home, Building2, Layers,
+} from 'lucide-react'
 
 function fmt(n: number): string {
   return '$' + n.toFixed(2)
+}
+
+// Determine if a service uses quantity-based unit pricing (acres, sqft, lf)
+function isUnitPriced(model: string) {
+  return model === 'per_sqft' || model === 'per_lf' || model === 'per_acre'
+}
+
+function unitLabel(model: string) {
+  if (model === 'per_sqft') return 'Sqft'
+  if (model === 'per_lf') return 'LF'
+  if (model === 'per_acre') return 'Acres'
+  return 'Qty'
+}
+
+function unitPlaceholder(model: string) {
+  if (model === 'per_sqft') return 'e.g. 2000'
+  if (model === 'per_acre') return 'e.g. 0.5'
+  return '1'
+}
+
+function calcUnitTotal(model: string, tierPrice: number, min: number, qty: number) {
+  if (model === 'per_sqft' || model === 'per_lf') {
+    return calculatePerSqftPrice({ label: '', min, price: tierPrice }, qty)
+  }
+  if (model === 'per_acre') {
+    // no minimum floor for per_acre
+    return tierPrice * qty
+  }
+  return tierPrice * qty
+}
+
+function describeUnit(model: string, label: string, qty: number) {
+  if (model === 'per_sqft') return `${label} — ${qty.toLocaleString()} sqft`
+  if (model === 'per_lf') return `${label} — ${qty.toLocaleString()} LF`
+  if (model === 'per_acre') return `${qty} acre${qty !== 1 ? 's' : ''}`
+  return label
+}
+
+// Category → icon mapping for visual flair
+const categoryIcons: Record<string, React.ElementType> = {
+  'Lawn Care': Leaf,
+  'Pressure Washing': Droplets,
+  'Window Cleaning': Sparkles,
 }
 
 /* ── Controlled qty input that allows free typing ─────────────────────── */
@@ -121,22 +169,22 @@ function OnetimeServiceCard({
   onAdd: (item: LineItem) => void
 }) {
   const [tierIndex, setTierIndex] = useState(0)
-  const [quantity, setQuantity] = useState(1)
+  const [quantity, setQuantity] = useState(isUnitPriced(service.pricingModel) ? 0 : 1)
   const [freqKey, setFreqKey] = useState(service.frequencies[0]?.frequency ?? 'onetime')
 
   const freq = service.frequencies.find(f => f.frequency === freqKey) ?? service.frequencies[0]
   const tier = service.tiers[tierIndex]
+  const isUnit = isUnitPriced(service.pricingModel)
 
   const pricing = useMemo(() => {
     if (!tier || !freq) return null
-    const isPerSqft = service.pricingModel === 'per_sqft' || service.pricingModel === 'per_lf'
-    const onetimeTotal = isPerSqft
-      ? calculatePerSqftPrice(tier, quantity)
+    const onetimeTotal = isUnit
+      ? calcUnitTotal(service.pricingModel, tier.price, tier.min, quantity)
       : tier.price * quantity
     const sub = calculateSubscriptionPrice(onetimeTotal, freq)
     const isSub = freq.frequency !== 'onetime'
-    return { onetimeTotal, sub, isSub, isPerSqft }
-  }, [tier, freq, quantity, service.pricingModel])
+    return { onetimeTotal, sub, isSub }
+  }, [tier, freq, quantity, service.pricingModel, isUnit])
 
   const handleAdd = () => {
     if (!pricing || !tier || !freq) return
@@ -144,41 +192,50 @@ function OnetimeServiceCard({
       serviceId: service.id,
       serviceName: service.name,
       category: service.category,
-      description: pricing.isPerSqft ? `${tier.label} — ${quantity.toLocaleString()} sqft` : tier.label,
+      description: describeUnit(service.pricingModel, tier.label, quantity),
       quantity,
       unitLabel: service.unitLabel,
       frequency: freq.label,
-      unitPrice: pricing.isPerSqft ? pricing.onetimeTotal : tier.price,
+      unitPrice: isUnit ? pricing.onetimeTotal : tier.price,
       lineTotal: pricing.isSub ? pricing.sub.monthlyAmount : pricing.onetimeTotal,
       isSubscription: pricing.isSub,
       monthlyAmount: pricing.isSub ? pricing.sub.monthlyAmount : undefined,
     }
     onAdd(item)
-    setQuantity(1)
+    setQuantity(isUnit ? 0 : 1)
     setTierIndex(0)
   }
 
+  // For per_acre: show the rate and live price prominently
+  const isAcre = service.pricingModel === 'per_acre'
+
   return (
-    <Card>
+    <Card className="border-l-2 border-l-primary/30">
       <CardContent className="pt-3 pb-3 space-y-3">
         <div className="flex items-start justify-between gap-2">
           <div>
             <p className="text-sm font-semibold">{service.name}</p>
-            <p className="text-xs text-muted-foreground">{service.unitLabel}</p>
+            {isAcre ? (
+              <p className="text-xs text-muted-foreground">
+                {fmt(tier?.price ?? 0)}/acre · {service.unitLabel}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">{service.unitLabel}</p>
+            )}
           </div>
-          {pricing && (
+          {pricing && pricing.onetimeTotal > 0 && (
             <div className="text-right shrink-0">
               {pricing.isSub ? (
-                <p className="text-sm font-bold">{fmt(pricing.sub.monthlyAmount)}/mo</p>
+                <p className="text-sm font-bold text-primary">{fmt(pricing.sub.monthlyAmount)}/mo</p>
               ) : (
-                <p className="text-sm font-bold">{fmt(pricing.onetimeTotal)}</p>
+                <p className="text-sm font-bold text-primary">{fmt(pricing.onetimeTotal)}</p>
               )}
             </div>
           )}
         </div>
 
         <div className="grid grid-cols-3 gap-2">
-          {/* Tier */}
+          {/* Tier selector — hide if only 1 tier (e.g. per_acre) */}
           {service.tiers.length > 1 && (
             <div className="space-y-1 col-span-1">
               <Label className="text-xs">Size</Label>
@@ -195,15 +252,13 @@ function OnetimeServiceCard({
             </div>
           )}
 
-          {/* Quantity */}
+          {/* Quantity / Acres / Sqft */}
           <div className={`space-y-1 ${service.tiers.length > 1 ? 'col-span-1' : 'col-span-2'}`}>
-            <Label className="text-xs">
-              {service.pricingModel === 'per_sqft' ? 'Sqft' : service.pricingModel === 'per_lf' ? 'LF' : 'Qty'}
-            </Label>
+            <Label className="text-xs">{unitLabel(service.pricingModel)}</Label>
             <QtyInput
               value={quantity}
               onChange={setQuantity}
-              placeholder={service.pricingModel === 'per_sqft' ? 'e.g. 2000' : '1'}
+              placeholder={unitPlaceholder(service.pricingModel)}
             />
           </div>
 
@@ -227,11 +282,27 @@ function OnetimeServiceCard({
           )}
         </div>
 
+        {/* Per-acre live breakdown */}
+        {isAcre && quantity > 0 && pricing && (
+          <div className="rounded-md bg-primary/5 border border-primary/20 px-3 py-2 text-xs space-y-1">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">{quantity} acre{quantity !== 1 ? 's' : ''} × {fmt(tier?.price ?? 0)}/acre</span>
+              <span className="font-semibold">{fmt(pricing.onetimeTotal)} per cut</span>
+            </div>
+            {pricing.isSub && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Monthly ({freq?.label})</span>
+                <span className="font-semibold text-primary">{fmt(pricing.sub.monthlyAmount)}/mo</span>
+              </div>
+            )}
+          </div>
+        )}
+
         <Button
           size="sm"
           className="w-full min-h-[44px]"
           onClick={handleAdd}
-          disabled={!pricing}
+          disabled={!pricing || pricing.onetimeTotal === 0}
         >
           <ShoppingCart className="h-4 w-4 mr-2" />
           Add to Cart
@@ -268,20 +339,21 @@ function SubServiceLine({
     onUpdate(lineIndex, {
       service: svc,
       tierIndex: 0,
-      quantity: 1,
+      quantity: isUnitPriced(svc.pricingModel) ? 0 : 1,
       frequency: svc.frequencies.find(f => f.frequency !== 'onetime') ?? svc.frequencies[0],
     })
   }
 
-  const isPerSqft = line.service.pricingModel === 'per_sqft' || line.service.pricingModel === 'per_lf'
+  const isUnit = isUnitPriced(line.service.pricingModel)
   const tier = line.service.tiers[line.tierIndex]
-  const onetimeTotal = isPerSqft && tier
-    ? calculatePerSqftPrice(tier, line.quantity)
+  const onetimeTotal = isUnit && tier
+    ? calcUnitTotal(line.service.pricingModel, tier.price, tier.min, line.quantity)
     : (tier?.price ?? 0) * line.quantity
   const sub = calculateSubscriptionPrice(onetimeTotal, line.frequency)
+  const isAcre = line.service.pricingModel === 'per_acre'
 
   return (
-    <Card>
+    <Card className="border-l-2 border-l-primary/30">
       <CardContent className="pt-3 pb-3 space-y-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 space-y-1">
@@ -308,31 +380,32 @@ function SubServiceLine({
         </div>
 
         <div className="grid grid-cols-3 gap-2">
-          <div className="space-y-1">
-            <Label className="text-xs">Tier</Label>
-            <Select
-              value={String(line.tierIndex)}
-              onValueChange={(v) => onUpdate(lineIndex, { tierIndex: parseInt(v, 10) })}
-            >
-              <SelectTrigger className="min-h-[44px] text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {line.service.tiers.map((t, i) => (
-                  <SelectItem key={i} value={String(i)}>{t.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* Tier selector — hide for single-tier services */}
+          {line.service.tiers.length > 1 ? (
+            <div className="space-y-1">
+              <Label className="text-xs">Tier</Label>
+              <Select
+                value={String(line.tierIndex)}
+                onValueChange={(v) => onUpdate(lineIndex, { tierIndex: parseInt(v, 10) })}
+              >
+                <SelectTrigger className="min-h-[44px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {line.service.tiers.map((t, i) => (
+                    <SelectItem key={i} value={String(i)}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : <div />}
 
           <div className="space-y-1">
-            <Label className="text-xs">
-              {line.service.pricingModel === 'per_sqft' ? 'Sqft' : line.service.pricingModel === 'per_lf' ? 'LF' : 'Qty'}
-            </Label>
+            <Label className="text-xs">{unitLabel(line.service.pricingModel)}</Label>
             <QtyInput
               value={line.quantity}
               onChange={(v) => onUpdate(lineIndex, { quantity: v })}
-              placeholder={line.service.pricingModel === 'per_sqft' ? 'e.g. 2000' : '1'}
+              placeholder={unitPlaceholder(line.service.pricingModel)}
             />
           </div>
 
@@ -359,9 +432,11 @@ function SubServiceLine({
 
         <div className="flex justify-between text-xs text-muted-foreground">
           <span>
-            {isPerSqft
-              ? `${fmt(tier?.price ?? 0)}/sqft × ${line.quantity.toLocaleString()}`
-              : `${fmt(tier?.price ?? 0)} × ${line.quantity}`}
+            {isAcre
+              ? `${line.quantity} acre${line.quantity !== 1 ? 's' : ''} × ${fmt(tier?.price ?? 0)}/acre`
+              : isUnit
+                ? `${fmt(tier?.price ?? 0)}/unit × ${line.quantity.toLocaleString()}`
+                : `${fmt(tier?.price ?? 0)} × ${line.quantity}`}
             {line.frequency.frequency !== 'onetime' && ` via ${line.frequency.label}`}
           </span>
           <span className="font-medium text-foreground">
@@ -405,7 +480,7 @@ function SubPlanBuilder({
       {
         service: svc,
         tierIndex: 0,
-        quantity: 1,
+        quantity: isUnitPriced(svc.pricingModel) ? 0 : 1,
         frequency: svc.frequencies.find(f => f.frequency !== 'onetime') ?? svc.frequencies[0],
       },
     ])
@@ -425,9 +500,9 @@ function SubPlanBuilder({
     let preDiscountMonthly = 0
     const lineDetails = lines.map(line => {
       const tier = line.service.tiers[line.tierIndex]
-      const isPerSqft = line.service.pricingModel === 'per_sqft' || line.service.pricingModel === 'per_lf'
-      const onetimeTotal = isPerSqft && tier
-        ? calculatePerSqftPrice(tier, line.quantity)
+      const isUnit = isUnitPriced(line.service.pricingModel)
+      const onetimeTotal = isUnit && tier
+        ? calcUnitTotal(line.service.pricingModel, tier.price, tier.min, line.quantity)
         : (tier?.price ?? 0) * line.quantity
       const sub = calculateSubscriptionPrice(onetimeTotal, line.frequency)
       const monthly = line.frequency.frequency !== 'onetime' ? sub.monthlyAmount : 0
@@ -469,22 +544,20 @@ function SubPlanBuilder({
     if (lines.length === 0) return
     const items: LineItem[] = lines.map(line => {
       const tier = line.service.tiers[line.tierIndex]
-      const isPerSqft = line.service.pricingModel === 'per_sqft' || line.service.pricingModel === 'per_lf'
-      const onetimeTotal = isPerSqft && tier
-        ? calculatePerSqftPrice(tier, line.quantity)
+      const isUnit = isUnitPriced(line.service.pricingModel)
+      const onetimeTotal = isUnit && tier
+        ? calcUnitTotal(line.service.pricingModel, tier.price, tier.min, line.quantity)
         : (tier?.price ?? 0) * line.quantity
       const sub = calculateSubscriptionPrice(onetimeTotal, line.frequency)
       return {
         serviceId: line.service.id,
         serviceName: line.service.name,
         category: line.service.category,
-        description: isPerSqft
-          ? `${tier?.label ?? ''} — ${line.quantity.toLocaleString()} sqft`
-          : (tier?.label ?? ''),
+        description: describeUnit(line.service.pricingModel, tier?.label ?? '', line.quantity),
         quantity: line.quantity,
         unitLabel: line.service.unitLabel,
         frequency: line.frequency.label,
-        unitPrice: isPerSqft ? onetimeTotal : (tier?.price ?? 0),
+        unitPrice: isUnit ? onetimeTotal : (tier?.price ?? 0),
         lineTotal: line.frequency.frequency === 'onetime' ? onetimeTotal : sub.monthlyAmount,
         isSubscription: line.frequency.frequency !== 'onetime',
         monthlyAmount: line.frequency.frequency !== 'onetime' ? sub.monthlyAmount : undefined,
@@ -504,14 +577,14 @@ function SubPlanBuilder({
               <p className="text-xs text-muted-foreground">{litePlan.commitmentMonths}-month commitment</p>
             </div>
             <div className="flex items-center gap-2">
-              <Badge>{fmt(litePlan.monthlyPrice)}/mo</Badge>
+              <Badge variant="secondary" className="bg-primary/10 text-primary border-primary/20">{fmt(litePlan.monthlyPrice)}/mo</Badge>
               <Button size="sm" variant="outline" onClick={handleAddLiteToCart}>
                 <ShoppingCart className="h-3.5 w-3.5 mr-1" />
                 Add
               </Button>
             </div>
           </div>
-          <Card>
+          <Card className="border-primary/20 bg-primary/5">
             <CardContent className="pt-3 pb-3">
               <ul className="text-xs space-y-1">
                 {litePlan.includedServices.map((s, i) => (
@@ -572,7 +645,7 @@ function SubPlanBuilder({
         )}
 
         {lines.length > 0 && (
-          <Card>
+          <Card className="border-primary/30">
             <CardContent className="pt-4 space-y-2">
               {!isAutopilot && totals.discountPct > 0 && (
                 <>
@@ -594,7 +667,7 @@ function SubPlanBuilder({
               )}
               <div className="flex justify-between items-center">
                 <span className="text-sm font-medium">Monthly Total</span>
-                <span className="text-lg font-bold">{fmt(totals.monthlyTotal)}/mo</span>
+                <span className="text-lg font-bold text-primary">{fmt(totals.monthlyTotal)}/mo</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-sm text-muted-foreground">Annual Estimate</span>
@@ -726,26 +799,39 @@ function CartBar({ items, onOpen }: { items: LineItem[]; onOpen: () => void }) {
   const hasSub = monthlyTotal > 0
 
   return (
-    <div
-      className="sticky bottom-0 z-40 bg-primary text-primary-foreground flex items-center justify-between px-4 py-3 shadow-lg"
-      style={{ marginBottom: 0 }}
-    >
+    <div className="sticky bottom-0 z-40 bg-primary text-primary-foreground flex items-center justify-between px-4 py-3 shadow-lg">
       <div className="flex items-center gap-2">
         <ShoppingCart className="h-5 w-5" />
         <span className="text-sm font-semibold">
-          {items.length} item{items.length !== 1 ? 's' : ''} ·{' '}
-          {fmt(displayTotal)}{hasSub && '/mo'}
+          {items.length} item{items.length !== 1 ? 's' : ''} · {fmt(displayTotal)}{hasSub && '/mo'}
         </span>
       </div>
-      <Button
-        size="sm"
-        variant="secondary"
-        className="gap-1"
-        onClick={onOpen}
-      >
+      <Button size="sm" variant="secondary" className="gap-1" onClick={onOpen}>
         Review
         <ChevronRight className="h-4 w-4" />
       </Button>
+    </div>
+  )
+}
+
+/* ── Branded header strip with logo ──────────────────────────────────── */
+function CalcHeader({ logoUrl }: { logoUrl?: string | null }) {
+  return (
+    <div className="relative overflow-hidden bg-gradient-to-r from-primary to-primary/80 text-primary-foreground px-4 py-3 flex items-center gap-3">
+      {/* subtle texture overlay */}
+      <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_30%_50%,white,transparent_70%)]" />
+      {logoUrl ? (
+        <img src={logoUrl} alt="Logo" className="h-9 w-auto object-contain relative z-10 brightness-0 invert" />
+      ) : (
+        <div className="relative z-10 flex items-center gap-1.5">
+          <Leaf className="h-5 w-5" />
+          <Sparkles className="h-4 w-4 opacity-70" />
+        </div>
+      )}
+      <div className="relative z-10">
+        <p className="text-sm font-bold leading-tight">Service Estimator</p>
+        <p className="text-xs opacity-80">Build accurate quotes on-site</p>
+      </div>
     </div>
   )
 }
@@ -758,7 +844,12 @@ type PlanType = 'tcep' | 'autopilot'
 export default function Calculator() {
   const { cartItems, addToCart, removeFromCart, clearCart, setIsCreatingQuote } = useQuoteContext()
   const [, navigate] = useLocation()
-  const { services: allServices, isLoading, getServicesByType } = useServices()
+  const { isLoading, getServicesByType } = useServices()
+
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ['/settings'],
+    queryFn: () => apiGet<CompanySettings>('/settings'),
+  })
 
   const [customerType, setCustomerType] = useState<CustomerType>('residential')
   const [serviceMode, setServiceMode] = useState<ServiceMode>('onetime')
@@ -770,7 +861,6 @@ export default function Calculator() {
     navigate('/quotes')
   }
 
-  // For one-time mode: get services filtered by customerType, excluding sub-only tags
   const onetimeServices = useMemo(() => {
     if (serviceMode !== 'onetime') return []
     return getServicesByType(customerType).filter(
@@ -778,15 +868,11 @@ export default function Calculator() {
     )
   }, [customerType, serviceMode, getServicesByType])
 
-  // Group one-time services by category
   const categories = useMemo(() => {
     const cats: string[] = []
     const seen = new Set<string>()
     for (const s of onetimeServices) {
-      if (!seen.has(s.category)) {
-        seen.add(s.category)
-        cats.push(s.category)
-      }
+      if (!seen.has(s.category)) { seen.add(s.category); cats.push(s.category) }
     }
     return cats
   }, [onetimeServices])
@@ -801,24 +887,27 @@ export default function Calculator() {
 
   return (
     <div className="flex flex-col">
+      {/* Branded header */}
+      <CalcHeader logoUrl={settings?.logoUrl} />
+
       {/* Toggle controls */}
-      <div className="px-4 pt-4 pb-2 space-y-2 bg-background sticky top-0 z-30 border-b">
-        {/* Customer type */}
+      <div className="px-4 pt-3 pb-2 space-y-2 bg-background sticky top-0 z-30 border-b shadow-sm">
         <ToggleGroup
           type="single"
           value={customerType}
           onValueChange={(v) => { if (v) setCustomerType(v as CustomerType) }}
           className="w-full"
         >
-          <ToggleGroupItem value="residential" className="flex-1 min-h-[44px] text-sm font-medium">
+          <ToggleGroupItem value="residential" className="flex-1 min-h-[44px] text-sm font-medium gap-1.5">
+            <Home className="h-4 w-4" />
             Residential
           </ToggleGroupItem>
-          <ToggleGroupItem value="commercial" className="flex-1 min-h-[44px] text-sm font-medium">
+          <ToggleGroupItem value="commercial" className="flex-1 min-h-[44px] text-sm font-medium gap-1.5">
+            <Building2 className="h-4 w-4" />
             Commercial
           </ToggleGroupItem>
         </ToggleGroup>
 
-        {/* Service mode */}
         <ToggleGroup
           type="single"
           value={serviceMode}
@@ -828,12 +917,12 @@ export default function Calculator() {
           <ToggleGroupItem value="onetime" className="flex-1 min-h-[44px] text-sm font-medium">
             One-Time
           </ToggleGroupItem>
-          <ToggleGroupItem value="subscription" className="flex-1 min-h-[44px] text-sm font-medium">
+          <ToggleGroupItem value="subscription" className="flex-1 min-h-[44px] text-sm font-medium gap-1.5">
+            <Layers className="h-3.5 w-3.5" />
             Subscription
           </ToggleGroupItem>
         </ToggleGroup>
 
-        {/* Plan type (subscription only) */}
         {serviceMode === 'subscription' && (
           <ToggleGroup
             type="single"
@@ -854,7 +943,6 @@ export default function Calculator() {
       {/* Content */}
       <div className="flex-1 p-4 space-y-3">
         {serviceMode === 'onetime' ? (
-          // Accordion by category for one-time services
           categories.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">
               No services available for this type.
@@ -863,11 +951,17 @@ export default function Calculator() {
             <Accordion type="multiple">
               {categories.map((cat) => {
                 const svcs = onetimeServices.filter(s => s.category === cat)
+                const Icon = categoryIcons[cat] ?? Sparkles
                 return (
                   <AccordionItem key={cat} value={cat}>
-                    <AccordionTrigger className="min-h-[48px] text-sm font-semibold">
-                      {cat}
-                      <Badge variant="secondary" className="ml-2 text-xs">{svcs.length}</Badge>
+                    <AccordionTrigger className="min-h-[52px] text-sm font-semibold hover:no-underline group">
+                      <div className="flex items-center gap-2">
+                        <div className="h-7 w-7 rounded-md bg-primary/10 flex items-center justify-center shrink-0 group-data-[state=open]:bg-primary/20 transition-colors">
+                          <Icon className="h-4 w-4 text-primary" />
+                        </div>
+                        <span>{cat}</span>
+                        <Badge variant="secondary" className="ml-1 text-xs">{svcs.length}</Badge>
+                      </div>
                     </AccordionTrigger>
                     <AccordionContent className="space-y-3 pt-2">
                       {svcs.map((svc) => (
@@ -884,7 +978,6 @@ export default function Calculator() {
             </Accordion>
           )
         ) : (
-          // TCEP / Autopilot plan builder
           <SubPlanBuilder
             customerType={customerType}
             planType={planType}
@@ -893,10 +986,8 @@ export default function Calculator() {
         )}
       </div>
 
-      {/* Sticky cart bar */}
       <CartBar items={cartItems} onOpen={() => setCartOpen(true)} />
 
-      {/* Cart drawer */}
       <CartDrawer
         open={cartOpen}
         onOpenChange={setCartOpen}

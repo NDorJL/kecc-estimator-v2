@@ -124,10 +124,15 @@ function ServiceCard({
         <div className="flex gap-4 text-xs text-muted-foreground">
           <span>Sub Cost: {pct(service.subCostPct)}</span>
           <span>Margin: {pct(1 - service.subCostPct)}</span>
+          {service.pricingModel === 'per_acre' && (
+            <span className="text-primary font-medium">Rate: per mowable acre</span>
+          )}
         </div>
 
         <div className="space-y-1.5">
-          <p className="text-xs font-medium text-muted-foreground">Tiers / Pricing</p>
+          <p className="text-xs font-medium text-muted-foreground">
+            {service.pricingModel === 'per_acre' ? 'Per-Acre Rate' : 'Tiers / Pricing'}
+          </p>
           {service.tiers.map((tier, idx) => {
             const isEditing = editingTier === idx
             return (
@@ -137,11 +142,13 @@ function ServiceCard({
               >
                 <div className="flex-1 min-w-0">
                   <span className="text-sm">{tier.label}</span>
-                  {tier.min > 0 && (
+                  {service.pricingModel === 'per_acre' ? (
+                    <span className="text-xs text-muted-foreground ml-2">per mowable acre</span>
+                  ) : tier.min > 0 ? (
                     <span className="text-xs text-muted-foreground ml-2">
                       {tier.min}{tier.max ? `–${tier.max}` : '+'} {service.unitLabel}
                     </span>
-                  )}
+                  ) : null}
                 </div>
                 <div className="flex items-center gap-1.5">
                   {isEditing ? (

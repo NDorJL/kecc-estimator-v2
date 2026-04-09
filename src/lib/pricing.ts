@@ -8,7 +8,7 @@
 // ============================================================
 
 export type ServiceType = "residential" | "commercial" | "both";
-export type PricingModel = "flat" | "per_unit" | "tiered" | "hourly" | "per_sqft" | "per_lf";
+export type PricingModel = "flat" | "per_unit" | "tiered" | "hourly" | "per_sqft" | "per_lf" | "per_acre";
 
 export interface PriceTier {
   label: string;
@@ -73,14 +73,10 @@ export const services: ServiceDefinition[] = [
     subcategory: "Mowing",
     serviceType: "residential",
     tags: ["onetime", "standalonesub", "subaddin"],
-    pricingModel: "tiered",
+    pricingModel: "per_acre",
     unitLabel: "per cut",
     tiers: [
-      { label: "Under ¼ acre", min: 0, max: 0.25, price: 35 },
-      { label: "¼ – ½ acre", min: 0.25, max: 0.5, price: 45 },
-      { label: "½ – 1 acre", min: 0.5, max: 1, price: 65 },
-      { label: "1 – 2 acres", min: 1, max: 2, price: 100 },
-      { label: "2+ acres", min: 2, max: 99, price: 150 },
+      { label: "Per Acre", min: 0, price: 100 },
     ],
     frequencies: [
       FREQ_ONETIME,
@@ -88,7 +84,7 @@ export const services: ServiceDefinition[] = [
       { ...FREQ_LAWN_BIWEEKLY, discountPct: 10 },
       { ...FREQ_LAWN_MONTHLY, discountPct: 8 },
     ],
-    notes: "Full-service cut includes mowing, edging, string trimming, blowing. Weed management and shrub trimming rolled into per-cut price for subscription clients. One-time cuts do NOT include weed/shrub work.",
+    notes: "Full-service cut includes mowing, edging, string trimming, blowing. Weed management and shrub trimming rolled into per-cut price for subscription clients. One-time cuts do NOT include weed/shrub work. Rate is per mowable acre — enter exact acreage for accurate pricing.",
     subCostPct: 0.78,
   },
   {
@@ -98,14 +94,10 @@ export const services: ServiceDefinition[] = [
     subcategory: "Mowing",
     serviceType: "commercial",
     tags: ["onetime", "standalonesub", "subaddin"],
-    pricingModel: "tiered",
+    pricingModel: "per_acre",
     unitLabel: "per cut",
     tiers: [
-      { label: "Under ¼ acre", min: 0, max: 0.25, price: 40 },
-      { label: "¼ – ½ acre", min: 0.25, max: 0.5, price: 55 },
-      { label: "½ – 1 acre", min: 0.5, max: 1, price: 80 },
-      { label: "1 – 2 acres", min: 1, max: 2, price: 120 },
-      { label: "2+ acres", min: 2, max: 99, price: 175 },
+      { label: "Per Acre", min: 0, price: 120 },
     ],
     frequencies: [
       FREQ_ONETIME,
@@ -113,7 +105,7 @@ export const services: ServiceDefinition[] = [
       { ...FREQ_LAWN_BIWEEKLY, discountPct: 10 },
       { ...FREQ_LAWN_MONTHLY, discountPct: 8 },
     ],
-    notes: "Commercial properties priced slightly higher due to liability, presentation standards, and scheduling requirements.",
+    notes: "Commercial properties priced slightly higher due to liability, presentation standards, and scheduling requirements. Rate is per mowable acre — enter exact acreage for accurate pricing.",
     subCostPct: 0.78,
   },
   {

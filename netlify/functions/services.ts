@@ -72,12 +72,13 @@ export const handler: Handler = async (event) => {
         const rows: string[][] = []
         rows.push(['Category','Service','Service Type','Pricing Model','Tier / Size','Unit','One-Time Price','Frequency','Discount %','Per-Visit','Monthly Amount','Annual Amount','Annual Savings','Sub Cost %','Margin %','Notes'])
         for (const svc of merged) {
-          const isPerUnit = svc.pricingModel === 'per_sqft' || svc.pricingModel === 'per_lf'
+          const isPerUnit = svc.pricingModel === 'per_sqft' || svc.pricingModel === 'per_lf' || svc.pricingModel === 'per_acre'
           const marginPct = ((1 - svc.subCostPct) * 100).toFixed(0) + '%'
           const subCostPct = (svc.subCostPct * 100).toFixed(0) + '%'
           if (isPerUnit) {
             for (const tier of svc.tiers) {
-              rows.push([svc.category, svc.name, svc.serviceType, svc.pricingModel, tier.label, svc.pricingModel === 'per_sqft' ? 'per sqft' : 'per LF', fmt(tier.price), svc.frequencies.map(f => f.label).join(', '), '', 'Min: '+fmt(tier.min), '', '', '', subCostPct, marginPct, svc.notes ?? ''])
+              const unitStr = svc.pricingModel === 'per_sqft' ? 'per sqft' : svc.pricingModel === 'per_lf' ? 'per LF' : 'per acre'
+              rows.push([svc.category, svc.name, svc.serviceType, svc.pricingModel, tier.label, unitStr, fmt(tier.price), svc.frequencies.map(f => f.label).join(', '), '', tier.min > 0 ? 'Min: '+fmt(tier.min) : 'No minimum', '', '', '', subCostPct, marginPct, svc.notes ?? ''])
             }
           } else {
             for (const tier of svc.tiers) {
