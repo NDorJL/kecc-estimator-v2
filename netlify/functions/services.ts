@@ -23,17 +23,41 @@ async function getMergedServices(): Promise<ServiceDefinition[]> {
     supabase.from('deleted_services').select('id'),
   ])
 
+  const allOverrides = overrides ?? []
   const deletedIds = (deleted ?? []).map((d: { id: string }) => d.id)
   const activeBase = baseServices.filter(s => !deletedIds.includes(s.id))
 
+  // Global frequency discount overrides (stored with service_id = '_global', field = 'freq_weekly' etc.)
+  const globalOverrides = allOverrides.filter((o: { service_id: string }) => o.service_id === '_global')
+  const freqDiscountOverrides: Record<string, number> = {}
+  for (const o of globalOverrides) {
+    if ((o.field as string).startsWith('freq_')) {
+      freqDiscountOverrides[(o.field as string).replace('freq_', '')] = Number(o.value)
+    }
+  }
+
   const merged = activeBase.map(svc => {
-    const svcOverrides = (overrides ?? []).filter((o: { service_id: string }) => o.service_id === svc.id)
-    if (svcOverrides.length === 0) return svc
+    const svcOverrides = allOverrides.filter((o: { service_id: string }) => o.service_id === svc.id)
+
+    // Apply tier price overrides
     const newTiers = svc.tiers.map((tier, idx) => {
       const o = svcOverrides.find((ov: { field: string; value: number }) => ov.field === `tier_${idx}`)
       return o ? { ...tier, price: Number(o.value) } : tier
     })
-    return { ...svc, tiers: newTiers }
+
+    // Apply minimum override
+    const minOverride = svcOverrides.find((ov: { field: string }) => ov.field === 'minimum')
+    const minimum = minOverride ? Number(minOverride.value) : svc.minimum
+
+    // Apply global frequency discount overrides
+    const newFrequencies = Object.keys(freqDiscountOverrides).length > 0
+      ? svc.frequencies.map(freq => {
+          const override = freqDiscountOverrides[freq.frequency]
+          return override !== undefined ? { ...freq, discountPct: override } : freq
+        })
+      : svc.frequencies
+
+    return { ...svc, tiers: newTiers, frequencies: newFrequencies, minimum }
   })
 
   const customParsed = (custom ?? []).map((c: { data: ServiceDefinition }) => c.data)

@@ -17,7 +17,7 @@ import {
   DialogTrigger,
   DialogClose,
 } from '@/components/ui/dialog'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -46,6 +46,113 @@ const tagColors: Record<string, string> = {
   subaddin: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200',
 }
 
+/* ── Frequency Discounts Card ─────────────────────────────────────────── */
+const GLOBAL_FREQS = [
+  { key: 'weekly',    label: 'Weekly' },
+  { key: 'biweekly',  label: 'Bi-Weekly' },
+  { key: 'monthly',   label: 'Monthly' },
+  { key: 'bimonthly', label: 'Bi-Monthly' },
+  { key: 'quarterly', label: 'Quarterly' },
+  { key: 'annual',    label: 'Annual' },
+] as const
+
+type PriceOverrideRow = { id: number; service_id: string; field: string; value: number }
+
+function FrequencyDiscountsCard({
+  overrides,
+  onSave,
+}: {
+  overrides: PriceOverrideRow[]
+  onSave: (serviceId: string, field: string, value: number) => void
+}) {
+  // Build initial values from existing overrides
+  const getInitial = (freqKey: string) => {
+    const o = overrides.find(r => r.service_id === '_global' && r.field === `freq_${freqKey}`)
+    return o !== undefined ? String(o.value) : ''
+  }
+
+  const [values, setValues] = useState<Record<string, string>>(() =>
+    Object.fromEntries(GLOBAL_FREQS.map(f => [f.key, getInitial(f.key)]))
+  )
+  const [editing, setEditing] = useState<Record<string, boolean>>({})
+
+  const startEdit = (key: string) => setEditing(e => ({ ...e, [key]: true }))
+  const cancelEdit = (key: string) => {
+    setEditing(e => ({ ...e, [key]: false }))
+    setValues(v => ({ ...v, [key]: getInitial(key) }))
+  }
+  const saveEdit = (key: string) => {
+    const raw = values[key].trim()
+    const val = raw === '' ? null : parseFloat(raw)
+    if (val !== null && (isNaN(val) || val < 0 || val > 100)) return
+    // If empty, save 0 (no discount)
+    onSave('_global', `freq_${key}`, val ?? 0)
+    setEditing(e => ({ ...e, [key]: false }))
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2 pt-4 px-4">
+        <CardTitle className="text-sm font-semibold">Global Frequency Discounts</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Applies to all recurring services. Enter the discount % for each frequency.
+        </p>
+      </CardHeader>
+      <CardContent className="px-4 pb-4">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+          {GLOBAL_FREQS.map(({ key, label }) => {
+            const isEditing = !!editing[key]
+            const currentOverride = overrides.find(r => r.service_id === '_global' && r.field === `freq_${key}`)
+            const displayVal = currentOverride !== undefined ? `${currentOverride.value}%` : '—'
+            return (
+              <div key={key} className="flex items-center justify-between border-b pb-1.5 last:border-b-0">
+                <span className="text-sm text-muted-foreground w-24 shrink-0">{label}</span>
+                {isEditing ? (
+                  <div className="flex items-center gap-1">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={1}
+                      value={values[key]}
+                      onChange={e => setValues(v => ({ ...v, [key]: e.target.value }))}
+                      placeholder="e.g. 10"
+                      className="w-20 h-8 text-sm"
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') saveEdit(key)
+                        if (e.key === 'Escape') cancelEdit(key)
+                      }}
+                    />
+                    <span className="text-sm text-muted-foreground">%</span>
+                    <Button size="icon" variant="ghost" className="h-8 w-8 text-green-600" onClick={() => saveEdit(key)}>
+                      <Check className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={() => cancelEdit(key)}>
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm font-semibold">{displayVal}</span>
+                    <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => startEdit(key)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-2">
+          These override the default discounts built into the price list. Set to 0 to remove discount.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ── Service Card ─────────────────────────────────────────────────────── */
 function ServiceCard({
   service,
   onSaveOverride,
@@ -59,6 +166,10 @@ function ServiceCard({
 }) {
   const [editingTier, setEditingTier] = useState<number | null>(null)
   const [editValue, setEditValue] = useState('')
+  const [editingMin, setEditingMin] = useState(false)
+  const [minValue, setMinValue] = useState(
+    service.minimum !== undefined && service.minimum > 0 ? String(service.minimum) : ''
+  )
 
   const startEdit = (tierIdx: number, currentPrice: number) => {
     setEditingTier(tierIdx)
@@ -76,6 +187,23 @@ function ServiceCard({
       onSaveOverride(service.id, `tier_${tierIdx}`, val)
     }
     setEditingTier(null)
+  }
+
+  const saveMin = () => {
+    const raw = minValue.trim()
+    // Empty = no minimum (save 0 to clear)
+    const val = raw === '' ? 0 : parseFloat(raw)
+    if (!isNaN(val) && val >= 0) {
+      onSaveOverride(service.id, 'minimum', val)
+    }
+    setEditingMin(false)
+  }
+
+  const cancelMin = () => {
+    setMinValue(
+      service.minimum !== undefined && service.minimum > 0 ? String(service.minimum) : ''
+    )
+    setEditingMin(false)
   }
 
   return (
@@ -129,6 +257,7 @@ function ServiceCard({
           )}
         </div>
 
+        {/* Tiers / Pricing */}
         <div className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">
             {service.pricingModel === 'per_acre' ? 'Per-Acre Rate' : 'Tiers / Pricing'}
@@ -185,6 +314,52 @@ function ServiceCard({
               </div>
             )
           })}
+        </div>
+
+        {/* Minimum Price */}
+        <div className="flex items-center justify-between gap-2 pt-0.5">
+          <div className="flex-1">
+            <p className="text-xs font-medium text-muted-foreground mb-0.5">Minimum Price</p>
+            {editingMin ? (
+              <div className="flex items-center gap-1">
+                <span className="text-sm text-muted-foreground">$</span>
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={minValue}
+                  onChange={(e) => setMinValue(e.target.value)}
+                  placeholder="No minimum"
+                  className="w-28 h-8 text-sm"
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveMin()
+                    if (e.key === 'Escape') cancelMin()
+                  }}
+                />
+                <Button size="icon" variant="ghost" className="h-8 w-8 text-green-600" onClick={saveMin}>
+                  <Check className="h-3.5 w-3.5" />
+                </Button>
+                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={cancelMin}>
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1">
+                <span className="text-sm font-semibold">
+                  {service.minimum && service.minimum > 0 ? fmt(service.minimum) : <span className="text-muted-foreground font-normal">No minimum</span>}
+                </span>
+                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditingMin(true)}>
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            )}
+          </div>
+          {!editingMin && (
+            <p className="text-[11px] text-muted-foreground text-right max-w-[140px]">
+              Leave blank for no minimum
+            </p>
+          )}
         </div>
 
         {service.frequencies.length > 1 && (
@@ -400,9 +575,15 @@ export default function PriceBook() {
     queryFn: () => apiGet<string[]>('/services?action=deleted'),
   })
 
+  const { data: allOverrides = [] } = useQuery<PriceOverrideRow[]>({
+    queryKey: ['/services?action=overrides'],
+    queryFn: () => apiGet<PriceOverrideRow[]>('/services?action=overrides'),
+  })
+
   const invalidateAll = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['/services?action=merged'] })
     queryClient.invalidateQueries({ queryKey: ['/services?action=deleted'] })
+    queryClient.invalidateQueries({ queryKey: ['/services?action=overrides'] })
   }, [queryClient])
 
   const createOverride = useMutation({
@@ -494,6 +675,12 @@ export default function PriceBook() {
           />
         </div>
       </div>
+
+      {/* Global frequency discounts */}
+      <FrequencyDiscountsCard
+        overrides={allOverrides}
+        onSave={(serviceId, field, value) => createOverride.mutate({ serviceId, field, value })}
+      />
 
       <Accordion type="multiple">
         {categories.map((cat) => {

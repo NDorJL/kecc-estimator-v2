@@ -1,7 +1,7 @@
 import { Switch, Route, Router, Link, useLocation } from 'wouter'
 import { useHashLocation } from 'wouter/use-hash-location'
 import { queryClient } from './lib/queryClient'
-import { QueryClientProvider, useQuery } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from '@/components/ui/toaster'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ThemeProvider, useTheme } from '@/components/theme-provider'
@@ -9,8 +9,6 @@ import { QuoteProvider } from '@/lib/quote-context'
 import { ServicesProvider } from '@/lib/services-context'
 import { Button } from '@/components/ui/button'
 import { Calculator as CalcIcon, FileText, BookOpen, Settings, Sun, Moon, CalendarCheck } from 'lucide-react'
-import { apiGet } from '@/lib/queryClient'
-import type { CompanySettings } from '@/types'
 import Calculator from '@/pages/Calculator'
 import Quotes from '@/pages/Quotes'
 import Subscriptions from '@/pages/Subscriptions'
@@ -20,17 +18,9 @@ import SettingsPage from '@/pages/Settings'
 
 function AppHeader() {
   const { theme, toggleTheme } = useTheme()
-  const { data: settings } = useQuery<CompanySettings>({
-    queryKey: ['/settings'],
-    queryFn: () => apiGet<CompanySettings>('/settings'),
-  })
   return (
     <header className="sticky top-0 z-50 flex items-center justify-between border-b bg-card px-4" style={{ minHeight: 48 }}>
-      {settings?.logoUrl ? (
-        <img src={settings.logoUrl} alt={settings.companyName} className="h-7 w-auto object-contain" />
-      ) : (
-        <h1 className="text-lg font-bold tracking-tight">KECC Estimator</h1>
-      )}
+      <h1 className="text-base font-bold tracking-tight">KECC Estimator</h1>
       <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-9 w-9">
         {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
       </Button>

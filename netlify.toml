@@ -15,9 +15,11 @@
 
 [functions."pdf-quote"]
   memory_size = 1024
+  external_node_modules = ["pdfkit"]
 
 [functions."pdf-subscription"]
   memory_size = 1024
+  external_node_modules = ["pdfkit"]
 
 [[headers]]
   for = "/*"

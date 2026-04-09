@@ -38,6 +38,7 @@ export interface ServiceDefinition {
   frequencies: FrequencyDiscount[];
   notes?: string;
   subCostPct: number;
+  minimum?: number; // optional minimum charge per visit/job (0 or undefined = no minimum)
 }
 
 // ============================================================

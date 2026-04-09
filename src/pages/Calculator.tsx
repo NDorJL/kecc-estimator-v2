@@ -44,6 +44,7 @@ import {
   ShoppingCart, Trash2, Tag, TrendingUp, Send, ChevronRight, Plus,
   Droplets, Leaf, Sparkles, Home, Building2, Layers,
 } from 'lucide-react'
+// Leaf, Sparkles used in categoryIcons fallback; Droplets in categoryIcons map
 
 function fmt(n: number): string {
   return '$' + n.toFixed(2)
@@ -178,13 +179,16 @@ function OnetimeServiceCard({
 
   const pricing = useMemo(() => {
     if (!tier || !freq) return null
-    const onetimeTotal = isUnit
+    const rawTotal = isUnit
       ? calcUnitTotal(service.pricingModel, tier.price, tier.min, quantity)
       : tier.price * quantity
+    const onetimeTotal = (service.minimum && service.minimum > 0)
+      ? Math.max(rawTotal, service.minimum)
+      : rawTotal
     const sub = calculateSubscriptionPrice(onetimeTotal, freq)
     const isSub = freq.frequency !== 'onetime'
-    return { onetimeTotal, sub, isSub }
-  }, [tier, freq, quantity, service.pricingModel, isUnit])
+    return { onetimeTotal, sub, isSub, hitMinimum: onetimeTotal > rawTotal }
+  }, [tier, freq, quantity, service.pricingModel, isUnit, service.minimum])
 
   const handleAdd = () => {
     if (!pricing || !tier || !freq) return
@@ -287,7 +291,10 @@ function OnetimeServiceCard({
           <div className="rounded-md bg-primary/5 border border-primary/20 px-3 py-2 text-xs space-y-1">
             <div className="flex justify-between">
               <span className="text-muted-foreground">{quantity} acre{quantity !== 1 ? 's' : ''} × {fmt(tier?.price ?? 0)}/acre</span>
-              <span className="font-semibold">{fmt(pricing.onetimeTotal)} per cut</span>
+              <span className="font-semibold">
+                {fmt(pricing.onetimeTotal)} per cut
+                {pricing.hitMinimum && <span className="text-muted-foreground ml-1">(min)</span>}
+              </span>
             </div>
             {pricing.isSub && (
               <div className="flex justify-between">
@@ -296,6 +303,12 @@ function OnetimeServiceCard({
               </div>
             )}
           </div>
+        )}
+        {/* Minimum callout for non-acre services */}
+        {!isAcre && pricing?.hitMinimum && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            Minimum charge of {fmt(service.minimum ?? 0)} applied
+          </p>
         )}
 
         <Button
@@ -346,9 +359,12 @@ function SubServiceLine({
 
   const isUnit = isUnitPriced(line.service.pricingModel)
   const tier = line.service.tiers[line.tierIndex]
-  const onetimeTotal = isUnit && tier
+  const rawTotal = isUnit && tier
     ? calcUnitTotal(line.service.pricingModel, tier.price, tier.min, line.quantity)
     : (tier?.price ?? 0) * line.quantity
+  const onetimeTotal = (line.service.minimum && line.service.minimum > 0)
+    ? Math.max(rawTotal, line.service.minimum)
+    : rawTotal
   const sub = calculateSubscriptionPrice(onetimeTotal, line.frequency)
   const isAcre = line.service.pricingModel === 'per_acre'
 
@@ -501,9 +517,12 @@ function SubPlanBuilder({
     const lineDetails = lines.map(line => {
       const tier = line.service.tiers[line.tierIndex]
       const isUnit = isUnitPriced(line.service.pricingModel)
-      const onetimeTotal = isUnit && tier
+      const rawTotal = isUnit && tier
         ? calcUnitTotal(line.service.pricingModel, tier.price, tier.min, line.quantity)
         : (tier?.price ?? 0) * line.quantity
+      const onetimeTotal = (line.service.minimum && line.service.minimum > 0)
+        ? Math.max(rawTotal, line.service.minimum)
+        : rawTotal
       const sub = calculateSubscriptionPrice(onetimeTotal, line.frequency)
       const monthly = line.frequency.frequency !== 'onetime' ? sub.monthlyAmount : 0
       preDiscountMonthly += monthly
@@ -545,9 +564,12 @@ function SubPlanBuilder({
     const items: LineItem[] = lines.map(line => {
       const tier = line.service.tiers[line.tierIndex]
       const isUnit = isUnitPriced(line.service.pricingModel)
-      const onetimeTotal = isUnit && tier
+      const rawCartTotal = isUnit && tier
         ? calcUnitTotal(line.service.pricingModel, tier.price, tier.min, line.quantity)
         : (tier?.price ?? 0) * line.quantity
+      const onetimeTotal = (line.service.minimum && line.service.minimum > 0)
+        ? Math.max(rawCartTotal, line.service.minimum)
+        : rawCartTotal
       const sub = calculateSubscriptionPrice(onetimeTotal, line.frequency)
       return {
         serviceId: line.service.id,
@@ -814,25 +836,17 @@ function CartBar({ items, onOpen }: { items: LineItem[]; onOpen: () => void }) {
   )
 }
 
-/* ── Branded header strip with logo ──────────────────────────────────── */
-function CalcHeader({ logoUrl }: { logoUrl?: string | null }) {
+/* ── Full-page logo watermark ────────────────────────────────────────── */
+function LogoWatermark({ logoUrl }: { logoUrl?: string | null }) {
+  if (!logoUrl) return null
   return (
-    <div className="relative overflow-hidden bg-gradient-to-r from-primary to-primary/80 text-primary-foreground px-4 py-3 flex items-center gap-3">
-      {/* subtle texture overlay */}
-      <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_30%_50%,white,transparent_70%)]" />
-      {logoUrl ? (
-        <img src={logoUrl} alt="Logo" className="h-9 w-auto object-contain relative z-10 brightness-0 invert" />
-      ) : (
-        <div className="relative z-10 flex items-center gap-1.5">
-          <Leaf className="h-5 w-5" />
-          <Sparkles className="h-4 w-4 opacity-70" />
-        </div>
-      )}
-      <div className="relative z-10">
-        <p className="text-sm font-bold leading-tight">Service Estimator</p>
-        <p className="text-xs opacity-80">Build accurate quotes on-site</p>
-      </div>
-    </div>
+    <img
+      src={logoUrl}
+      alt=""
+      aria-hidden
+      className="fixed inset-0 w-full h-full object-contain pointer-events-none select-none z-0"
+      style={{ opacity: 0.04 }}
+    />
   )
 }
 
@@ -886,12 +900,12 @@ export default function Calculator() {
   }
 
   return (
-    <div className="flex flex-col">
-      {/* Branded header */}
-      <CalcHeader logoUrl={settings?.logoUrl} />
+    <div className="flex flex-col relative">
+      {/* Full-page watermark */}
+      <LogoWatermark logoUrl={settings?.logoUrl} />
 
       {/* Toggle controls */}
-      <div className="px-4 pt-3 pb-2 space-y-2 bg-background sticky top-0 z-30 border-b shadow-sm">
+      <div className="px-4 pt-3 pb-2 space-y-2 bg-background/90 sticky top-0 z-30 border-b shadow-sm relative">
         <ToggleGroup
           type="single"
           value={customerType}
@@ -941,7 +955,7 @@ export default function Calculator() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 p-4 space-y-3">
+      <div className="flex-1 p-4 space-y-3 relative z-10">
         {serviceMode === 'onetime' ? (
           categories.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">
