@@ -365,6 +365,7 @@ function SubServiceLine({
   const onetimeTotal = (line.service.minimum && line.service.minimum > 0)
     ? Math.max(rawTotal, line.service.minimum)
     : rawTotal
+  const hitMinimum = onetimeTotal > rawTotal
   const sub = calculateSubscriptionPrice(onetimeTotal, line.frequency)
   const isAcre = line.service.pricingModel === 'per_acre'
 
@@ -446,20 +447,27 @@ function SubServiceLine({
           </div>
         </div>
 
-        <div className="flex justify-between text-xs text-muted-foreground">
-          <span>
-            {isAcre
-              ? `${line.quantity} acre${line.quantity !== 1 ? 's' : ''} × ${fmt(tier?.price ?? 0)}/acre`
-              : isUnit
-                ? `${fmt(tier?.price ?? 0)}/unit × ${line.quantity.toLocaleString()}`
-                : `${fmt(tier?.price ?? 0)} × ${line.quantity}`}
-            {line.frequency.frequency !== 'onetime' && ` via ${line.frequency.label}`}
-          </span>
-          <span className="font-medium text-foreground">
-            {line.frequency.frequency !== 'onetime'
-              ? `${fmt(sub.monthlyAmount)}/mo`
-              : fmt(onetimeTotal)}
-          </span>
+        <div className="space-y-1">
+          <div className="flex justify-between text-xs text-muted-foreground">
+            <span>
+              {isAcre
+                ? `${line.quantity} acre${line.quantity !== 1 ? 's' : ''} × ${fmt(tier?.price ?? 0)}/acre = ${fmt(rawTotal)}/cut`
+                : isUnit
+                  ? `${fmt(tier?.price ?? 0)}/unit × ${line.quantity.toLocaleString()}`
+                  : `${fmt(tier?.price ?? 0)} × ${line.quantity}`}
+              {line.frequency.frequency !== 'onetime' && ` · ${line.frequency.label}`}
+            </span>
+            <span className="font-medium text-foreground">
+              {line.frequency.frequency !== 'onetime'
+                ? `${fmt(sub.monthlyAmount)}/mo`
+                : fmt(onetimeTotal)}
+            </span>
+          </div>
+          {hitMinimum && (
+            <p className="text-xs text-amber-600 dark:text-amber-400">
+              Minimum ${(line.service.minimum ?? 0).toFixed(2)} applied per cut (actual {fmt(rawTotal)})
+            </p>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -514,6 +522,7 @@ function SubPlanBuilder({
 
   const totals = useMemo(() => {
     let preDiscountMonthly = 0
+    let preDiscountAnnual = 0
     const lineDetails = lines.map(line => {
       const tier = line.service.tiers[line.tierIndex]
       const isUnit = isUnitPriced(line.service.pricingModel)
@@ -525,7 +534,9 @@ function SubPlanBuilder({
         : rawTotal
       const sub = calculateSubscriptionPrice(onetimeTotal, line.frequency)
       const monthly = line.frequency.frequency !== 'onetime' ? sub.monthlyAmount : 0
+      const annual = line.frequency.frequency !== 'onetime' ? sub.annualAmount : 0
       preDiscountMonthly += monthly
+      preDiscountAnnual += annual
       return { onetimeTotal, sub, monthly }
     })
 
@@ -533,13 +544,18 @@ function SubPlanBuilder({
       ? { discountPct: 0, discountAmount: 0, discountedTotal: preDiscountMonthly }
       : applyBundleDiscount(preDiscountMonthly, recurringCount)
 
+    // Use each line's annualAmount (which respects seasonal annualMultiplier, e.g. 9 for lawn)
+    // then apply the same bundle discount % to get the correct annual estimate
+    const annualDiscountFactor = 1 - discountPct / 100
+    const annualTotal = Math.round(preDiscountAnnual * annualDiscountFactor * 100) / 100
+
     return {
       lineDetails,
       preDiscountMonthly,
       discountPct,
       discountAmount,
       monthlyTotal: discountedTotal,
-      annualTotal: discountedTotal * 12,
+      annualTotal,
     }
   }, [lines, isAutopilot, recurringCount])
 
