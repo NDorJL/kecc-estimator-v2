@@ -182,12 +182,21 @@ function OnetimeServiceCard({
     const rawTotal = isUnit
       ? calcUnitTotal(service.pricingModel, tier.price, tier.min, quantity)
       : tier.price * quantity
-    const onetimeTotal = (service.minimum && service.minimum > 0)
-      ? Math.max(rawTotal, service.minimum)
-      : rawTotal
-    const sub = calculateSubscriptionPrice(onetimeTotal, freq)
     const isSub = freq.frequency !== 'onetime'
-    return { onetimeTotal, sub, isSub, hitMinimum: onetimeTotal > rawTotal }
+    const minVal = (service.minimum && service.minimum > 0) ? service.minimum : 0
+
+    if (isSub) {
+      // For subscriptions: apply minimum to monthly total, not per-cut price
+      const sub = calculateSubscriptionPrice(rawTotal, freq)
+      const effectiveMonthly = minVal > 0 ? Math.max(sub.monthlyAmount, minVal) : sub.monthlyAmount
+      const hitMinimum = effectiveMonthly > sub.monthlyAmount
+      return { onetimeTotal: rawTotal, sub, effectiveMonthly, isSub, hitMinimum }
+    } else {
+      // For one-time jobs: apply minimum to the flat charge
+      const onetimeTotal = minVal > 0 ? Math.max(rawTotal, minVal) : rawTotal
+      const sub = calculateSubscriptionPrice(onetimeTotal, freq)
+      return { onetimeTotal, sub, effectiveMonthly: onetimeTotal, isSub, hitMinimum: onetimeTotal > rawTotal }
+    }
   }, [tier, freq, quantity, service.pricingModel, isUnit, service.minimum])
 
   const handleAdd = () => {
@@ -201,9 +210,9 @@ function OnetimeServiceCard({
       unitLabel: service.unitLabel,
       frequency: freq.label,
       unitPrice: isUnit ? pricing.onetimeTotal : tier.price,
-      lineTotal: pricing.isSub ? pricing.sub.monthlyAmount : pricing.onetimeTotal,
+      lineTotal: pricing.isSub ? pricing.effectiveMonthly : pricing.onetimeTotal,
       isSubscription: pricing.isSub,
-      monthlyAmount: pricing.isSub ? pricing.sub.monthlyAmount : undefined,
+      monthlyAmount: pricing.isSub ? pricing.effectiveMonthly : undefined,
     }
     onAdd(item)
     setQuantity(isUnit ? 0 : 1)
@@ -227,10 +236,10 @@ function OnetimeServiceCard({
               <p className="text-xs text-muted-foreground">{service.unitLabel}</p>
             )}
           </div>
-          {pricing && pricing.onetimeTotal > 0 && (
+          {pricing && (pricing.isSub ? pricing.effectiveMonthly > 0 : pricing.onetimeTotal > 0) && (
             <div className="text-right shrink-0">
               {pricing.isSub ? (
-                <p className="text-sm font-bold text-primary">{fmt(pricing.sub.monthlyAmount)}/mo</p>
+                <p className="text-sm font-bold text-primary">{fmt(pricing.effectiveMonthly)}/mo</p>
               ) : (
                 <p className="text-sm font-bold text-primary">{fmt(pricing.onetimeTotal)}</p>
               )}
@@ -291,23 +300,25 @@ function OnetimeServiceCard({
           <div className="rounded-md bg-primary/5 border border-primary/20 px-3 py-2 text-xs space-y-1">
             <div className="flex justify-between">
               <span className="text-muted-foreground">{quantity} acre{quantity !== 1 ? 's' : ''} × {fmt(tier?.price ?? 0)}/acre</span>
-              <span className="font-semibold">
-                {fmt(pricing.onetimeTotal)} per cut
-                {pricing.hitMinimum && <span className="text-muted-foreground ml-1">(min)</span>}
-              </span>
+              <span className="font-semibold">{fmt(pricing.onetimeTotal)} per cut</span>
             </div>
             {pricing.isSub && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Monthly ({freq?.label})</span>
-                <span className="font-semibold text-primary">{fmt(pricing.sub.monthlyAmount)}/mo</span>
+                <span className="font-semibold text-primary">
+                  {fmt(pricing.effectiveMonthly)}/mo
+                  {pricing.hitMinimum && <span className="text-muted-foreground ml-1">(min)</span>}
+                </span>
               </div>
             )}
           </div>
         )}
-        {/* Minimum callout for non-acre services */}
-        {!isAcre && pricing?.hitMinimum && (
+        {/* Minimum callout */}
+        {pricing?.hitMinimum && (
           <p className="text-xs text-amber-600 dark:text-amber-400">
-            Minimum charge of {fmt(service.minimum ?? 0)} applied
+            {pricing.isSub
+              ? `Monthly minimum of ${fmt(service.minimum ?? 0)} applied`
+              : `Minimum charge of ${fmt(service.minimum ?? 0)} applied`}
           </p>
         )}
 
@@ -362,11 +373,11 @@ function SubServiceLine({
   const rawTotal = isUnit && tier
     ? calcUnitTotal(line.service.pricingModel, tier.price, tier.min, line.quantity)
     : (tier?.price ?? 0) * line.quantity
-  const onetimeTotal = (line.service.minimum && line.service.minimum > 0)
-    ? Math.max(rawTotal, line.service.minimum)
-    : rawTotal
-  const hitMinimum = onetimeTotal > rawTotal
-  const sub = calculateSubscriptionPrice(onetimeTotal, line.frequency)
+  const sub = calculateSubscriptionPrice(rawTotal, line.frequency)
+  const minVal = (line.service.minimum && line.service.minimum > 0) ? line.service.minimum : 0
+  // Apply minimum to monthly total, not per-cut price
+  const effectiveMonthly = minVal > 0 ? Math.max(sub.monthlyAmount, minVal) : sub.monthlyAmount
+  const hitMinimum = effectiveMonthly > sub.monthlyAmount
   const isAcre = line.service.pricingModel === 'per_acre'
 
   return (
@@ -459,13 +470,13 @@ function SubServiceLine({
             </span>
             <span className="font-medium text-foreground">
               {line.frequency.frequency !== 'onetime'
-                ? `${fmt(sub.monthlyAmount)}/mo`
-                : fmt(onetimeTotal)}
+                ? `${fmt(effectiveMonthly)}/mo`
+                : fmt(rawTotal)}
             </span>
           </div>
           {hitMinimum && (
             <p className="text-xs text-amber-600 dark:text-amber-400">
-              Minimum ${(line.service.minimum ?? 0).toFixed(2)} applied per cut (actual {fmt(rawTotal)})
+              Monthly minimum of {fmt(line.service.minimum ?? 0)} applied (calculated {fmt(sub.monthlyAmount)})
             </p>
           )}
         </div>
@@ -529,23 +540,28 @@ function SubPlanBuilder({
       const rawTotal = isUnit && tier
         ? calcUnitTotal(line.service.pricingModel, tier.price, tier.min, line.quantity)
         : (tier?.price ?? 0) * line.quantity
-      const onetimeTotal = (line.service.minimum && line.service.minimum > 0)
-        ? Math.max(rawTotal, line.service.minimum)
-        : rawTotal
-      const sub = calculateSubscriptionPrice(onetimeTotal, line.frequency)
-      const monthly = line.frequency.frequency !== 'onetime' ? sub.monthlyAmount : 0
-      const annual = line.frequency.frequency !== 'onetime' ? sub.annualAmount : 0
-      preDiscountMonthly += monthly
-      preDiscountAnnual += annual
-      return { onetimeTotal, sub, monthly }
+      const sub = calculateSubscriptionPrice(rawTotal, line.frequency)
+      const minVal = (line.service.minimum && line.service.minimum > 0) ? line.service.minimum : 0
+
+      // Apply minimum to monthly total (not per-cut)
+      const rawMonthly = line.frequency.frequency !== 'onetime' ? sub.monthlyAmount : 0
+      const effectiveMonthly = minVal > 0 ? Math.max(rawMonthly, minVal) : rawMonthly
+
+      // Scale annual proportionally when minimum kicks in (preserves seasonal multiplier ratio)
+      const rawAnnual = line.frequency.frequency !== 'onetime' ? sub.annualAmount : 0
+      const effectiveAnnual = rawMonthly > 0
+        ? effectiveMonthly * (rawAnnual / rawMonthly)
+        : effectiveMonthly > 0 ? effectiveMonthly * 12 : 0
+
+      preDiscountMonthly += effectiveMonthly
+      preDiscountAnnual += effectiveAnnual
+      return { rawTotal, sub, effectiveMonthly }
     })
 
     const { discountPct, discountAmount, discountedTotal } = isAutopilot
       ? { discountPct: 0, discountAmount: 0, discountedTotal: preDiscountMonthly }
       : applyBundleDiscount(preDiscountMonthly, recurringCount)
 
-    // Use each line's annualAmount (which respects seasonal annualMultiplier, e.g. 9 for lawn)
-    // then apply the same bundle discount % to get the correct annual estimate
     const annualDiscountFactor = 1 - discountPct / 100
     const annualTotal = Math.round(preDiscountAnnual * annualDiscountFactor * 100) / 100
 
@@ -583,10 +599,12 @@ function SubPlanBuilder({
       const rawCartTotal = isUnit && tier
         ? calcUnitTotal(line.service.pricingModel, tier.price, tier.min, line.quantity)
         : (tier?.price ?? 0) * line.quantity
-      const onetimeTotal = (line.service.minimum && line.service.minimum > 0)
-        ? Math.max(rawCartTotal, line.service.minimum)
-        : rawCartTotal
-      const sub = calculateSubscriptionPrice(onetimeTotal, line.frequency)
+      const sub = calculateSubscriptionPrice(rawCartTotal, line.frequency)
+      const minVal = (line.service.minimum && line.service.minimum > 0) ? line.service.minimum : 0
+      // Apply minimum to monthly total, not per-cut
+      const rawMonthly = sub.monthlyAmount
+      const effectiveMonthly = minVal > 0 ? Math.max(rawMonthly, minVal) : rawMonthly
+      const isSub = line.frequency.frequency !== 'onetime'
       return {
         serviceId: line.service.id,
         serviceName: line.service.name,
@@ -595,10 +613,10 @@ function SubPlanBuilder({
         quantity: line.quantity,
         unitLabel: line.service.unitLabel,
         frequency: line.frequency.label,
-        unitPrice: isUnit ? onetimeTotal : (tier?.price ?? 0),
-        lineTotal: line.frequency.frequency === 'onetime' ? onetimeTotal : sub.monthlyAmount,
-        isSubscription: line.frequency.frequency !== 'onetime',
-        monthlyAmount: line.frequency.frequency !== 'onetime' ? sub.monthlyAmount : undefined,
+        unitPrice: isUnit ? rawCartTotal : (tier?.price ?? 0),
+        lineTotal: isSub ? effectiveMonthly : rawCartTotal,
+        isSubscription: isSub,
+        monthlyAmount: isSub ? effectiveMonthly : undefined,
       }
     })
     onAddToCart(items)
