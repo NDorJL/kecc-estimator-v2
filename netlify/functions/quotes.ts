@@ -65,6 +65,8 @@ export const handler: Handler = async (event) => {
         total: Number(body.total ?? 0),
         notes: body.notes ?? null,
         status: body.status ?? 'draft',
+        contact_id: body.contactId ?? null,
+        expires_at: body.expiresAt ?? null,
       }
       const { data, error } = await supabase.from('quotes').insert(insert).select().single()
       if (error) throw error
@@ -87,6 +89,8 @@ export const handler: Handler = async (event) => {
       if (body.total !== undefined) update.total = Number(body.total)
       if (body.notes !== undefined) update.notes = body.notes
       if (body.status !== undefined) update.status = body.status
+      if (body.contactId !== undefined) update.contact_id = body.contactId
+      if (body.expiresAt !== undefined) update.expires_at = body.expiresAt
       const { data, error } = await supabase.from('quotes').update(update).eq('id', id).select().single()
       if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Quote not found' }) }
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToQuote(data)) }

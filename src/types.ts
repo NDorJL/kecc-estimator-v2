@@ -39,6 +39,9 @@ export interface Quote {
   status: QuoteStatus;
   trashedAt: string | null;
   createdAt: string;
+  contactId: string | null;
+  expiresAt: string | null;
+  acceptToken: string | null;
 }
 
 // ── Subscription Types ─────────────────────────────────────────────────
@@ -77,6 +80,7 @@ export interface Subscription {
   quickbooksReference: string | null;
   changeHistory: ChangeHistoryEntry[];
   createdAt: string;
+  contactId: string | null;
 }
 
 // ── Settings & Attachments ─────────────────────────────────────────────
@@ -130,6 +134,68 @@ export function computeSeasonalTotals(services: SubscriptionService[]) {
   };
 }
 
+// ── Contact / Property / Lead / Activity Types ────────────────────────
+export interface Contact {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  type: 'residential' | 'commercial';
+  businessName: string | null;
+  source: string | null;
+  notes: string | null;
+  tags: string[];
+  customFields: Record<string, string>;
+  leadScore: number;
+  referredBy: string | null;
+  nextFollowup: string | null;
+  createdAt: string;
+}
+
+export interface Property {
+  id: string;
+  contactId: string;
+  label: string | null;
+  address: string;
+  type: 'residential' | 'commercial';
+  mowableAcres: number | null;
+  sqft: number | null;
+  lat: number | null;
+  lng: number | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export type LeadStage = 'new' | 'contacted' | 'quoted' | 'follow_up' | 'won' | 'lost';
+
+export interface Lead {
+  id: string;
+  contactId: string | null;
+  stage: LeadStage;
+  source: string | null;
+  serviceInterest: string | null;
+  estimatedValue: number | null;
+  quoteId: string | null;
+  lostReason: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export type ActivityType =
+  | 'note' | 'call' | 'sms_in' | 'sms_out' | 'email_sent'
+  | 'quote_sent' | 'quote_accepted' | 'quote_declined'
+  | 'job_scheduled' | 'job_completed' | 'invoice_sent'
+  | 'payment_received' | 'esign_sent' | 'esign_completed';
+
+export interface Activity {
+  id: string;
+  contactId: string;
+  type: ActivityType;
+  summary: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
 // ── Supabase row → camelCase helpers ──────────────────────────────────
 // Supabase returns snake_case columns; these helpers normalize them.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -150,6 +216,9 @@ export function rowToQuote(r: any): Quote {
     status: r.status,
     trashedAt: r.trashed_at,
     createdAt: r.created_at,
+    contactId: r.contact_id ?? null,
+    expiresAt: r.expires_at ?? null,
+    acceptToken: r.accept_token ?? null,
   };
 }
 
@@ -171,6 +240,7 @@ export function rowToSubscription(r: any): Subscription {
     quickbooksReference: r.quickbooks_reference,
     changeHistory: Array.isArray(r.change_history) ? r.change_history : [],
     createdAt: r.created_at,
+    contactId: r.contact_id ?? null,
   };
 }
 
@@ -198,6 +268,71 @@ export function rowToAttachment(r: any): QuoteAttachment {
     enabled: r.enabled,
     attachMode: r.attach_mode,
     sortOrder: r.sort_order,
+    createdAt: r.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function rowToContact(r: any): Contact {
+  return {
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    phone: r.phone,
+    type: r.type,
+    businessName: r.business_name,
+    source: r.source,
+    notes: r.notes,
+    tags: Array.isArray(r.tags) ? r.tags : [],
+    customFields: r.custom_fields ?? {},
+    leadScore: r.lead_score ?? 0,
+    referredBy: r.referred_by,
+    nextFollowup: r.next_followup,
+    createdAt: r.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function rowToProperty(r: any): Property {
+  return {
+    id: r.id,
+    contactId: r.contact_id,
+    label: r.label,
+    address: r.address,
+    type: r.type,
+    mowableAcres: r.mowable_acres !== null ? Number(r.mowable_acres) : null,
+    sqft: r.sqft !== null ? Number(r.sqft) : null,
+    lat: r.lat !== null ? Number(r.lat) : null,
+    lng: r.lng !== null ? Number(r.lng) : null,
+    notes: r.notes,
+    createdAt: r.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function rowToLead(r: any): Lead {
+  return {
+    id: r.id,
+    contactId: r.contact_id,
+    stage: r.stage,
+    source: r.source,
+    serviceInterest: r.service_interest,
+    estimatedValue: r.estimated_value !== null ? Number(r.estimated_value) : null,
+    quoteId: r.quote_id,
+    lostReason: r.lost_reason,
+    notes: r.notes,
+    createdAt: r.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function rowToActivity(r: any): Activity {
+  return {
+    id: r.id,
+    contactId: r.contact_id,
+    type: r.type,
+    summary: r.summary,
+    metadata: r.metadata ?? {},
     createdAt: r.created_at,
   };
 }

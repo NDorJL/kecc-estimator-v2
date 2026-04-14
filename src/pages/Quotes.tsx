@@ -40,7 +40,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip } from "lucide-react";
+import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle } from "lucide-react";
 
 function fmt(n: number): string {
   return "$" + n.toFixed(2);
@@ -371,6 +371,11 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
               {activateSubMutation.isPending ? "Activating..." : "Activate Sub"}
             </Button>
           )}
+          {quote.status === "accepted" && (
+            <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => toast({ title: "Convert to Job", description: "Job scheduling coming in Phase 3." })}>
+              <Briefcase className="h-4 w-4 mr-1" />Convert to Job
+            </Button>
+          )}
           <Select value={quote.status} onValueChange={val => updateStatusMutation.mutate(val)}>
             <SelectTrigger className="min-h-[44px] w-[120px]"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -544,20 +549,29 @@ function QuotesList({ onViewQuote }: { onViewQuote: (quote: Quote) => void }) {
   const QuoteCard = ({ quote, trashed = false }: { quote: Quote; trashed?: boolean }) => {
     const date = new Date(quote.createdAt);
     const typeLabel = quote.quoteType.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    const isExpired = quote.expiresAt && new Date(quote.expiresAt) < new Date() && quote.status !== 'accepted';
     return (
       <Card className={trashed ? "opacity-60" : "cursor-pointer"}>
         <CardContent className="py-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex-1 min-w-0" onClick={!trashed ? () => onViewQuote(quote) : undefined}>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-semibold truncate">{quote.customerName}</span>
                 {!trashed && <StatusBadge status={quote.status} />}
                 {trashed && <Badge variant="destructive" className="text-[10px]">Trash</Badge>}
+                {isExpired && (
+                  <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-400 flex items-center gap-0.5">
+                    <AlertTriangle className="h-2.5 w-2.5" />Expired
+                  </Badge>
+                )}
               </div>
-              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5 flex-wrap">
                 <span>{date.toLocaleDateString()}</span>
                 <Badge variant="outline" className="text-[10px]">{typeLabel}</Badge>
                 <span className="font-medium text-foreground">{fmt(quote.total)}</span>
+                {quote.expiresAt && !isExpired && (
+                  <span className="text-amber-600">Expires {new Date(quote.expiresAt).toLocaleDateString()}</span>
+                )}
               </div>
             </div>
             <div className="flex gap-1 shrink-0">
