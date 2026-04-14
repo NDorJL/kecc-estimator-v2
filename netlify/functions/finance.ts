@@ -93,6 +93,18 @@ export const handler: Handler = async (event) => {
     } catch { return err('Invalid request', 400) }
   }
 
+  // ── Clear All Data ─────────────────────────────────────────────────────────
+  if (event.httpMethod === 'DELETE' && action === 'clear-all') {
+    try {
+      // Delete all rows by matching a condition that is always true
+      await supabase.from('transactions').delete().gte('created_at', '2000-01-01')
+      await supabase.from('balance_sheet_snapshots').delete().gte('created_at', '2000-01-01')
+      return ok({ cleared: true })
+    } catch (e: unknown) {
+      return err(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   // ── Seed Data ──────────────────────────────────────────────────────────────
   if (event.httpMethod === 'POST' && action === 'seed') {
     try {

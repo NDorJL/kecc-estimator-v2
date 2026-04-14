@@ -16,7 +16,7 @@ import { useToast } from '@/hooks/use-toast'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import {
   Lock, AlertTriangle, Upload, Plus, Pencil, Trash2,
-  Check, X, RefreshCw, Download, TrendingUp, TrendingDown,
+  Check, X, RefreshCw, Download, TrendingUp, TrendingDown, Settings2,
 } from 'lucide-react'
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1007,15 +1007,19 @@ function TransactionsTab({ transactions, period, onRefresh }: { transactions: Tr
 
   const filtered = useMemo(() => {
     let list = [...periodFiltered]
-    if (typeFilter === 'Income')   list = list.filter(t => t.type === 'Income')
+    if (typeFilter === 'Income')       list = list.filter(t => t.type === 'Income')
     else if (typeFilter === 'Expense') list = list.filter(t => t.type === 'Expense')
     else if (typeFilter === 'review')  list = list.filter(t => t.review)
-    if (catFilter) list = list.filter(t => t.category === catFilter)
+    if (catFilter) list = list.filter(t => (t.category || '') === catFilter)
     if (search) {
       const q = search.toLowerCase()
-      list = list.filter(t => t.description.toLowerCase().includes(q) || (t.notes || '').toLowerCase().includes(q) || t.category.toLowerCase().includes(q))
+      list = list.filter(t =>
+        (t.description || '').toLowerCase().includes(q) ||
+        (t.notes || '').toLowerCase().includes(q) ||
+        (t.category || '').toLowerCase().includes(q)
+      )
     }
-    return list.sort((a, b) => b.date.localeCompare(a.date))
+    return list.sort((a, b) => (b.date || '').localeCompare(a.date || ''))
   }, [periodFiltered, typeFilter, catFilter, search])
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
@@ -1404,6 +1408,9 @@ function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]
 export default function Finance() {
   const [unlocked, setUnlocked] = useState(() => sessionStorage.getItem(SESSION_KEY) === '1')
   const [period, setPeriod] = useState<Period>(getInitialPeriod)
+  const [showClearDialog, setShowClearDialog] = useState(false)
+  const [clearing, setClearing] = useState(false)
+  const { toast } = useToast()
 
   const { data: transactions = [], refetch: refetchTx } = useQuery<Transaction[]>({
     queryKey: ['finance-transactions'],
@@ -1421,6 +1428,18 @@ export default function Finance() {
 
   const refresh = useCallback(() => { refetchTx(); refetchSnaps() }, [refetchTx, refetchSnaps])
 
+  async function handleClearAll() {
+    setClearing(true)
+    try {
+      await apiRequest('DELETE', '/finance?action=clear-all')
+      toast({ title: 'All data cleared', description: 'You can now upload fresh statements.' })
+      setShowClearDialog(false)
+      refresh()
+    } catch (e) {
+      toast({ title: 'Clear failed', description: String(e), variant: 'destructive' })
+    } finally { setClearing(false) }
+  }
+
   if (!unlocked) return <PinGate onUnlock={() => setUnlocked(true)} />
 
   return (
@@ -1430,14 +1449,41 @@ export default function Finance() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-base font-bold">Financial Dashboard</h1>
-            <p className="text-xs text-muted-foreground">{transactions.length} transactions loaded</p>
+            <p className="text-xs text-muted-foreground">{transactions.length} transaction{transactions.length !== 1 ? 's' : ''}</p>
           </div>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={refresh}>
-            <RefreshCw className="h-4 w-4" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" className="h-8 w-8" title="Clear all data" onClick={() => setShowClearDialog(true)}>
+              <Settings2 className="h-4 w-4" />
+            </Button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" title="Refresh" onClick={refresh}>
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
         <PeriodSelector period={period} onChange={setPeriod} />
       </div>
+
+      {/* Clear All Data dialog */}
+      <Dialog open={showClearDialog} onOpenChange={setShowClearDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="h-5 w-5" /> Clear All Financial Data
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <p className="text-sm text-muted-foreground">This will permanently delete <strong>all transactions</strong> and <strong>all balance sheet snapshots</strong> from the database.</p>
+            <p className="text-sm text-muted-foreground">Use this to start fresh with new uploads. This cannot be undone.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowClearDialog(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleClearAll} disabled={clearing}>
+              <Trash2 className="h-4 w-4 mr-1.5" />
+              {clearing ? 'Clearing…' : 'Delete Everything'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Tabs */}
       <Tabs defaultValue="dashboard" className="flex-1">
