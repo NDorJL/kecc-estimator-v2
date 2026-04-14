@@ -251,7 +251,7 @@ function PinGate({ onUnlock }: { onUnlock: () => void }) {
     e.preventDefault()
     setLoading(true); setFailed(false)
     try {
-      const res = await apiRequest('POST', '/.netlify/functions/finance?action=verify-pin', { pin })
+      const res = await apiRequest('POST', '/finance?action=verify-pin', { pin })
       const data = await res.json()
       if (data.valid) {
         sessionStorage.setItem(SESSION_KEY, '1')
@@ -557,7 +557,7 @@ function BalanceSheetTab({ snapshots, onRefresh }: { snapshots: Snapshot[]; onRe
   async function handleSave() {
     setSaving(true)
     try {
-      await apiRequest('POST', '/.netlify/functions/finance?action=snapshots', {
+      await apiRequest('POST', '/finance?action=snapshots', {
         month: selMonth, year: YEAR, ...form,
       })
       toast({ title: 'Balance sheet saved' })
@@ -759,9 +759,9 @@ function TransactionsTab({ transactions, onRefresh }: { transactions: Transactio
   const saveMutation = useMutation({
     mutationFn: async (data: Partial<Transaction>) => {
       if (data.id) {
-        await apiRequest('PATCH', `/.netlify/functions/finance?id=${data.id}`, data)
+        await apiRequest('PATCH', `/finance?id=${data.id}`, data)
       } else {
-        await apiRequest('POST', '/.netlify/functions/finance', data)
+        await apiRequest('POST', '/finance', data)
       }
     },
     onSuccess: () => { toast({ title: 'Transaction saved' }); setDialogOpen(false); onRefresh() },
@@ -770,7 +770,7 @@ function TransactionsTab({ transactions, onRefresh }: { transactions: Transactio
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      await apiRequest('DELETE', `/.netlify/functions/finance?id=${id}`)
+      await apiRequest('DELETE', `/finance?id=${id}`)
     },
     onSuccess: () => { toast({ title: 'Transaction deleted' }); onRefresh() },
     onError: (e) => toast({ title: 'Error', description: String(e), variant: 'destructive' }),
@@ -866,7 +866,7 @@ function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]
     if (preview.length === 0) return
     setImporting(true)
     try {
-      await apiRequest('POST', '/.netlify/functions/finance', preview)
+      await apiRequest('POST', '/finance', preview)
       toast({ title: `Imported ${preview.length} transactions` })
       setPreview([])
       onRefresh()
@@ -953,14 +953,14 @@ export default function Finance() {
 
   const { data: transactions = [], refetch: refetchTx } = useQuery<Transaction[]>({
     queryKey: ['finance-transactions'],
-    queryFn: () => apiGet(`/.netlify/functions/finance?year=${YEAR}`),
+    queryFn: () => apiGet(`/finance?year=${YEAR}`),
     enabled: unlocked,
     staleTime: 30_000,
   })
 
   const { data: snapshots = [], refetch: refetchSnaps } = useQuery<Snapshot[]>({
     queryKey: ['finance-snapshots'],
-    queryFn: () => apiGet(`/.netlify/functions/finance?action=snapshots&year=${YEAR}`),
+    queryFn: () => apiGet(`/finance?action=snapshots&year=${YEAR}`),
     enabled: unlocked,
     staleTime: 30_000,
   })
@@ -970,7 +970,7 @@ export default function Finance() {
     if (!unlocked) return
     refetchTx().then(({ data }) => {
       if (!data || data.length === 0) {
-        apiRequest('POST', '/.netlify/functions/finance?action=seed').then(() => {
+        apiRequest('POST', '/finance?action=seed').then(() => {
           refetchTx()
           refetchSnaps()
         })
