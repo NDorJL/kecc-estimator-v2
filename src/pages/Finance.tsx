@@ -943,9 +943,13 @@ function TxDialog({ tx, open, onClose, onSave }: {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1"><Label>Date</Label><Input type="date" value={form.date || ''} onChange={e => set('date', e.target.value)} /></div>
             <div className="space-y-1"><Label>Type</Label>
-              <Select value={form.type || ''} onValueChange={v => { set('type', v); set('category', '') }}>
-                <SelectTrigger><SelectValue placeholder="Type" /></SelectTrigger>
-                <SelectContent><SelectItem value="Income">Income</SelectItem><SelectItem value="Expense">Expense</SelectItem></SelectContent>
+              <Select value={form.type ?? '__NONE__'} onValueChange={v => { set('type', v); set('category', '__NONE__') }}>
+                <SelectTrigger><SelectValue placeholder="Select type…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__NONE__" disabled>Select type…</SelectItem>
+                  <SelectItem value="Income">Income</SelectItem>
+                  <SelectItem value="Expense">Expense</SelectItem>
+                </SelectContent>
               </Select>
             </div>
           </div>
@@ -953,16 +957,17 @@ function TxDialog({ tx, open, onClose, onSave }: {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1"><Label>Amount ($)</Label><Input type="number" step="0.01" min="0" value={form.amount || ''} onChange={e => set('amount', parseFloat(e.target.value) || 0)} /></div>
             <div className="space-y-1"><Label>Account</Label>
-              <Select value={form.account || ''} onValueChange={v => set('account', v)}>
-                <SelectTrigger><SelectValue placeholder="Account" /></SelectTrigger>
+              <Select value={form.account || ACCOUNTS[0]} onValueChange={v => set('account', v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>{ACCOUNTS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}</SelectContent>
               </Select>
             </div>
           </div>
           <div className="space-y-1"><Label>Category</Label>
-            <Select value={form.category || ''} onValueChange={v => set('category', v)}>
-              <SelectTrigger><SelectValue placeholder="Category" /></SelectTrigger>
+            <Select value={form.category && form.category !== '__NONE__' ? form.category : '__NONE__'} onValueChange={v => set('category', v === '__NONE__' ? '' : v)}>
+              <SelectTrigger><SelectValue placeholder="Select category…" /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="__NONE__" disabled>Select category…</SelectItem>
                 {catList.map(c => (
                   <SelectItem key={c} value={c}>
                     {c}{SCHEDULE_C[c] ? ` · ${SCHEDULE_C[c].line}` : ''}
@@ -1085,10 +1090,10 @@ function TransactionsTab({ transactions, period, onRefresh }: { transactions: Tr
 
       {/* Category filter */}
       {usedCats.length > 0 && (
-        <Select value={catFilter} onValueChange={v => { setCatFilter(v); setPage(0) }}>
-          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All categories" /></SelectTrigger>
+        <Select value={catFilter || '__ALL__'} onValueChange={v => { setCatFilter(v === '__ALL__' ? '' : v); setPage(0) }}>
+          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="">All categories</SelectItem>
+            <SelectItem value="__ALL__">All categories</SelectItem>
             {usedCats.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
           </SelectContent>
         </Select>
@@ -1168,6 +1173,47 @@ function TransactionsTab({ transactions, period, onRefresh }: { transactions: Tr
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// PDF TEXT PARSER
+// Extracts transactions from raw text pulled out of bank-statement PDFs.
+// Works by scanning for lines that contain a date + amount pattern.
+// ═══════════════════════════════════════════════════════════════════════════
+function parsePDFText(text: string, statementType: string): Omit<Transaction, 'id' | 'created_at'>[] {
+  const results: Omit<Transaction, 'id' | 'created_at'>[] = []
+  // Match patterns like:  01/15/2026   Some Description   $1,234.56
+  //                       01/15/26     Some Description   1,234.56
+  const lineRe = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})\s+(.+?)\s+\$?([\d,]+\.\d{2})\s*$/gm
+  let match
+  while ((match = lineRe.exec(text)) !== null) {
+    const [, rawDate, rawDesc, rawAmt] = match
+    let normalDate = ''
+    try {
+      const d = new Date(rawDate)
+      if (!isNaN(d.getTime())) normalDate = d.toISOString().slice(0, 10)
+    } catch { continue }
+    if (!normalDate) continue
+    const amount = parseFloat(rawAmt.replace(/,/g, '')) || 0
+    if (!amount) continue
+    const desc = rawDesc.trim()
+    const { type: catType, cat, review, note } = categorize(desc)
+    const account = statementType === 'cc'      ? 'Chase Ink Business Unlimited'
+                  : statementType === 'savings' ? 'KECC Savings (TVA)'
+                  :                               'KECC Checking (TVA)'
+    // PDFs don't have a clear debit/credit column — flag everything for review
+    const type: 'Income' | 'Expense' = catType ?? (statementType === 'cc' ? 'Expense' : 'Expense')
+    const finalType = cat ? (INCOME_CATS.includes(cat) ? 'Income' : 'Expense') : type
+    results.push({
+      date: normalDate, description: desc, amount,
+      type: finalType, category: cat || '',
+      account, notes: '',
+      review: true, // always flag PDF imports for manual review
+      review_note: note || 'PDF import — verify amount and Income/Expense classification.',
+      source: 'upload',
+    })
+  }
+  return results
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // CSV IMPORT TAB  — editable preview before committing
 // ═══════════════════════════════════════════════════════════════════════════
 type PreviewRow = Omit<Transaction, 'id' | 'created_at'>
@@ -1199,24 +1245,55 @@ function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]
     setPreview(prev => prev.filter((_, idx) => idx !== i))
   }
 
-  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => {
-      const text = ev.target?.result as string
-      const parsed = parseCSVFile(text, statementType)
+    const ext = file.name.split('.').pop()?.toLowerCase()
+
+    try {
+      let parsed: Omit<Transaction, 'id' | 'created_at'>[] = []
+
+      if (ext === 'pdf') {
+        // Lazy-load pdfjs so it doesn't bloat the initial bundle
+        const pdfjsLib = await import('pdfjs-dist')
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+          'pdfjs-dist/build/pdf.worker.mjs',
+          import.meta.url
+        ).toString()
+
+        const arrayBuf = await file.arrayBuffer()
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuf }).promise
+        let fullText = ''
+        for (let p = 1; p <= pdf.numPages; p++) {
+          const page = await pdf.getPage(p)
+          const content = await page.getTextContent()
+          const pageText = content.items
+            .map((item: { str?: string }) => item.str ?? '')
+            .join(' ')
+          fullText += pageText + '\n'
+        }
+        parsed = parsePDFText(fullText, statementType)
+      } else {
+        // CSV / TXT
+        const text = await file.text()
+        parsed = parseCSVFile(text, statementType)
+      }
+
       const unique = dedupe(parsed, transactions)
       if (unique.length === 0) {
         toast({ title: 'No new transactions found', description: 'All rows already exist or the file could not be parsed.' })
       } else {
         setPreview(unique)
         const dupes = parsed.length - unique.length
-        toast({ title: `${unique.length} new transactions ready to review`, description: dupes > 0 ? `${dupes} duplicate(s) skipped.` : undefined })
+        toast({
+          title: `${unique.length} transaction${unique.length !== 1 ? 's' : ''} ready to review`,
+          description: dupes > 0 ? `${dupes} duplicate(s) skipped.` : undefined,
+        })
       }
-      e.target.value = ''
+    } catch (err) {
+      toast({ title: 'Could not read file', description: String(err), variant: 'destructive' })
     }
-    reader.readAsText(file)
+    e.target.value = ''
   }
 
   async function handleImport() {
@@ -1272,10 +1349,14 @@ function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]
           <div className="rounded-lg border-2 border-dashed border-border p-6 text-center space-y-3">
             <Upload className="h-8 w-8 mx-auto text-muted-foreground" />
             <div>
-              <p className="text-sm font-medium">Select a CSV file to preview</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Nothing is saved until you click "Import" — you can edit everything first</p>
+              <p className="text-sm font-medium">Select a CSV or PDF file to preview</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Nothing is saved until you click "Import" — review and correct every row first</p>
             </div>
-            <Input type="file" accept=".csv,.txt" className="max-w-xs mx-auto cursor-pointer text-xs" onChange={handleFile} />
+            <Input type="file" accept=".csv,.txt,.pdf" className="max-w-xs mx-auto cursor-pointer text-xs" onChange={handleFile} />
+            <p className="text-xs text-muted-foreground">
+              <strong>Tip:</strong> CSV exports are more accurate than PDFs. Export CSV from your bank's online portal when possible.
+              PDF imports flag every row for manual review.
+            </p>
           </div>
         </div>
       )}
