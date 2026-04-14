@@ -250,6 +250,78 @@ function calcPLRow(transactions: Transaction[]): PLRow {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// FIXED vs VARIABLE EXPENSE CLASSIFICATION
+// Rule: if the same expense (normalized description) appears in 2+ distinct
+// calendar months within the year → Fixed.  Otherwise → Variable.
+// ═══════════════════════════════════════════════════════════════════════════
+interface FVItem {
+  key: string          // normalized description used as group key
+  display: string      // original description (most common form)
+  category: string
+  total: number        // sum across entire year
+  count: number        // transaction count
+  monthCount: number   // # distinct months it appears in
+  months: number[]     // sorted month numbers it appears in
+}
+interface FVResult {
+  fixed: FVItem[]
+  variable: FVItem[]
+  fixedTotal: number
+  variableTotal: number
+}
+
+function normalizeDesc(desc: string): string {
+  return (desc || '')
+    .toLowerCase()
+    .replace(/\d{6,}/g, '')          // strip long number strings (account #, ref #)
+    .replace(/[#*\\/\-_.(),$@!]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 32)
+}
+
+function classifyFixedVariable(transactions: Transaction[], year: number): FVResult {
+  const expenses = transactions.filter(t => t.type === 'Expense' && txYear(t) === year)
+
+  // Group by normalized description key
+  const groups: Record<string, { displays: string[]; category: string; months: Set<number>; total: number; count: number }> = {}
+  for (const tx of expenses) {
+    const key = normalizeDesc(tx.description)
+    if (!key) continue
+    if (!groups[key]) groups[key] = { displays: [], category: tx.category || 'Other Expenses', months: new Set(), total: 0, count: 0 }
+    groups[key].displays.push(tx.description)
+    // Use the category that appears most often for this key
+    groups[key].category = tx.category || groups[key].category
+    groups[key].months.add(txMonth(tx))
+    groups[key].total += Number(tx.amount)
+    groups[key].count++
+  }
+
+  const fixed: FVItem[] = []
+  const variable: FVItem[] = []
+
+  for (const [key, g] of Object.entries(groups)) {
+    // Pick the most common display name
+    const freq: Record<string, number> = {}
+    g.displays.forEach(d => { freq[d] = (freq[d] || 0) + 1 })
+    const display = Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0]
+    const months = [...g.months].sort((a, b) => a - b)
+    const item: FVItem = { key, display, category: g.category, total: g.total, count: g.count, monthCount: g.months.size, months }
+    if (g.months.size >= 2) fixed.push(item)
+    else variable.push(item)
+  }
+
+  fixed.sort((a, b) => b.total - a.total)
+  variable.sort((a, b) => b.total - a.total)
+
+  return {
+    fixed, variable,
+    fixedTotal: fixed.reduce((s, x) => s + x.total, 0),
+    variableTotal: variable.reduce((s, x) => s + x.total, 0),
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // FORMATTING & EXPORT
 // ═══════════════════════════════════════════════════════════════════════════
 const fmt$ = (v: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(v || 0)
@@ -554,6 +626,11 @@ function DashboardTab({ transactions, snapshots, period }: { transactions: Trans
     .filter(x => x.value > 0)
     .sort((a, b) => b.value - a.value)
 
+  // Fixed vs. Variable classification — always uses full year so cross-month
+  // recurrence can be detected regardless of the current period filter.
+  const fv = useMemo(() => classifyFixedVariable(transactions, period.year), [transactions, period.year])
+  const [fvShowFixed, setFvShowFixed] = useState(true)
+
   const reviewCount = filtered.filter(t => t.review).length
   const grossMargin = pl.totalIncome > 0 ? (pl.grossProfit / pl.totalIncome) * 100 : 0
   const netMargin = pl.totalIncome > 0 ? (pl.net / pl.totalIncome) * 100 : 0
@@ -664,6 +741,105 @@ function DashboardTab({ transactions, snapshots, period }: { transactions: Trans
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Fixed vs. Variable Expenses */}
+      {(fv.fixed.length > 0 || fv.variable.length > 0) && (
+        <div className="rounded-xl border bg-card p-4 space-y-3">
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Fixed vs. Variable Expenses — {period.year}</h3>
+            <p className="text-[10px] text-muted-foreground/60 mt-0.5">Classification based on full year. Fixed = recurring in 2+ months. Variable = single-month occurrence.</p>
+          </div>
+
+          {/* KPI split */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-lg border bg-muted/30 px-3 py-2.5 space-y-0.5">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-violet-500 shrink-0" />
+                <span className="text-xs font-semibold text-muted-foreground">Fixed</span>
+              </div>
+              <div className="text-lg font-bold text-violet-600 dark:text-violet-400">{fmt$(fv.fixedTotal)}</div>
+              <div className="text-[10px] text-muted-foreground">{fv.fixed.length} recurring expense{fv.fixed.length !== 1 ? 's' : ''}</div>
+            </div>
+            <div className="rounded-lg border bg-muted/30 px-3 py-2.5 space-y-0.5">
+              <div className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-orange-400 shrink-0" />
+                <span className="text-xs font-semibold text-muted-foreground">Variable</span>
+              </div>
+              <div className="text-lg font-bold text-orange-500 dark:text-orange-400">{fmt$(fv.variableTotal)}</div>
+              <div className="text-[10px] text-muted-foreground">{fv.variable.length} one-time / irregular</div>
+            </div>
+          </div>
+
+          {/* Donut chart */}
+          {fv.fixedTotal + fv.variableTotal > 0 && (
+            <ResponsiveContainer width="100%" height={140}>
+              <PieChart>
+                <Pie
+                  data={[
+                    { name: 'Fixed', value: Math.round(fv.fixedTotal * 100) / 100 },
+                    { name: 'Variable', value: Math.round(fv.variableTotal * 100) / 100 },
+                  ]}
+                  dataKey="value" nameKey="name"
+                  cx="40%" cy="50%" outerRadius={55} innerRadius={30}
+                >
+                  <Cell fill="#7c3aed" />
+                  <Cell fill="#fb923c" />
+                </Pie>
+                <Tooltip formatter={(v: number) => fmt$d(v)} />
+                <Legend layout="vertical" align="right" verticalAlign="middle" iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+
+          {/* Toggle tabs */}
+          <div className="flex rounded-lg border overflow-hidden text-xs">
+            <button onClick={() => setFvShowFixed(true)}
+              className={`flex-1 py-1.5 font-medium transition-colors ${fvShowFixed ? 'bg-violet-600 text-white' : 'text-muted-foreground hover:bg-muted'}`}>
+              Fixed ({fv.fixed.length})
+            </button>
+            <button onClick={() => setFvShowFixed(false)}
+              className={`flex-1 py-1.5 font-medium transition-colors ${!fvShowFixed ? 'bg-orange-500 text-white' : 'text-muted-foreground hover:bg-muted'}`}>
+              Variable ({fv.variable.length})
+            </button>
+          </div>
+
+          {/* Item list */}
+          <div className="space-y-1.5 max-h-64 overflow-y-auto">
+            {(fvShowFixed ? fv.fixed : fv.variable).slice(0, 30).map(item => (
+              <div key={item.key} className="flex items-start justify-between gap-2 px-1 py-1 rounded-lg hover:bg-muted/40">
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-medium truncate">{item.display}</div>
+                  <div className="text-[10px] text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                    <span>{item.category}</span>
+                    <span>·</span>
+                    <span>{item.count} transaction{item.count !== 1 ? 's' : ''}</span>
+                    {fvShowFixed && (
+                      <>
+                        <span>·</span>
+                        <span className="text-violet-500">{item.months.map(m => MONTHS[m - 1]).join(', ')}</span>
+                      </>
+                    )}
+                    {!fvShowFixed && (
+                      <>
+                        <span>·</span>
+                        <span className="text-orange-500">{MONTHS[item.months[0] - 1]}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <span className={`text-xs font-semibold shrink-0 ${fvShowFixed ? 'text-violet-600 dark:text-violet-400' : 'text-orange-500 dark:text-orange-400'}`}>
+                  {fmt$d(item.total)}
+                </span>
+              </div>
+            ))}
+            {(fvShowFixed ? fv.fixed : fv.variable).length === 0 && (
+              <p className="text-xs text-muted-foreground text-center py-3">
+                {fvShowFixed ? 'No fixed expenses detected yet — need data from 2+ months.' : 'No variable-only expenses this year.'}
+              </p>
+            )}
           </div>
         </div>
       )}
