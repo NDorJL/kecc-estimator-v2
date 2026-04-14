@@ -12,7 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import {
   LayoutDashboard, Users, Calendar, Briefcase, MoreHorizontal,
   Calculator as CalcIcon, FileText, CalendarCheck, FileStack,
-  BookOpen, BarChart2, Settings, MessageSquare, Sun, Moon,
+  BookOpen, BarChart2, Settings, MessageSquare, Sun, Moon, TrendingUp,
 } from 'lucide-react'
 import { useState } from 'react'
 import Dashboard from '@/pages/Dashboard'
@@ -26,13 +26,14 @@ import Quotes from '@/pages/Quotes'
 import Subscriptions from '@/pages/Subscriptions'
 import PriceBook from '@/pages/PriceBook'
 import SettingsPage from '@/pages/Settings'
+import Finance from '@/pages/Finance'
 
 
 function AppHeader() {
   const { theme, toggleTheme } = useTheme()
   return (
     <header className="sticky top-0 z-50 flex items-center justify-between border-b bg-card px-4" style={{ minHeight: 48 }}>
-      <h1 className="text-base font-bold tracking-tight">KECC Estimator</h1>
+      <h1 className="text-base font-bold tracking-tight">Knox Exterior Care Co.</h1>
       <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-9 w-9">
         {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
       </Button>
@@ -56,6 +57,7 @@ const moreItems = [
   { path: '/reports', label: 'Reports', icon: BarChart2 },
   { path: '/settings', label: 'Settings', icon: Settings },
   { path: '/sms', label: 'Send SMS', icon: MessageSquare },
+  { path: '/finance', label: 'Finance', icon: TrendingUp },
 ] as const
 
 function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -145,6 +147,7 @@ function AppLayout() {
           <Route path="/subscriptions" component={Subscriptions} />
           <Route path="/pricebook" component={PriceBook} />
           <Route path="/settings" component={SettingsPage} />
+          <Route path="/finance" component={Finance} />
           <Route>
             <div className="flex flex-col items-center justify-center h-full p-8 text-center">
               <h2 className="text-2xl font-bold mb-2">Page Not Found</h2>
