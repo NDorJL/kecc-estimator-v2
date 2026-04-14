@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -287,7 +287,8 @@ type CsvFormat = 'DEBIT_CREDIT' | 'CHASE_CC' | 'CHASE_CHECKING' | 'GENERIC' | 'U
 function detectCsvFormat(headers: string[]): CsvFormat {
   const h = headers.map(x => (x || '').toLowerCase().trim())
   const has = (k: string) => h.some(x => x.includes(k))
-  if (has('debit') && has('credit'))                 return 'DEBIT_CREDIT'
+  // Debit/Credit OR Withdrawal/Deposit column pairs (TVA, most credit unions)
+  if ((has('debit') || has('withdrawal')) && (has('credit') || has('deposit'))) return 'DEBIT_CREDIT'
   if (has('transaction date') && has('type'))        return 'CHASE_CC'
   if (has('posting date') && has('details'))         return 'CHASE_CHECKING'
   if (has('amount') || has('transaction amount'))    return 'GENERIC'
@@ -929,6 +930,8 @@ function TxDialog({ tx, open, onClose, onSave }: {
   tx: Partial<Transaction> | null; open: boolean; onClose: () => void; onSave: (d: Partial<Transaction>) => void
 }) {
   const [form, setForm] = useState<Partial<Transaction>>(tx || {})
+  // Sync form whenever the transaction being edited changes
+  useEffect(() => { setForm(tx || {}) }, [tx])
   const set = (k: keyof Transaction, v: string | number | boolean) => setForm(p => ({ ...p, [k]: v }))
   const catList = form.type === 'Income' ? INCOME_CATS : form.type === 'Expense' ? EXPENSE_CATS : ALL_CATS
 
@@ -985,29 +988,42 @@ function TxDialog({ tx, open, onClose, onSave }: {
 // ═══════════════════════════════════════════════════════════════════════════
 // TRANSACTIONS TAB
 // ═══════════════════════════════════════════════════════════════════════════
+const PAGE_SIZE = 50
+
 function TransactionsTab({ transactions, period, onRefresh }: { transactions: Transaction[]; period: Period; onRefresh: () => void }) {
   const [typeFilter, setTypeFilter] = useState<'all' | 'Income' | 'Expense' | 'review'>('all')
   const [catFilter, setCatFilter] = useState('')
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(0)
   const [editTx, setEditTx] = useState<Partial<Transaction> | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
   const { toast } = useToast()
+
+  // Reset page when filters change
+  useEffect(() => setPage(0), [typeFilter, catFilter, search, period])
 
   const periodFiltered = useMemo(() => filterByPeriod(transactions, period), [transactions, period])
 
   const filtered = useMemo(() => {
     let list = [...periodFiltered]
-    if (typeFilter === 'Income') list = list.filter(t => t.type === 'Income')
+    if (typeFilter === 'Income')   list = list.filter(t => t.type === 'Income')
     else if (typeFilter === 'Expense') list = list.filter(t => t.type === 'Expense')
-    else if (typeFilter === 'review') list = list.filter(t => t.review)
+    else if (typeFilter === 'review')  list = list.filter(t => t.review)
     if (catFilter) list = list.filter(t => t.category === catFilter)
-    if (search) list = list.filter(t => t.description.toLowerCase().includes(search.toLowerCase()) || (t.notes || '').toLowerCase().includes(search.toLowerCase()))
+    if (search) {
+      const q = search.toLowerCase()
+      list = list.filter(t => t.description.toLowerCase().includes(q) || (t.notes || '').toLowerCase().includes(q) || t.category.toLowerCase().includes(q))
+    }
     return list.sort((a, b) => b.date.localeCompare(a.date))
   }, [periodFiltered, typeFilter, catFilter, search])
 
-  const reviewCount = periodFiltered.filter(t => t.review).length
-  const totalIncome = filtered.filter(t => t.type === 'Income').reduce((s, t) => s + Number(t.amount), 0)
-  const totalExpense = filtered.filter(t => t.type === 'Expense').reduce((s, t) => s + Number(t.amount), 0)
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
+  const pageSlice = useMemo(() => filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE), [filtered, page])
+
+  const reviewCount   = periodFiltered.filter(t => t.review).length
+  const totalIncome   = filtered.filter(t => t.type === 'Income').reduce((s, t) => s + Number(t.amount), 0)
+  const totalExpense  = filtered.filter(t => t.type === 'Expense').reduce((s, t) => s + Number(t.amount), 0)
 
   const saveMutation = useMutation({
     mutationFn: async (data: Partial<Transaction>) => {
@@ -1020,26 +1036,21 @@ function TransactionsTab({ transactions, period, onRefresh }: { transactions: Tr
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiRequest('DELETE', `/finance?id=${id}`),
-    onSuccess: () => { toast({ title: 'Deleted' }); onRefresh() },
+    onSuccess: () => { toast({ title: 'Transaction deleted' }); setDeleteId(null); onRefresh() },
     onError: e => toast({ title: 'Error', description: String(e), variant: 'destructive' }),
   })
-
-  const handleExport = () => {
-    exportCSV(filtered, `KECC-Transactions-${periodLabel(period).replace(/ /g, '-')}.csv`)
-    toast({ title: `Exported ${filtered.length} transactions` })
-  }
 
   const usedCats = useMemo(() => [...new Set(periodFiltered.map(t => t.category).filter(Boolean))].sort(), [periodFiltered])
 
   return (
     <div className="space-y-3 p-4">
-      {/* Summary row */}
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded-lg border bg-card px-3 py-2">
+      {/* Summary */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-lg border bg-card px-3 py-2 text-xs">
           <div className="text-muted-foreground">Income</div>
-          <div className="font-bold text-green-600">{fmt$d(totalIncome)}</div>
+          <div className="font-bold text-green-600 dark:text-green-400">{fmt$d(totalIncome)}</div>
         </div>
-        <div className="rounded-lg border bg-card px-3 py-2">
+        <div className="rounded-lg border bg-card px-3 py-2 text-xs">
           <div className="text-muted-foreground">Expenses</div>
           <div className="font-bold text-destructive">{fmt$d(totalExpense)}</div>
         </div>
@@ -1047,28 +1058,30 @@ function TransactionsTab({ transactions, period, onRefresh }: { transactions: Tr
 
       {/* Toolbar */}
       <div className="flex items-center gap-2">
-        <Input className="h-8 flex-1 text-sm" placeholder="Search transactions…" value={search} onChange={e => setSearch(e.target.value)} />
-        <Button size="sm" variant="outline" className="h-8 px-2" onClick={handleExport} title="Export CSV">
+        <Input className="h-8 flex-1 text-sm" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)} />
+        <Button size="sm" variant="outline" className="h-8 px-2" title="Export CSV"
+          onClick={() => { exportCSV(filtered, `KECC-${periodLabel(period).replace(/ /g, '-')}.csv`); toast({ title: `Exported ${filtered.length} transactions` }) }}>
           <Download className="h-4 w-4" />
         </Button>
-        <Button size="sm" className="h-8 px-2" onClick={() => { setEditTx({ type: 'Expense', date: new Date().toISOString().slice(0, 10), account: 'KECC Checking (TVA)' }); setDialogOpen(true) }}>
+        <Button size="sm" className="h-8 px-2"
+          onClick={() => { setEditTx({ type: 'Expense', date: new Date().toISOString().slice(0, 10), account: 'KECC Checking (TVA)' }); setDialogOpen(true) }}>
           <Plus className="h-4 w-4" />
         </Button>
       </div>
 
       {/* Type filter pills */}
-      <div className="flex gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
+      <div className="flex gap-1.5 overflow-x-auto pb-0.5">
         {(['all', 'Income', 'Expense', 'review'] as const).map(f => (
           <button key={f} onClick={() => setTypeFilter(f)}
             className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${typeFilter === f ? 'bg-primary text-primary-foreground border-primary' : 'bg-card border-border text-muted-foreground'}`}>
-            {f === 'review' ? `Needs Review (${reviewCount})` : f === 'all' ? `All (${periodFiltered.length})` : f}
+            {f === 'review' ? `Needs Review (${reviewCount})` : f === 'all' ? `All (${filtered.length})` : f}
           </button>
         ))}
       </div>
 
       {/* Category filter */}
       {usedCats.length > 0 && (
-        <Select value={catFilter} onValueChange={setCatFilter}>
+        <Select value={catFilter} onValueChange={v => { setCatFilter(v); setPage(0) }}>
           <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All categories" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="">All categories</SelectItem>
@@ -1077,14 +1090,16 @@ function TransactionsTab({ transactions, period, onRefresh }: { transactions: Tr
         </Select>
       )}
 
-      {/* Transactions list */}
+      {/* Transactions list — paginated */}
       <div className="space-y-1.5">
         {filtered.length === 0 && (
           <div className="text-center py-10 text-muted-foreground text-sm">
-            {periodFiltered.length === 0 ? 'No transactions for this period. Upload statements using the CSV Import tab.' : 'No results matching your filters.'}
+            {periodFiltered.length === 0
+              ? 'No transactions for this period. Upload statements via CSV Import.'
+              : 'No results matching your filters.'}
           </div>
         )}
-        {filtered.map(tx => (
+        {pageSlice.map(tx => (
           <div key={tx.id} className={`rounded-xl border bg-card px-3 py-2.5 ${tx.review ? 'border-yellow-300 dark:border-yellow-700' : ''}`}>
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
@@ -1095,7 +1110,7 @@ function TransactionsTab({ transactions, period, onRefresh }: { transactions: Tr
                 <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1.5 flex-wrap">
                   <span>{tx.date}</span>
                   <span>·</span>
-                  <span className="font-medium">{tx.category || <span className="text-yellow-600">Uncategorized</span>}</span>
+                  <span className={`font-medium ${!tx.category ? 'text-yellow-600' : ''}`}>{tx.category || 'Uncategorized'}</span>
                   {SCHEDULE_C[tx.category] && <span className="text-muted-foreground/60">{SCHEDULE_C[tx.category].line}</span>}
                   <span>·</span>
                   <span>{tx.account}</span>
@@ -1110,7 +1125,7 @@ function TransactionsTab({ transactions, period, onRefresh }: { transactions: Tr
                 <button onClick={() => { setEditTx(tx); setDialogOpen(true) }} className="p-1 text-muted-foreground hover:text-foreground rounded">
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
-                <button onClick={() => { if (confirm('Delete this transaction?')) deleteMutation.mutate(tx.id) }} className="p-1 text-muted-foreground hover:text-destructive rounded">
+                <button onClick={() => setDeleteId(tx.id)} className="p-1 text-muted-foreground hover:text-destructive rounded">
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
@@ -1119,19 +1134,66 @@ function TransactionsTab({ transactions, period, onRefresh }: { transactions: Tr
         ))}
       </div>
 
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-3 pt-1">
+          <Button variant="outline" size="sm" className="h-8" disabled={page === 0} onClick={() => setPage(p => p - 1)}>← Prev</Button>
+          <span className="text-xs text-muted-foreground">Page {page + 1} of {totalPages} · {filtered.length} total</span>
+          <Button variant="outline" size="sm" className="h-8" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)}>Next →</Button>
+        </div>
+      )}
+
+      {/* Edit dialog */}
       <TxDialog tx={editTx} open={dialogOpen} onClose={() => setDialogOpen(false)} onSave={data => saveMutation.mutate(data)} />
+
+      {/* Delete confirmation dialog */}
+      <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader><DialogTitle>Delete transaction?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">This will permanently remove the transaction from your records.</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteId(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => deleteId && deleteMutation.mutate(deleteId)} disabled={deleteMutation.isPending}>
+              {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CSV IMPORT TAB
+// CSV IMPORT TAB  — editable preview before committing
 // ═══════════════════════════════════════════════════════════════════════════
+type PreviewRow = Omit<Transaction, 'id' | 'created_at'>
+
 function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]; onRefresh: () => void }) {
   const [statementType, setStatementType] = useState('checking')
-  const [preview, setPreview] = useState<Omit<Transaction, 'id' | 'created_at'>[]>([])
+  const [preview, setPreview] = useState<PreviewRow[]>([])
   const [importing, setImporting] = useState(false)
+  const [editingIdx, setEditingIdx] = useState<number | null>(null)
   const { toast } = useToast()
+
+  // Update a single preview row
+  function updateRow(i: number, changes: Partial<PreviewRow>) {
+    setPreview(prev => prev.map((row, idx) => idx === i ? { ...row, ...changes } : row))
+  }
+
+  // Flip a row's Income/Expense classification
+  function flipType(i: number) {
+    setPreview(prev => prev.map((row, idx) => {
+      if (idx !== i) return row
+      const newType: 'Income' | 'Expense' = row.type === 'Income' ? 'Expense' : 'Income'
+      // Reset category if it doesn't belong to the new type
+      const validCats = newType === 'Income' ? INCOME_CATS : EXPENSE_CATS
+      return { ...row, type: newType, category: validCats.includes(row.category) ? row.category : '' }
+    }))
+  }
+
+  function removeRow(i: number) {
+    setPreview(prev => prev.filter((_, idx) => idx !== i))
+  }
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -1142,10 +1204,11 @@ function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]
       const parsed = parseCSVFile(text, statementType)
       const unique = dedupe(parsed, transactions)
       if (unique.length === 0) {
-        toast({ title: 'No new transactions found', description: 'All rows already exist or could not be parsed.' })
+        toast({ title: 'No new transactions found', description: 'All rows already exist or the file could not be parsed.' })
       } else {
         setPreview(unique)
-        toast({ title: `Found ${unique.length} new transactions`, description: `${parsed.length - unique.length} duplicate(s) skipped.` })
+        const dupes = parsed.length - unique.length
+        toast({ title: `${unique.length} new transactions ready to review`, description: dupes > 0 ? `${dupes} duplicate(s) skipped.` : undefined })
       }
       e.target.value = ''
     }
@@ -1153,89 +1216,182 @@ function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]
   }
 
   async function handleImport() {
-    if (!preview.length) return
+    const toImport = preview.filter(r => r.type && r.category) // skip any still-uncategorized
+    const skipped = preview.length - toImport.length
+    if (!toImport.length) {
+      toast({ title: 'Nothing to import', description: 'Assign a category to each row first.' })
+      return
+    }
     setImporting(true)
     try {
-      await apiRequest('POST', '/finance', preview)
-      toast({ title: `Imported ${preview.length} transactions` })
+      await apiRequest('POST', '/finance', toImport)
+      toast({ title: `Imported ${toImport.length} transactions${skipped > 0 ? ` (${skipped} uncategorized skipped)` : ''}` })
       setPreview([]); onRefresh()
     } catch (e) {
       toast({ title: 'Import failed', description: String(e), variant: 'destructive' })
     } finally { setImporting(false) }
   }
 
-  const reviewCount = preview.filter(t => t.review).length
-  const previewIncome = preview.filter(t => t.type === 'Income').reduce((s, t) => s + t.amount, 0)
-  const previewExpense = preview.filter(t => t.type === 'Expense').reduce((s, t) => s + t.amount, 0)
+  const incomeCount  = preview.filter(r => r.type === 'Income').length
+  const expenseCount = preview.filter(r => r.type === 'Expense').length
+  const uncatCount   = preview.filter(r => !r.category).length
+  const reviewCount  = preview.filter(r => r.review).length
+  const previewIncome  = preview.filter(r => r.type === 'Income').reduce((s, r) => s + r.amount, 0)
+  const previewExpense = preview.filter(r => r.type === 'Expense').reduce((s, r) => s + r.amount, 0)
 
   return (
     <div className="p-4 space-y-5">
       <div>
         <h2 className="text-lg font-bold">Import Bank Statements</h2>
-        <p className="text-sm text-muted-foreground mt-1">Upload CSV exports from TVA Credit Union, Chase, or any bank. Duplicates are automatically detected and skipped. Transactions are auto-categorized using Schedule C rules.</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Upload a CSV export from your bank. Every transaction is shown for review before anything is saved — fix classifications, categories, or remove rows you don't want.
+        </p>
       </div>
 
-      <div className="space-y-3 rounded-xl border bg-card p-4">
-        <div className="space-y-1.5">
-          <Label>Statement Source</Label>
-          <Select value={statementType} onValueChange={setStatementType}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="checking">TVA Checking</SelectItem>
-              <SelectItem value="savings">TVA Savings</SelectItem>
-              <SelectItem value="cc">Chase Ink (Credit Card)</SelectItem>
-              <SelectItem value="other">Other Bank</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="rounded-lg border-2 border-dashed border-border p-5 text-center space-y-2">
-          <Upload className="h-7 w-7 mx-auto text-muted-foreground" />
-          <p className="text-sm font-medium">Drop a CSV file here or click to browse</p>
-          <p className="text-xs text-muted-foreground">Supports Chase, TVA Credit Union, and standard bank CSV formats</p>
-          <Input type="file" accept=".csv,.txt" className="max-w-xs mx-auto cursor-pointer text-xs" onChange={handleFile} />
-        </div>
-      </div>
-
-      {preview.length > 0 && (
-        <div className="space-y-3">
-          <div className="rounded-xl border bg-card p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-sm">{preview.length} new transactions ready to import</h3>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => setPreview([])}><X className="h-3.5 w-3.5 mr-1" />Clear</Button>
-                <Button size="sm" onClick={handleImport} disabled={importing}><Check className="h-3.5 w-3.5 mr-1" />{importing ? 'Importing…' : 'Import All'}</Button>
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div className="rounded-lg bg-muted px-3 py-2"><div className="text-muted-foreground">Income</div><div className="font-bold text-green-600">{fmt$d(previewIncome)}</div></div>
-              <div className="rounded-lg bg-muted px-3 py-2"><div className="text-muted-foreground">Expenses</div><div className="font-bold text-destructive">{fmt$d(previewExpense)}</div></div>
-              <div className="rounded-lg bg-muted px-3 py-2"><div className="text-muted-foreground">Need Review</div><div className={`font-bold ${reviewCount > 0 ? 'text-yellow-600' : ''}`}>{reviewCount}</div></div>
-            </div>
+      {/* Upload step */}
+      {preview.length === 0 && (
+        <div className="space-y-3 rounded-xl border bg-card p-4">
+          <div className="space-y-1.5">
+            <Label>Statement Source</Label>
+            <Select value={statementType} onValueChange={setStatementType}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="checking">TVA Checking</SelectItem>
+                <SelectItem value="savings">TVA Savings</SelectItem>
+                <SelectItem value="cc">Chase Ink (Credit Card)</SelectItem>
+                <SelectItem value="other">Other / Generic</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">Supported formats: TVA Credit Union, Chase, or any bank CSV with Date / Description / Amount (or Debit / Credit) columns.</p>
           </div>
 
-          <div className="space-y-1.5 max-h-80 overflow-y-auto">
-            {preview.map((tx, i) => (
-              <div key={i} className={`rounded-lg border bg-card px-3 py-2 ${tx.review ? 'border-yellow-300 dark:border-yellow-700' : ''}`}>
-                <div className="flex items-center justify-between gap-2">
+          <div className="rounded-lg border-2 border-dashed border-border p-6 text-center space-y-3">
+            <Upload className="h-8 w-8 mx-auto text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium">Select a CSV file to preview</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Nothing is saved until you click "Import" — you can edit everything first</p>
+            </div>
+            <Input type="file" accept=".csv,.txt" className="max-w-xs mx-auto cursor-pointer text-xs" onChange={handleFile} />
+          </div>
+        </div>
+      )}
+
+      {/* Editable preview */}
+      {preview.length > 0 && (
+        <div className="space-y-3">
+          {/* Summary bar */}
+          <div className="rounded-xl border bg-card p-3 space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="text-sm font-semibold">{preview.length} transactions to review</div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => setPreview([])}>
+                  <X className="h-3.5 w-3.5 mr-1" />Start over
+                </Button>
+                <Button size="sm" className="h-8 text-xs" onClick={handleImport} disabled={importing}>
+                  <Check className="h-3.5 w-3.5 mr-1" />{importing ? 'Saving…' : `Import ${preview.filter(r => r.category).length}`}
+                </Button>
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5 text-xs">
+              <div className="rounded-lg bg-muted px-2 py-1.5"><div className="text-muted-foreground">Income</div><div className="font-bold text-green-600">{fmt$d(previewIncome)}</div></div>
+              <div className="rounded-lg bg-muted px-2 py-1.5"><div className="text-muted-foreground">Expenses</div><div className="font-bold text-destructive">{fmt$d(previewExpense)}</div></div>
+              <div className="rounded-lg bg-muted px-2 py-1.5"><div className="text-muted-foreground">Uncategorized</div><div className={`font-bold ${uncatCount > 0 ? 'text-yellow-600' : 'text-green-600'}`}>{uncatCount}</div></div>
+              <div className="rounded-lg bg-muted px-2 py-1.5"><div className="text-muted-foreground">Needs Review</div><div className={`font-bold ${reviewCount > 0 ? 'text-yellow-600' : ''}`}>{reviewCount}</div></div>
+            </div>
+            {uncatCount > 0 && (
+              <p className="text-xs text-yellow-700 dark:text-yellow-400 flex items-center gap-1.5">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                {uncatCount} row{uncatCount > 1 ? 's' : ''} need a category before they can be imported.
+              </p>
+            )}
+          </div>
+
+          {/* Row list */}
+          <div className="space-y-2">
+            {preview.map((row, i) => (
+              <div key={i} className={`rounded-xl border bg-card p-3 space-y-2 ${!row.category ? 'border-yellow-300 dark:border-yellow-700' : row.review ? 'border-yellow-200 dark:border-yellow-800' : ''}`}>
+                {/* Row header */}
+                <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium truncate">{tx.description}</p>
-                    <p className="text-xs text-muted-foreground">{tx.date} · {tx.category || <span className="text-yellow-600">Uncategorized</span>}
-                      {SCHEDULE_C[tx.category] && <span className="text-muted-foreground/60"> · {SCHEDULE_C[tx.category].line}</span>}
-                    </p>
+                    <p className="text-sm font-medium truncate">{row.description}</p>
+                    <p className="text-xs text-muted-foreground">{row.date} · {row.account}</p>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {tx.review && <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />}
-                    <span className={`text-xs font-bold ${tx.type === 'Income' ? 'text-green-600' : 'text-destructive'}`}>
-                      {tx.type === 'Income' ? '+' : '−'}{fmt$d(tx.amount)}
+                    <span className={`text-sm font-bold ${row.type === 'Income' ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
+                      {row.type === 'Income' ? '+' : '−'}{fmt$d(row.amount)}
                     </span>
+                    <button onClick={() => removeRow(i)} className="p-1 text-muted-foreground hover:text-destructive rounded" title="Remove row">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
                   </div>
                 </div>
+
+                {/* Review note */}
+                {row.review && row.review_note && (
+                  <p className="text-xs text-yellow-700 dark:text-yellow-400 flex items-start gap-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />{row.review_note}
+                  </p>
+                )}
+
+                {/* Edit controls */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Income/Expense flip toggle */}
+                  <button
+                    onClick={() => flipType(i)}
+                    className={`shrink-0 h-7 px-3 rounded-full text-xs font-semibold border transition-colors ${
+                      row.type === 'Income'
+                        ? 'bg-green-50 border-green-300 text-green-700 dark:bg-green-950 dark:border-green-700 dark:text-green-400'
+                        : 'bg-red-50 border-red-300 text-destructive dark:bg-red-950 dark:border-red-800'
+                    }`}
+                    title="Tap to flip Income ↔ Expense"
+                  >
+                    {row.type === 'Income' ? '↑ Income' : '↓ Expense'} ⇄
+                  </button>
+
+                  {/* Category selector */}
+                  <Select
+                    value={row.category || ''}
+                    onValueChange={v => updateRow(i, { category: v, review: v ? false : row.review })}
+                  >
+                    <SelectTrigger className="h-7 flex-1 text-xs min-w-[160px]">
+                      <SelectValue placeholder="Assign category…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(row.type === 'Income' ? INCOME_CATS : EXPENSE_CATS).map(c => (
+                        <SelectItem key={c} value={c} className="text-xs">
+                          {c}{SCHEDULE_C[c] ? ` · ${SCHEDULE_C[c].line}` : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Notes field (expandable) */}
+                {editingIdx === i ? (
+                  <div className="flex gap-2">
+                    <Input
+                      className="h-7 text-xs flex-1"
+                      placeholder="Notes (optional)"
+                      value={row.notes || ''}
+                      onChange={e => updateRow(i, { notes: e.target.value })}
+                      onBlur={() => setEditingIdx(null)}
+                      autoFocus
+                    />
+                  </div>
+                ) : (
+                  <button className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setEditingIdx(i)}>
+                    {row.notes ? `📝 ${row.notes}` : '+ Add note'}
+                  </button>
+                )}
               </div>
             ))}
           </div>
+
+          {/* Bottom import button */}
+          <Button className="w-full" onClick={handleImport} disabled={importing}>
+            <Check className="h-4 w-4 mr-2" />
+            {importing ? 'Saving to database…' : `Import ${preview.filter(r => r.category).length} of ${preview.length} transactions`}
+          </Button>
         </div>
       )}
     </div>
