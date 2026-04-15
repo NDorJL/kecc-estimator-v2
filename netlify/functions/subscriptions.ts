@@ -54,6 +54,9 @@ export const handler: Handler = async (event) => {
         off_season_monthly_total: Number(body.offSeasonMonthlyTotal ?? 0),
         quickbooks_reference: body.quickbooksReference ?? null,
         change_history: body.changeHistory ?? [],
+        contact_id: body.contactId ?? null,
+        agreement_id: body.agreementId ?? null,
+        qb_invoice_id: body.qbInvoiceId ?? null,
       }
       const { data, error } = await supabase.from('subscriptions').insert(insert).select().single()
       if (error) throw error
@@ -76,7 +79,10 @@ export const handler: Handler = async (event) => {
       if (body.inSeasonMonthlyTotal !== undefined) update.in_season_monthly_total = Number(body.inSeasonMonthlyTotal)
       if (body.offSeasonMonthlyTotal !== undefined) update.off_season_monthly_total = Number(body.offSeasonMonthlyTotal)
       if (body.quickbooksReference !== undefined) update.quickbooks_reference = body.quickbooksReference
-      if (body.changeHistory !== undefined) update.change_history = body.changeHistory
+      if (body.changeHistory !== undefined)       update.change_history = body.changeHistory
+      if (body.contactId !== undefined)           update.contact_id = body.contactId
+      if (body.agreementId !== undefined)         update.agreement_id = body.agreementId
+      if (body.qbInvoiceId !== undefined)         update.qb_invoice_id = body.qbInvoiceId
       const { data, error } = await supabase.from('subscriptions').update(update).eq('id', id).select().single()
       if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Subscription not found' }) }
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToSubscription(data)) }

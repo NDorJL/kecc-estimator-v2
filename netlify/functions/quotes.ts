@@ -1,6 +1,7 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { rowToQuote } from '../../src/types'
+import { randomUUID } from 'crypto'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -67,6 +68,7 @@ export const handler: Handler = async (event) => {
         status: body.status ?? 'draft',
         contact_id: body.contactId ?? null,
         expires_at: body.expiresAt ?? null,
+        accept_token: randomUUID(),
       }
       const { data, error } = await supabase.from('quotes').insert(insert).select().single()
       if (error) throw error
@@ -89,8 +91,12 @@ export const handler: Handler = async (event) => {
       if (body.total !== undefined) update.total = Number(body.total)
       if (body.notes !== undefined) update.notes = body.notes
       if (body.status !== undefined) update.status = body.status
-      if (body.contactId !== undefined) update.contact_id = body.contactId
-      if (body.expiresAt !== undefined) update.expires_at = body.expiresAt
+      if (body.contactId !== undefined)      update.contact_id = body.contactId
+      if (body.expiresAt !== undefined)      update.expires_at = body.expiresAt
+      if (body.signedAt !== undefined)       update.signed_at = body.signedAt
+      if (body.signatureData !== undefined)  update.signature_data = body.signatureData
+      if (body.signedIp !== undefined)       update.signed_ip = body.signedIp
+      if (body.qbInvoiceId !== undefined)    update.qb_invoice_id = body.qbInvoiceId
       const { data, error } = await supabase.from('quotes').update(update).eq('id', id).select().single()
       if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Quote not found' }) }
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToQuote(data)) }

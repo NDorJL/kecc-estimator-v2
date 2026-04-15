@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useParams } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import { Contact, Property, Quote, Subscription, Activity, rowToContact } from '@/types'
+import { Contact, Property, Quote, Subscription, Activity, ServiceAgreement, rowToContact } from '@/types'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { ArrowLeft, Plus, Pencil, Check, X, MapPin, Phone, Mail, Building2, MessageSquare } from 'lucide-react'
+import { ArrowLeft, Plus, Pencil, Check, X, MapPin, Phone, Mail, Building2, MessageSquare, FileText, Send, ExternalLink, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 
@@ -328,11 +328,24 @@ function QuotesTab({ contactId }: { contactId: string }) {
 // ── Subscriptions Tab ──────────────────────────────────────────────────────
 
 function SubsTab({ contactId }: { contactId: string }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+
   const { data: allSubs, isLoading } = useQuery<Subscription[]>({
     queryKey: ['/subscriptions'],
     queryFn: () => apiGet('/subscriptions'),
   })
   const subs = (allSubs ?? []).filter(s => s.contactId === contactId)
+
+  const generateAgreementMutation = useMutation({
+    mutationFn: (subscriptionId: string) =>
+      apiRequest('POST', '/agreements', { contactId, subscriptionId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/agreements', contactId] })
+      toast({ title: 'Agreement generated', description: 'Check the Agreements tab to review and send.' })
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
 
   if (isLoading) return <div className="p-4"><Skeleton className="h-20 w-full rounded-xl" /></div>
   if (!subs.length) return (
@@ -347,9 +360,138 @@ function SubsTab({ contactId }: { contactId: string }) {
         <div key={s.id} className="rounded-xl border bg-card p-3">
           <div className="flex items-center justify-between mb-1">
             <span className="text-sm font-medium">{s.customerName}</span>
-            <Badge variant={s.status === 'ACTIVE' ? 'default' : 'secondary'} className="text-xs">{s.status}</Badge>
+            <div className="flex items-center gap-1.5">
+              {!s.agreementId && (
+                <span className="flex items-center gap-1 text-xs font-medium text-amber-600 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-400 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
+                  <AlertTriangle className="h-3 w-3" />No Agreement
+                </span>
+              )}
+              <Badge variant={s.status === 'ACTIVE' ? 'default' : 'secondary'} className="text-xs">{s.status}</Badge>
+            </div>
           </div>
           <p className="text-sm text-muted-foreground">${s.inSeasonMonthlyTotal}/mo in-season</p>
+          {!s.agreementId && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-2 h-8 text-xs w-full"
+              disabled={generateAgreementMutation.isPending}
+              onClick={() => generateAgreementMutation.mutate(s.id)}
+            >
+              <FileText className="h-3.5 w-3.5 mr-1" />
+              {generateAgreementMutation.isPending ? 'Generating…' : 'Generate Agreement'}
+            </Button>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Agreements Tab ─────────────────────────────────────────────────────────
+
+const AGREEMENT_STATUS_COLORS: Record<string, string> = {
+  draft: 'bg-muted text-muted-foreground',
+  pending_signature: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
+  signed: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
+  void: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
+}
+
+function AgreementsTab({ contactId }: { contactId: string }) {
+  const { toast } = useToast()
+  const queryClient = useQueryClient()
+
+  const { data: agreements, isLoading } = useQuery<ServiceAgreement[]>({
+    queryKey: ['/agreements', contactId],
+    queryFn: () => apiGet(`/agreements?contactId=${contactId}`),
+  })
+
+  const sendMutation = useMutation({
+    mutationFn: (agreementId: string) =>
+      apiRequest('POST', `/agreements/${agreementId}/send`, {}),
+    onSuccess: async (res, agreementId) => {
+      const data = await (res as Response).json()
+      const signUrl: string = data.signUrl ?? ''
+      try {
+        await navigator.clipboard.writeText(signUrl)
+        toast({ title: 'E-sign link copied!', description: 'Paste and send to your customer.' })
+      } catch {
+        toast({ title: 'E-sign link ready', description: signUrl })
+      }
+      queryClient.invalidateQueries({ queryKey: ['/agreements', contactId] })
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  if (isLoading) {
+    return (
+      <div className="p-4 space-y-2">
+        {Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}
+      </div>
+    )
+  }
+
+  if (!agreements?.length) {
+    return (
+      <div className="flex flex-col items-center justify-center h-48 text-center p-4">
+        <FileText className="h-8 w-8 text-muted-foreground mb-2" />
+        <p className="text-muted-foreground text-sm">No agreements yet.</p>
+        <p className="text-xs text-muted-foreground mt-1">Generate one from the Subs tab.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-4 space-y-3">
+      {agreements.map(ag => (
+        <div key={ag.id} className="rounded-xl border bg-card p-3 space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">{ag.customerName}</p>
+              {ag.customerAddress && (
+                <p className="text-xs text-muted-foreground truncate">{ag.customerAddress}</p>
+              )}
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Created {new Date(ag.createdAt).toLocaleDateString()}
+              </p>
+            </div>
+            <div className="flex flex-col items-end gap-1.5 shrink-0">
+              <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium capitalize', AGREEMENT_STATUS_COLORS[ag.status] ?? '')}>
+                {ag.status.replace('_', ' ')}
+              </span>
+              {ag.signedAt && (
+                <span className="flex items-center gap-1 text-xs text-green-600">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Signed {new Date(ag.signedAt).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            {ag.pdfUrl && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 h-8 text-xs"
+                onClick={() => window.open(ag.pdfUrl!, '_blank')}
+              >
+                <ExternalLink className="h-3.5 w-3.5 mr-1" />View PDF
+              </Button>
+            )}
+            {ag.status !== 'signed' && ag.status !== 'void' && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 h-8 text-xs"
+                disabled={sendMutation.isPending}
+                onClick={() => sendMutation.mutate(ag.id)}
+              >
+                <Send className="h-3.5 w-3.5 mr-1" />
+                {sendMutation.isPending ? 'Copying…' : 'Send E-Sign Link'}
+              </Button>
+            )}
+          </div>
         </div>
       ))}
     </div>
@@ -532,17 +674,19 @@ export default function ContactDetail() {
 
       {/* Tabs */}
       <Tabs defaultValue="info" className="flex flex-col flex-1 overflow-hidden">
-        <TabsList className="shrink-0 w-full rounded-none border-b bg-transparent justify-start px-3 gap-0 h-10">
-          {(['info', 'quotes', 'subs', 'jobs', 'invoices', 'activity'] as const).map(tab => (
-            <TabsTrigger
-              key={tab}
-              value={tab}
-              className="capitalize rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent text-xs px-3 h-10"
-            >
-              {tab === 'subs' ? 'Subs' : tab === 'info' ? 'Info' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <div className="shrink-0 border-b overflow-x-auto">
+          <TabsList className="w-max min-w-full rounded-none bg-transparent justify-start px-3 gap-0 h-10">
+            {(['info', 'quotes', 'subs', 'agreements', 'jobs', 'invoices', 'activity'] as const).map(tab => (
+              <TabsTrigger
+                key={tab}
+                value={tab}
+                className="capitalize rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent text-xs px-3 h-10 whitespace-nowrap"
+              >
+                {tab === 'subs' ? 'Subs' : tab === 'info' ? 'Info' : tab === 'agreements' ? 'Agreements' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
 
         <div className="flex-1 overflow-y-auto">
           <TabsContent value="info" className="mt-0 h-full">
@@ -553,6 +697,9 @@ export default function ContactDetail() {
           </TabsContent>
           <TabsContent value="subs" className="mt-0 h-full">
             <SubsTab contactId={contact.id} />
+          </TabsContent>
+          <TabsContent value="agreements" className="mt-0 h-full">
+            <AgreementsTab contactId={contact.id} />
           </TabsContent>
           <TabsContent value="jobs" className="mt-0 h-full">
             <div className="flex flex-col items-center justify-center h-48 text-center p-4">

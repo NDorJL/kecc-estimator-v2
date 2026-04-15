@@ -58,12 +58,17 @@ export const handler: Handler = async (event) => {
     if (method === 'PATCH' && !action) {
       const body = JSON.parse(event.body ?? '{}')
       const update: Record<string, unknown> = {}
-      if (body.companyName !== undefined) update.company_name = body.companyName
-      if (body.phone !== undefined) update.phone = body.phone
-      if (body.email !== undefined) update.email = body.email
-      if (body.address !== undefined) update.address = body.address
-      if (body.logoUrl !== undefined) update.logo_url = body.logoUrl
-      if (body.quoteFooter !== undefined) update.quote_footer = body.quoteFooter
+      if (body.companyName !== undefined)              update.company_name = body.companyName
+      if (body.phone !== undefined)                    update.phone = body.phone
+      if (body.email !== undefined)                    update.email = body.email
+      if (body.address !== undefined)                  update.address = body.address
+      if (body.logoUrl !== undefined)                  update.logo_url = body.logoUrl
+      if (body.quoteFooter !== undefined)              update.quote_footer = body.quoteFooter
+      if (body.serviceAgreementTemplate !== undefined) update.service_agreement_template = body.serviceAgreementTemplate
+      if (body.qbRealmId !== undefined)                update.qb_realm_id = body.qbRealmId
+      if (body.qbAccessToken !== undefined)            update.qb_access_token = body.qbAccessToken
+      if (body.qbRefreshToken !== undefined)           update.qb_refresh_token = body.qbRefreshToken
+      if (body.qbTokenExpiresAt !== undefined)         update.qb_token_expires_at = body.qbTokenExpiresAt
 
       // Get the existing settings ID
       const { data: existing } = await supabase.from('company_settings').select('id').limit(1).single()

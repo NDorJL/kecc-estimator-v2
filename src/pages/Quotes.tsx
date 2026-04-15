@@ -40,7 +40,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle, Link2, CheckCircle2 } from "lucide-react";
 
 function fmt(n: number): string {
   return "$" + n.toFixed(2);
@@ -261,6 +261,20 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
   const [, setLocation] = useLocation();
   const [showExportDialog, setShowExportDialog] = useState(false);
 
+  const copyEsignLink = async () => {
+    if (!quote.acceptToken) {
+      toast({ title: 'No e-sign token', description: 'This quote has no signing link yet.', variant: 'destructive' });
+      return;
+    }
+    const url = `${window.location.origin}/.netlify/functions/esign?token=${quote.acceptToken}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast({ title: 'E-sign link copied!', description: 'Paste and send to your customer.' });
+    } catch {
+      toast({ title: 'E-sign link', description: url });
+    }
+  };
+
   const createSubscriptionFromQuote = async () => {
     const lineItems: LineItem[] = Array.isArray(quote.lineItems) ? quote.lineItems : [];
     const subServices: SubscriptionService[] = lineItems
@@ -365,6 +379,17 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
           <Button variant="outline" size="sm" onClick={() => setShowExportDialog(true)} className="min-h-[44px]">
             <Download className="h-4 w-4 mr-1" />PDF
           </Button>
+          {quote.status !== "accepted" && quote.status !== "declined" && (
+            <Button variant="outline" size="sm" onClick={copyEsignLink} className="min-h-[44px]">
+              <Link2 className="h-4 w-4 mr-1" />E-Sign Link
+            </Button>
+          )}
+          {quote.signedAt && (
+            <span className="flex items-center gap-1 text-sm font-medium text-green-600 dark:text-green-400 px-2">
+              <CheckCircle2 className="h-4 w-4" />
+              Signed {new Date(quote.signedAt).toLocaleDateString()}
+            </span>
+          )}
           {quote.status === "accepted" && (
             <Button variant="default" size="sm" onClick={() => activateSubMutation.mutate()} disabled={activateSubMutation.isPending} className="min-h-[44px] bg-green-700 hover:bg-green-800">
               <CalendarCheck className="h-4 w-4 mr-1" />

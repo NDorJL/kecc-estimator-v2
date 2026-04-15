@@ -42,6 +42,11 @@ export interface Quote {
   contactId: string | null;
   expiresAt: string | null;
   acceptToken: string | null;
+  // E-sign fields
+  signedAt: string | null;
+  signatureData: string | null;
+  signedIp: string | null;
+  qbInvoiceId: string | null;
 }
 
 // ── Subscription Types ─────────────────────────────────────────────────
@@ -81,6 +86,8 @@ export interface Subscription {
   changeHistory: ChangeHistoryEntry[];
   createdAt: string;
   contactId: string | null;
+  agreementId: string | null;
+  qbInvoiceId: string | null;
 }
 
 // ── Settings & Attachments ─────────────────────────────────────────────
@@ -92,6 +99,10 @@ export interface CompanySettings {
   address: string | null;
   logoUrl: string | null;
   quoteFooter: string | null;
+  serviceAgreementTemplate: string | null;
+  qbConnected: boolean;
+  qbRealmId: string | null;
+  qbTokenExpiresAt: string | null;
 }
 
 export interface QuoteAttachment {
@@ -111,6 +122,39 @@ export interface PriceOverride {
   serviceId: string;
   field: string;
   value: number;
+}
+
+// ── Contractor Types ────────────────────────────────────────────────────
+export interface Contractor {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  company: string | null;
+  specialty: string | null;
+  ratePerJob: number | null;
+  notes: string | null;
+  is1099: boolean;
+  createdAt: string;
+}
+
+// ── Service Agreement Types ─────────────────────────────────────────────
+export type AgreementStatus = 'draft' | 'pending_signature' | 'signed' | 'void';
+
+export interface ServiceAgreement {
+  id: string;
+  contactId: string;
+  subscriptionId: string | null;
+  customerName: string;
+  customerAddress: string | null;
+  status: AgreementStatus;
+  pdfPath: string | null;
+  pdfUrl: string | null;
+  acceptToken: string | null;
+  signedAt: string | null;
+  qbInvoiceId: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // ── Seasonal constants (from original shared/schema.ts) ────────────────
@@ -197,7 +241,6 @@ export interface Activity {
 }
 
 // ── Supabase row → camelCase helpers ──────────────────────────────────
-// Supabase returns snake_case columns; these helpers normalize them.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function rowToQuote(r: any): Quote {
   return {
@@ -219,6 +262,10 @@ export function rowToQuote(r: any): Quote {
     contactId: r.contact_id ?? null,
     expiresAt: r.expires_at ?? null,
     acceptToken: r.accept_token ?? null,
+    signedAt: r.signed_at ?? null,
+    signatureData: r.signature_data ?? null,
+    signedIp: r.signed_ip ?? null,
+    qbInvoiceId: r.qb_invoice_id ?? null,
   };
 }
 
@@ -241,6 +288,8 @@ export function rowToSubscription(r: any): Subscription {
     changeHistory: Array.isArray(r.change_history) ? r.change_history : [],
     createdAt: r.created_at,
     contactId: r.contact_id ?? null,
+    agreementId: r.agreement_id ?? null,
+    qbInvoiceId: r.qb_invoice_id ?? null,
   };
 }
 
@@ -254,6 +303,10 @@ export function rowToSettings(r: any): CompanySettings {
     address: r.address,
     logoUrl: r.logo_url,
     quoteFooter: r.quote_footer,
+    serviceAgreementTemplate: r.service_agreement_template ?? null,
+    qbConnected: !!r.qb_realm_id,
+    qbRealmId: r.qb_realm_id ?? null,
+    qbTokenExpiresAt: r.qb_token_expires_at ?? null,
   };
 }
 
@@ -334,5 +387,40 @@ export function rowToActivity(r: any): Activity {
     summary: r.summary,
     metadata: r.metadata ?? {},
     createdAt: r.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function rowToContractor(r: any): Contractor {
+  return {
+    id: r.id,
+    name: r.name,
+    phone: r.phone ?? null,
+    email: r.email ?? null,
+    company: r.company ?? null,
+    specialty: r.specialty ?? null,
+    ratePerJob: r.rate_per_job !== null && r.rate_per_job !== undefined ? Number(r.rate_per_job) : null,
+    notes: r.notes ?? null,
+    is1099: r.is_1099,
+    createdAt: r.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function rowToServiceAgreement(r: any): ServiceAgreement {
+  return {
+    id: r.id,
+    contactId: r.contact_id,
+    subscriptionId: r.subscription_id ?? null,
+    customerName: r.customer_name,
+    customerAddress: r.customer_address ?? null,
+    status: r.status,
+    pdfPath: r.pdf_path ?? null,
+    pdfUrl: r.pdf_url ?? null,
+    acceptToken: r.accept_token ?? null,
+    signedAt: r.signed_at ?? null,
+    qbInvoiceId: r.qb_invoice_id ?? null,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
   };
 }

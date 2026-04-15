@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
-import { Save, Loader2, Upload, X, ImageIcon, Paperclip, FileText, Trash2, Plus } from 'lucide-react'
+import { Save, Loader2, Upload, X, ImageIcon, Paperclip, FileText, Trash2, Plus, Link2, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react'
 
 const settingsFormSchema = z.object({
   companyName: z.string().min(1, 'Company name is required'),
@@ -362,6 +362,173 @@ function QuoteAttachmentsSection() {
   )
 }
 
+/* ── Service Agreement Template ───────────────────────────────────────── */
+function ServiceAgreementTemplateSection({ settings }: { settings: CompanySettings | null }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const [template, setTemplate] = useState(settings?.serviceAgreementTemplate ?? '')
+
+  useEffect(() => {
+    setTemplate(settings?.serviceAgreementTemplate ?? '')
+  }, [settings?.serviceAgreementTemplate])
+
+  const saveMutation = useMutation({
+    mutationFn: () => apiRequest('PATCH', '/settings', { serviceAgreementTemplate: template }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/settings'] })
+      toast({ title: 'Template saved' })
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  const AVAILABLE_VARS = [
+    '{{customerName}}', '{{customerAddress}}', '{{customerPhone}}', '{{customerEmail}}',
+    '{{businessName}}', '{{services}}', '{{pricing}}', '{{frequency}}',
+    '{{date}}', '{{startDate}}', '{{companyName}}',
+  ]
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <FileText className="h-4 w-4" />
+          Service Agreement Template
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted-foreground">
+          Write your agreement text using <code className="bg-muted px-1 rounded text-xs">{'{{placeholders}}'}</code>.
+          The CRM fills them in automatically when generating agreements.
+        </p>
+        <div className="flex flex-wrap gap-1.5">
+          {AVAILABLE_VARS.map(v => (
+            <code
+              key={v}
+              className="text-xs bg-muted px-1.5 py-0.5 rounded cursor-pointer hover:bg-muted/80 border"
+              onClick={() => setTemplate(t => t + v)}
+              title="Click to insert"
+            >
+              {v}
+            </code>
+          ))}
+        </div>
+        <Textarea
+          value={template}
+          onChange={e => setTemplate(e.target.value)}
+          rows={12}
+          placeholder={`This Service Agreement is entered into between {{companyName}} and {{customerName}}, effective {{date}}.\n\nSERVICES: {{services}}\nPRICING: {{pricing}}\n...`}
+          className="font-mono text-xs"
+        />
+        <Button
+          className="w-full min-h-[44px]"
+          disabled={saveMutation.isPending}
+          onClick={() => saveMutation.mutate()}
+        >
+          {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+          Save Template
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ── QuickBooks Section ────────────────────────────────────────────────── */
+function QuickBooksSection({ settings }: { settings: CompanySettings | null }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+
+  const { data: qbStatus, isLoading: statusLoading } = useQuery<{
+    connected: boolean
+    realmId: string | null
+    expiresAt: string | null
+    sandbox: boolean
+  }>({
+    queryKey: ['/qb-status'],
+    queryFn: () => fetch('/.netlify/functions/qb?action=status').then(r => r.json()),
+  })
+
+  const disconnectMutation = useMutation({
+    mutationFn: () => fetch('/.netlify/functions/qb?action=disconnect', { method: 'POST' }).then(r => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/qb-status'] })
+      queryClient.invalidateQueries({ queryKey: ['/settings'] })
+      toast({ title: 'QuickBooks disconnected' })
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  const connected = qbStatus?.connected ?? settings?.qbConnected ?? false
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Link2 className="h-4 w-4" />
+          QuickBooks Integration
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {statusLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />Checking status…
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              {connected ? (
+                <span className="flex items-center gap-1.5 text-sm font-medium text-green-600 dark:text-green-400">
+                  <CheckCircle2 className="h-4 w-4" />Connected
+                  {qbStatus?.sandbox && <span className="text-xs text-amber-600 ml-1">(Sandbox)</span>}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <AlertCircle className="h-4 w-4" />Not connected
+                </span>
+              )}
+            </div>
+
+            {connected && qbStatus?.expiresAt && (
+              <p className="text-xs text-muted-foreground">
+                Token expires: {new Date(qbStatus.expiresAt).toLocaleString()}
+              </p>
+            )}
+
+            {connected ? (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Invoices are auto-created in QuickBooks when customers sign quotes or service agreements.
+                  For subscriptions, set up the recurring schedule manually in QuickBooks Online under Recurring Transactions.
+                </p>
+                <Button
+                  variant="outline"
+                  className="w-full min-h-[44px] text-destructive border-destructive/30 hover:bg-destructive/10"
+                  disabled={disconnectMutation.isPending}
+                  onClick={() => disconnectMutation.mutate()}
+                >
+                  {disconnectMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+                  Disconnect QuickBooks
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Connect your QuickBooks Online account to auto-create invoices when customers sign. Requires <code className="bg-muted px-1 rounded text-xs">QB_CLIENT_ID</code> and <code className="bg-muted px-1 rounded text-xs">QB_CLIENT_SECRET</code> env vars to be set in Netlify.
+                </p>
+                <Button
+                  className="w-full min-h-[44px]"
+                  onClick={() => { window.location.href = '/.netlify/functions/qb?action=connect' }}
+                >
+                  <Link2 className="h-4 w-4 mr-2" />Connect QuickBooks
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 /* ── Main Settings Page ───────────────────────────────────────────────── */
 export default function SettingsPage() {
   const queryClient = useQueryClient()
@@ -541,6 +708,12 @@ export default function SettingsPage() {
           <QuoteAttachmentsSection />
         </CardContent>
       </Card>
+
+      {/* Service Agreement Template */}
+      <ServiceAgreementTemplateSection settings={settings ?? null} />
+
+      {/* QuickBooks */}
+      <QuickBooksSection settings={settings ?? null} />
     </div>
   )
 }
