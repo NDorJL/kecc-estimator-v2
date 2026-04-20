@@ -360,25 +360,42 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
   const handleDownloadPdf = async (selectedManualIds: string[]) => {
     const params = new URLSearchParams({ quoteId: quote.id });
     if (selectedManualIds.length > 0) params.set("attachments", selectedManualIds.join(","));
-    const functionUrl = `/.netlify/functions/pdf-quote?${params.toString()}`;
+    const functionPath = `/.netlify/functions/pdf-quote?${params.toString()}`;
     const filename = `KECC-Estimate-${quote.customerName.replace(/\s+/g, "-")}-${quote.id.slice(0, 8).toUpperCase()}.pdf`;
 
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    if (isIOS) {
+      // navigator.share() MUST be called synchronously from the user gesture — any await
+      // before it (e.g. fetching a blob) invalidates the gesture token on iOS and causes
+      // a silent failure that falls through to blob navigation, which soft-locks the webview.
+      // Fix: share the URL directly (no fetch). User taps "Open in Safari" from the Share
+      // sheet → Safari downloads the PDF via Content-Disposition: attachment with its full UI.
+      if (navigator.share) {
+        try {
+          await navigator.share({
+            url: `${window.location.origin}${functionPath}`,
+            title: filename,
+          });
+        } catch (err) {
+          if (err instanceof Error && err.name !== "AbortError") {
+            toast({ title: "Share failed", description: String(err), variant: "destructive" });
+          }
+        }
+      } else {
+        // Very old iOS without Share API — copy the link so they can open it in Safari manually
+        try { await navigator.clipboard.writeText(`${window.location.origin}${functionPath}`); } catch { /* ignore */ }
+        toast({ title: "Link copied", description: "Paste it in Safari to download the PDF." });
+      }
+      return;
+    }
+
+    // Android / desktop: fetch → blob → <a download>
     setIsPdfLoading(true);
     try {
-      const res = await fetch(functionUrl);
+      const res = await fetch(functionPath);
       if (!res.ok) throw new Error("Failed to generate PDF");
       const blob = await res.blob();
-
-      // Web Share API: the only reliable way to get the native iOS Share sheet
-      // (Save to Files, AirDrop, Mail, etc.) from inside a standalone PWA.
-      // window.open / location.href are both trapped in the WKWebView with no browser UI.
-      const file = new File([blob], filename, { type: "application/pdf" });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: filename });
-        return;
-      }
-
-      // Fallback for Android / desktop: blob URL + <a download>
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -388,7 +405,6 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") return; // user cancelled the share sheet
       toast({ title: "PDF export failed", description: String(err), variant: "destructive" });
     } finally {
       setIsPdfLoading(false);
