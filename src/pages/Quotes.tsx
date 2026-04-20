@@ -40,7 +40,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle, Link2, CheckCircle2 } from "lucide-react";
+import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle, Link2, CheckCircle2, Loader2 } from "lucide-react";
 
 function fmt(n: number): string {
   return "$" + n.toFixed(2);
@@ -146,7 +146,7 @@ function PdfExportDialog({
 }
 
 function QuoteCreateForm({ onDone }: { onDone: () => void }) {
-  const { cartItems, clearCart } = useQuoteContext();
+  const { cartItems, bundleDiscount, clearCart } = useQuoteContext();
   const { toast } = useToast();
   const [customerName, setCustomerName] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
@@ -159,8 +159,8 @@ function QuoteCreateForm({ onDone }: { onDone: () => void }) {
   const onetimeItems = cartItems.filter(i => !i.isSubscription);
   const subItems = cartItems.filter(i => i.isSubscription);
   const onetimeTotal = onetimeItems.reduce((s, i) => s + i.lineTotal, 0);
-  const monthlyTotal = subItems.reduce((s, i) => s + (i.monthlyAmount ?? i.lineTotal), 0);
-  const total = onetimeTotal + monthlyTotal;
+  const monthlySubtotal = subItems.reduce((s, i) => s + (i.monthlyAmount ?? i.lineTotal), 0);
+  const total = onetimeTotal + monthlySubtotal - bundleDiscount;
 
   const createMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -187,7 +187,8 @@ function QuoteCreateForm({ onDone }: { onDone: () => void }) {
       businessName: businessName.trim() || null,
       quoteType,
       lineItems: cartItems,
-      subtotal: total,
+      subtotal: onetimeTotal + monthlySubtotal,
+      discount: bundleDiscount > 0 ? bundleDiscount : undefined,
       total,
       notes: notes.trim() || null,
     });
@@ -244,8 +245,14 @@ function QuoteCreateForm({ onDone }: { onDone: () => void }) {
               <span className="shrink-0 font-medium">{fmt(item.lineTotal)}{item.isSubscription ? "/mo" : ""}</span>
             </div>
           ))}
+          {bundleDiscount > 0 && (
+            <div className="flex justify-between text-xs text-green-700 dark:text-green-400">
+              <span>Bundle Discount</span>
+              <span>-{fmt(bundleDiscount)}/mo</span>
+            </div>
+          )}
           <div className="border-t pt-2 mt-2 flex justify-between text-sm font-semibold">
-            <span>Total</span><span>{fmt(total)}</span>
+            <span>Total</span><span>{fmt(total)}{subItems.length > 0 ? "/mo" : ""}</span>
           </div>
         </CardContent>
       </Card>
@@ -357,10 +364,37 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
   const monthlySubtotal = subItems.reduce((s, i) => s + (i.monthlyAmount ?? i.lineTotal), 0);
   const bundleDiscount = quote.discount ?? 0;
 
-  const handleDownloadPdf = (selectedManualIds: string[]) => {
-    const params = new URLSearchParams({ quoteId: quote.id });
-    if (selectedManualIds.length > 0) params.set("attachments", selectedManualIds.join(","));
-    window.location.href = `/.netlify/functions/pdf-quote?${params.toString()}`;
+  const [isPdfLoading, setIsPdfLoading] = useState(false);
+
+  const handleDownloadPdf = async (selectedManualIds: string[]) => {
+    setIsPdfLoading(true);
+    try {
+      const params = new URLSearchParams({ quoteId: quote.id });
+      if (selectedManualIds.length > 0) params.set("attachments", selectedManualIds.join(","));
+      const res = await fetch(`/.netlify/functions/pdf-quote?${params.toString()}`);
+      if (!res.ok) throw new Error("Failed to generate PDF");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const filename = `KECC-Estimate-${quote.customerName.replace(/\s+/g, "-")}-${quote.id.slice(0, 8).toUpperCase()}.pdf`;
+      // iOS Safari doesn't honor <a download> — open in new tab so the Share sheet appears
+      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+      if (isIOS) {
+        window.open(url, "_blank");
+      } else {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+      // Delay revoke so the browser has time to start the download
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (err) {
+      toast({ title: "PDF export failed", description: String(err), variant: "destructive" });
+    } finally {
+      setIsPdfLoading(false);
+    }
   };
 
   const qt = quote.quoteType ?? "";
@@ -376,8 +410,8 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
           <ChevronLeft className="h-4 w-4 mr-1" />Back
         </Button>
         <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" size="sm" onClick={() => setShowExportDialog(true)} className="min-h-[44px]">
-            <Download className="h-4 w-4 mr-1" />PDF
+          <Button variant="outline" size="sm" onClick={() => setShowExportDialog(true)} className="min-h-[44px]" disabled={isPdfLoading}>
+            {isPdfLoading ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Generating…</> : <><Download className="h-4 w-4 mr-1" />PDF</>}
           </Button>
           {quote.status !== "accepted" && quote.status !== "declined" && (
             <Button variant="outline" size="sm" onClick={copyEsignLink} className="min-h-[44px]">

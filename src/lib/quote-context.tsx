@@ -3,11 +3,13 @@ import type { LineItem } from '@/types'
 
 interface QuoteContextType {
   cartItems: LineItem[]
+  bundleDiscount: number
   addToCart: (items: LineItem[]) => void
   removeFromCart: (index: number) => void
   clearCart: () => void
   isCreatingQuote: boolean
   setIsCreatingQuote: (v: boolean) => void
+  setBundleDiscount: (v: number) => void
 }
 
 const QuoteContext = createContext<QuoteContextType | null>(null)
@@ -15,6 +17,7 @@ const QuoteContext = createContext<QuoteContextType | null>(null)
 export function QuoteProvider({ children }: { children: ReactNode }) {
   const [cartItems, setCartItems] = useState<LineItem[]>([])
   const [isCreatingQuote, setIsCreatingQuote] = useState(false)
+  const [bundleDiscount, setBundleDiscount] = useState(0)
 
   const addToCart = useCallback((items: LineItem[]) => {
     setCartItems((prev) => [...prev, ...items])
@@ -26,11 +29,12 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
 
   const clearCart = useCallback(() => {
     setCartItems([])
+    setBundleDiscount(0)
   }, [])
 
   return (
     <QuoteContext.Provider
-      value={{ cartItems, addToCart, removeFromCart, clearCart, isCreatingQuote, setIsCreatingQuote }}
+      value={{ cartItems, bundleDiscount, addToCart, removeFromCart, clearCart, isCreatingQuote, setIsCreatingQuote, setBundleDiscount }}
     >
       {children}
     </QuoteContext.Provider>

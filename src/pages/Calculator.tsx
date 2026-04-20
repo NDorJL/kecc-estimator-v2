@@ -490,10 +490,12 @@ function SubPlanBuilder({
   customerType,
   planType,
   onAddToCart,
+  onSetDiscount,
 }: {
   customerType: 'residential' | 'commercial'
   planType: 'tcep' | 'autopilot'
   onAddToCart: (items: LineItem[]) => void
+  onSetDiscount?: (v: number) => void
 }) {
   const { getServicesByType } = useServices()
   const litePlan = customerType === 'residential' ? rtcepLite : ctcepLite
@@ -620,6 +622,7 @@ function SubPlanBuilder({
       }
     })
     onAddToCart(items)
+    onSetDiscount?.(totals.discountAmount)
   }
 
   return (
@@ -890,7 +893,7 @@ type ServiceMode = 'onetime' | 'subscription'
 type PlanType = 'tcep' | 'autopilot'
 
 export default function Calculator() {
-  const { cartItems, addToCart, removeFromCart, clearCart, setIsCreatingQuote } = useQuoteContext()
+  const { cartItems, addToCart, removeFromCart, clearCart, setIsCreatingQuote, setBundleDiscount } = useQuoteContext()
   const [, navigate] = useLocation()
   const { isLoading, getServicesByType } = useServices()
 
@@ -1030,6 +1033,7 @@ export default function Calculator() {
             customerType={customerType}
             planType={planType}
             onAddToCart={addToCart}
+            onSetDiscount={setBundleDiscount}
           />
         )}
       </div>
