@@ -60,7 +60,22 @@ async function getMergedServices(): Promise<ServiceDefinition[]> {
     return { ...svc, tiers: newTiers, frequencies: newFrequencies, minimum }
   })
 
-  const customParsed = (custom ?? []).map((c: { data: ServiceDefinition }) => c.data)
+  const customParsed = (custom ?? []).map((c: { data: ServiceDefinition }) => {
+    const svc = c.data
+    const svcOverrides = allOverrides.filter((o: { service_id: string }) => o.service_id === svc.id)
+
+    // Apply tier price overrides
+    const newTiers = svc.tiers.map((tier, idx) => {
+      const o = svcOverrides.find((ov: { field: string; value: number }) => ov.field === `tier_${idx}`)
+      return o ? { ...tier, price: Number(o.value) } : tier
+    })
+
+    // Apply minimum override
+    const minOverride = svcOverrides.find((ov: { field: string }) => ov.field === 'minimum')
+    const minimum = minOverride ? Number(minOverride.value) : svc.minimum
+
+    return { ...svc, tiers: newTiers, minimum }
+  })
   return [...merged, ...customParsed]
 }
 
