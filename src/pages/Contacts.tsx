@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
@@ -253,24 +253,31 @@ function ContractorSheet({
 }: {
   open: boolean; onClose: () => void; contractor?: Contractor | null
 }) {
-  const [form, setForm] = useState<ContractorForm>(
-    contractor
-      ? {
-          name: contractor.name,
-          phone: contractor.phone ?? '',
-          email: contractor.email ?? '',
-          company: contractor.company ?? '',
-          specialty: contractor.specialty ?? '',
-          ratePerJob: contractor.ratePerJob !== null ? String(contractor.ratePerJob) : '',
-          notes: contractor.notes ?? '',
-          is1099: contractor.is1099,
-        }
-      : EMPTY_CONTRACTOR_FORM
-  )
+  const [form, setForm] = useState<ContractorForm>(EMPTY_CONTRACTOR_FORM)
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
   const isEdit = !!contractor
+
+  // Sync form fields whenever the sheet opens or the contractor changes
+  useEffect(() => {
+    if (open) {
+      setForm(
+        contractor
+          ? {
+              name: contractor.name,
+              phone: contractor.phone ?? '',
+              email: contractor.email ?? '',
+              company: contractor.company ?? '',
+              specialty: contractor.specialty ?? '',
+              ratePerJob: contractor.ratePerJob !== null ? String(contractor.ratePerJob) : '',
+              notes: contractor.notes ?? '',
+              is1099: contractor.is1099,
+            }
+          : EMPTY_CONTRACTOR_FORM
+      )
+    }
+  }, [open, contractor])
 
   const mutation = useMutation({
     mutationFn: (data: ContractorForm) => {
