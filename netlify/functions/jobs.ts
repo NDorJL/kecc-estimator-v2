@@ -28,8 +28,8 @@ export const handler: Handler = async (event) => {
       const { data, error } = await supabase
         .from('jobs')
         .select('*')
-        .order('scheduled_date', { ascending: true })
-      if (error) throw error
+        .order('scheduled_date', { ascending: true, nullsFirst: false })
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToJob)) }
     }
 
@@ -43,25 +43,29 @@ export const handler: Handler = async (event) => {
     // CREATE
     if (method === 'POST' && !id) {
       const body = JSON.parse(event.body ?? '{}')
-      const insert = {
-        contact_id: body.contactId ?? null,
-        subscription_id: body.subscriptionId ?? null,
-        quote_id: body.quoteId ?? null,
-        contractor_id: body.contractorId ?? null,
-        job_type: body.jobType ?? 'one_time',
-        service_name: body.serviceName ?? '',
-        status: body.status ?? 'scheduled',
-        scheduled_date: body.scheduledDate ?? null,
-        customer_name: body.customerName ?? null,
+      const insert: Record<string, unknown> = {
+        job_type:         body.jobType ?? 'one_time',
+        service_name:     body.serviceName ?? '',
+        status:           body.status ?? 'scheduled',
+        scheduled_date:   body.scheduledDate ?? null,
+        scheduled_window: body.scheduledWindow ?? null,
+        customer_name:    body.customerName ?? null,
         customer_address: body.customerAddress ?? null,
-        customer_phone: body.customerPhone ?? null,
-        customer_email: body.customerEmail ?? null,
-        notes: body.notes ?? null,
-        internal_notes: body.internalNotes ?? null,
-        property_info: body.propertyInfo ?? {},
+        customer_phone:   body.customerPhone ?? null,
+        customer_email:   body.customerEmail ?? null,
+        notes:            body.notes ?? null,
+        internal_notes:   body.internalNotes ?? null,
+        property_info:    body.propertyInfo ?? {},
       }
+      // Optional FK columns — only set if provided to avoid FK violation on null values
+      // (all are ON DELETE SET NULL so null is fine)
+      insert.contact_id      = body.contactId ?? null
+      insert.subscription_id = body.subscriptionId ?? null
+      insert.quote_id        = body.quoteId ?? null
+      insert.contractor_id   = body.contractorId ?? null
+
       const { data, error } = await supabase.from('jobs').insert(insert).select().single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 201, headers: CORS, body: JSON.stringify(rowToJob(data)) }
     }
 
@@ -72,6 +76,9 @@ export const handler: Handler = async (event) => {
       if ('contractorId'    in body) patch.contractor_id    = body.contractorId ?? null
       if ('status'          in body) patch.status           = body.status
       if ('scheduledDate'   in body) patch.scheduled_date   = body.scheduledDate ?? null
+      if ('scheduledWindow' in body) patch.scheduled_window = body.scheduledWindow ?? null
+      if ('startTime'       in body) patch.start_time       = body.startTime ?? null
+      if ('endTime'         in body) patch.end_time         = body.endTime ?? null
       if ('notes'           in body) patch.notes            = body.notes ?? null
       if ('internalNotes'   in body) patch.internal_notes   = body.internalNotes ?? null
       if ('propertyInfo'    in body) patch.property_info    = body.propertyInfo
@@ -79,22 +86,24 @@ export const handler: Handler = async (event) => {
       if ('customerAddress' in body) patch.customer_address = body.customerAddress ?? null
       if ('customerPhone'   in body) patch.customer_phone   = body.customerPhone ?? null
       if ('customerEmail'   in body) patch.customer_email   = body.customerEmail ?? null
+      if ('serviceName'     in body) patch.service_name     = body.serviceName
 
       const { data, error } = await supabase.from('jobs').update(patch).eq('id', id).select().single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToJob(data)) }
     }
 
     // DELETE
     if (method === 'DELETE' && id) {
       const { error } = await supabase.from('jobs').delete().eq('id', id)
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 204, headers: CORS, body: '' }
     }
 
     return { statusCode: 405, headers: CORS, body: JSON.stringify({ message: 'Method not allowed' }) }
   } catch (err) {
-    console.error('jobs function error:', err)
-    return { statusCode: 500, headers: CORS, body: JSON.stringify({ message: String(err) }) }
+    const msg = err instanceof Error ? err.message : JSON.stringify(err)
+    console.error('jobs function error:', msg)
+    return { statusCode: 500, headers: CORS, body: JSON.stringify({ message: msg }) }
   }
 }

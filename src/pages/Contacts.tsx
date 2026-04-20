@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import { Contact, Contractor } from '@/types'
+import { Contact, Contractor, ContractorDoc } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -13,7 +13,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Search, Plus, Phone, Mail, Building2, User, HardHat, DollarSign, Pencil, Trash2 } from 'lucide-react'
+import { Search, Plus, Phone, Mail, Building2, User, HardHat, DollarSign, Pencil, Trash2, Upload, FileText, X, ExternalLink } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
 type FilterType = 'all' | 'residential' | 'commercial' | 'contractors'
@@ -173,8 +173,18 @@ const EMPTY_CONTRACTOR_FORM: ContractorForm = {
 }
 
 const SPECIALTIES = [
-  'Lawn Care', 'Tree Work', 'Landscaping', 'Pest Control',
-  'Irrigation', 'Hardscaping', 'Snow Removal', 'General Labor', 'Other',
+  'Lawn Care',
+  'Pressure Washing',
+  'Window Cleaning',
+  'Pet Waste Cleanup',
+  'Lawn Irrigation',
+  'Hardscaping',
+  'Tree Work',
+  'Landscaping',
+  'Pest Control',
+  'Snow Removal',
+  'General Labor',
+  'Other',
 ]
 
 function ContractorCard({ contractor, onEdit, onDelete }: { contractor: Contractor; onEdit: (c: Contractor) => void; onDelete: (id: string) => void }) {
@@ -347,9 +357,143 @@ function ContractorSheet({
           <Button className="w-full mt-2" disabled={!form.name.trim() || mutation.isPending} onClick={() => mutation.mutate(form)}>
             {mutation.isPending ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Contractor'}
           </Button>
+
+          {/* Documents — only visible when editing an existing contractor */}
+          {isEdit && contractor && (
+            <ContractorDocsSection contractor={contractor} />
+          )}
         </div>
       </SheetContent>
     </Sheet>
+  )
+}
+
+// ── Contractor Documents Section ───────────────────────────────────────────
+
+const DOC_TYPE_LABELS: Record<string, string> = {
+  w9: 'W-9',
+  agreement: 'Subcontractor Agreement',
+  license: 'License / Insurance',
+  other: 'Other',
+}
+
+function ContractorDocsSection({ contractor }: { contractor: Contractor }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const [uploading, setUploading] = useState(false)
+  const [docName, setDocName] = useState('')
+  const [docType, setDocType] = useState('other')
+
+  // Keep local docs in sync with contractor (from cache)
+  const { data: contractors } = useQuery<Contractor[]>({ queryKey: ['/contractors'] })
+  const current = contractors?.find(c => c.id === contractor.id) ?? contractor
+  const docs: ContractorDoc[] = current.documents ?? []
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const name = docName.trim() || file.name
+    setUploading(true)
+    try {
+      const arrayBuf = await file.arrayBuffer()
+      const res = await fetch(`/.netlify/functions/contractor-docs/${contractor.id}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream',
+          'X-Doc-Name': name,
+          'X-Doc-Type': docType,
+        },
+        body: arrayBuf,
+      })
+      if (!res.ok) throw new Error(await res.text())
+      queryClient.invalidateQueries({ queryKey: ['/contractors'] })
+      setDocName('')
+      toast({ title: 'Document uploaded' })
+    } catch (err) {
+      toast({ title: 'Upload failed', description: String(err), variant: 'destructive' })
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  async function handleDelete(docId: string) {
+    try {
+      const res = await fetch(`/.netlify/functions/contractor-docs/${contractor.id}/${docId}`, { method: 'DELETE' })
+      if (!res.ok && res.status !== 204) throw new Error(await res.text())
+      queryClient.invalidateQueries({ queryKey: ['/contractors'] })
+      toast({ title: 'Document removed' })
+    } catch (err) {
+      toast({ title: 'Delete failed', description: String(err), variant: 'destructive' })
+    }
+  }
+
+  return (
+    <div className="border-t pt-4 mt-2">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Documents</p>
+
+      {docs.length > 0 && (
+        <div className="space-y-2 mb-3">
+          {docs.map(doc => (
+            <div key={doc.id} className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+              <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{doc.name}</p>
+                <p className="text-xs text-muted-foreground">{DOC_TYPE_LABELS[doc.docType] ?? doc.docType} · {new Date(doc.uploadedAt).toLocaleDateString()}</p>
+              </div>
+              <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="p-1 text-muted-foreground hover:text-primary">
+                <ExternalLink className="h-3.5 w-3.5" />
+              </a>
+              <button onClick={() => handleDelete(doc.id)} className="p-1 text-muted-foreground hover:text-destructive">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {docs.length === 0 && (
+        <p className="text-xs text-muted-foreground mb-3">No documents yet. Upload W-9s, agreements, licenses, and more.</p>
+      )}
+
+      {/* Upload controls */}
+      <div className="space-y-2">
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <Label className="text-xs">Document Name</Label>
+            <Input
+              className="mt-1"
+              placeholder="e.g. W-9 2025"
+              value={docName}
+              onChange={e => setDocName(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Type</Label>
+            <Select value={docType} onValueChange={setDocType}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="w9">W-9</SelectItem>
+                <SelectItem value="agreement">Subcontractor Agreement</SelectItem>
+                <SelectItem value="license">License / Insurance</SelectItem>
+                <SelectItem value="other">Other</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        <label className={`flex items-center justify-center gap-2 w-full rounded-lg border-2 border-dashed px-4 py-3 text-sm cursor-pointer transition-colors ${uploading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-muted/40'}`}>
+          <Upload className="h-4 w-4 text-muted-foreground" />
+          <span className="text-muted-foreground">{uploading ? 'Uploading…' : 'Choose PDF or image to upload'}</span>
+          <input
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png,.webp"
+            className="sr-only"
+            disabled={uploading}
+            onChange={handleUpload}
+          />
+        </label>
+      </div>
+    </div>
   )
 }
 

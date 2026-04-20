@@ -138,6 +138,15 @@ export interface PriceOverride {
 }
 
 // ── Contractor Types ────────────────────────────────────────────────────
+export interface ContractorDoc {
+  id: string;
+  name: string;
+  docType: string;   // 'w9' | 'agreement' | 'license' | 'other'
+  fileUrl: string;
+  filePath: string;
+  uploadedAt: string;
+}
+
 export interface Contractor {
   id: string;
   name: string;
@@ -148,6 +157,7 @@ export interface Contractor {
   ratePerJob: number | null;
   notes: string | null;
   is1099: boolean;
+  documents: ContractorDoc[];
   createdAt: string;
 }
 
@@ -416,6 +426,7 @@ export function rowToContractor(r: any): Contractor {
     ratePerJob: r.rate_per_job !== null && r.rate_per_job !== undefined ? Number(r.rate_per_job) : null,
     notes: r.notes ?? null,
     is1099: r.is_1099,
+    documents: Array.isArray(r.documents) ? r.documents : [],
     createdAt: r.created_at,
   };
 }
@@ -452,7 +463,10 @@ export interface Job {
   jobType: JobType;
   serviceName: string;
   status: JobStatus;
-  scheduledDate: string | null;   // ISO date 'YYYY-MM-DD'
+  scheduledDate: string | null;     // ISO date 'YYYY-MM-DD'
+  scheduledWindow: string | null;   // 'morning' | 'afternoon' | 'evening' | 'anytime'
+  startTime: string | null;         // ISO timestamptz
+  endTime: string | null;           // ISO timestamptz
   customerName: string | null;
   customerAddress: string | null;
   customerPhone: string | null;
@@ -473,8 +487,11 @@ export function rowToJob(r: any): Job {
     contractorId: r.contractor_id ?? null,
     jobType: r.job_type ?? 'one_time',
     serviceName: r.service_name,
-    status: r.status,
+    status: r.status ?? 'scheduled',
     scheduledDate: r.scheduled_date ?? null,
+    scheduledWindow: r.scheduled_window ?? null,
+    startTime: r.start_time ?? null,
+    endTime: r.end_time ?? null,
     customerName: r.customer_name ?? null,
     customerAddress: r.customer_address ?? null,
     customerPhone: r.customer_phone ?? null,

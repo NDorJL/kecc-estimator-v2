@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   TrendingUp, FileText, CalendarCheck, DollarSign,
-  Users, RefreshCw, Target, BookOpen, BarChart2,
+  Users, Target, BookOpen, BarChart2,
   MessageSquare, CheckCircle2, PenLine,
 } from 'lucide-react'
 import { useLocation } from 'wouter'
@@ -49,14 +49,13 @@ function KpiCard({
 }
 
 const quickNavItems = [
-  { label: 'Contacts',      path: '/contacts',      icon: Users },
-  { label: 'Subscriptions', path: '/subscriptions', icon: RefreshCw },
-  { label: 'Leads',         path: '/leads',         icon: Target },
-  { label: 'Price Book',    path: '/pricebook',     icon: BookOpen },
-  { label: 'Finance',       path: '/finance',       icon: DollarSign },
-  { label: 'Reports',       path: '/finance',       icon: BarChart2 },
-  { label: 'Jobs',          path: '/jobs',          icon: CalendarCheck },
-  { label: 'Send SMS',      path: '/contacts',      icon: MessageSquare },
+  { label: 'Contacts',   path: '/contacts',  icon: Users },
+  { label: 'Open Jobs',  path: '/jobs',      icon: CalendarCheck },
+  { label: 'Leads',      path: '/leads',     icon: Target },
+  { label: 'Price Book', path: '/pricebook', icon: BookOpen },
+  { label: 'Finance',    path: '/finance',   icon: DollarSign },
+  { label: 'Reports',    path: '/finance',   icon: BarChart2 },
+  { label: 'Send SMS',   path: '/contacts',  icon: MessageSquare },
 ] as const
 
 export default function Dashboard() {
