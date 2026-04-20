@@ -358,28 +358,34 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
   const [isPdfLoading, setIsPdfLoading] = useState(false);
 
   const handleDownloadPdf = async (selectedManualIds: string[]) => {
+    const params = new URLSearchParams({ quoteId: quote.id });
+    if (selectedManualIds.length > 0) params.set("attachments", selectedManualIds.join(","));
+    const functionUrl = `/.netlify/functions/pdf-quote?${params.toString()}`;
+
+    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    if (isIOS) {
+      // On iOS (both standalone PWA and Safari browser), open the function URL directly
+      // in a new window. This forces real Safari to open (with full chrome: address bar,
+      // Share sheet, "Save to Files") instead of the trapped standalone webview.
+      // Blob URLs cannot cross this boundary — only a real HTTP URL works here.
+      window.open(functionUrl, "_blank");
+      return;
+    }
+
+    // Android / desktop: fetch → blob → programmatic <a download> click
     setIsPdfLoading(true);
     try {
-      const params = new URLSearchParams({ quoteId: quote.id });
-      if (selectedManualIds.length > 0) params.set("attachments", selectedManualIds.join(","));
-      const res = await fetch(`/.netlify/functions/pdf-quote?${params.toString()}`);
+      const res = await fetch(functionUrl);
       if (!res.ok) throw new Error("Failed to generate PDF");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const filename = `KECC-Estimate-${quote.customerName.replace(/\s+/g, "-")}-${quote.id.slice(0, 8).toUpperCase()}.pdf`;
-      // iOS Safari doesn't honor <a download> — open in new tab so the Share sheet appears
-      const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-      if (isIOS) {
-        window.open(url, "_blank");
-      } else {
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      }
-      // Delay revoke so the browser has time to start the download
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (err) {
       toast({ title: "PDF export failed", description: String(err), variant: "destructive" });
