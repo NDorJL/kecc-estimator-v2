@@ -361,25 +361,25 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
     const params = new URLSearchParams({ quoteId: quote.id });
     if (selectedManualIds.length > 0) params.set("attachments", selectedManualIds.join(","));
     const functionUrl = `/.netlify/functions/pdf-quote?${params.toString()}`;
+    const filename = `KECC-Estimate-${quote.customerName.replace(/\s+/g, "-")}-${quote.id.slice(0, 8).toUpperCase()}.pdf`;
 
-    const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
-    if (isIOS) {
-      // On iOS (both standalone PWA and Safari browser), open the function URL directly
-      // in a new window. This forces real Safari to open (with full chrome: address bar,
-      // Share sheet, "Save to Files") instead of the trapped standalone webview.
-      // Blob URLs cannot cross this boundary — only a real HTTP URL works here.
-      window.open(functionUrl, "_blank");
-      return;
-    }
-
-    // Android / desktop: fetch → blob → programmatic <a download> click
     setIsPdfLoading(true);
     try {
       const res = await fetch(functionUrl);
       if (!res.ok) throw new Error("Failed to generate PDF");
       const blob = await res.blob();
+
+      // Web Share API: the only reliable way to get the native iOS Share sheet
+      // (Save to Files, AirDrop, Mail, etc.) from inside a standalone PWA.
+      // window.open / location.href are both trapped in the WKWebView with no browser UI.
+      const file = new File([blob], filename, { type: "application/pdf" });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: filename });
+        return;
+      }
+
+      // Fallback for Android / desktop: blob URL + <a download>
       const url = URL.createObjectURL(blob);
-      const filename = `KECC-Estimate-${quote.customerName.replace(/\s+/g, "-")}-${quote.id.slice(0, 8).toUpperCase()}.pdf`;
       const a = document.createElement("a");
       a.href = url;
       a.download = filename;
@@ -388,6 +388,7 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
       document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return; // user cancelled the share sheet
       toast({ title: "PDF export failed", description: String(err), variant: "destructive" });
     } finally {
       setIsPdfLoading(false);
