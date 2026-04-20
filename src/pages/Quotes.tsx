@@ -320,6 +320,35 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
     onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
   });
 
+  const convertToJobMutation = useMutation({
+    mutationFn: async () => {
+      const items: LineItem[] = Array.isArray(quote.lineItems) ? quote.lineItems : [];
+      const onetimeItems = items.filter(i => !i.isSubscription);
+      if (onetimeItems.length === 0) throw new Error("No one-time services found on this quote.");
+      const serviceName = onetimeItems.length === 1
+        ? onetimeItems[0].serviceName
+        : onetimeItems.map(i => i.serviceName).join(", ");
+      const res = await apiRequest("POST", "/jobs", {
+        quoteId: quote.id,
+        contactId: quote.contactId ?? null,
+        jobType: "one_time",
+        serviceName,
+        status: "scheduled",
+        customerName: quote.customerName,
+        customerAddress: quote.customerAddress ?? null,
+        customerPhone: quote.customerPhone ?? null,
+        customerEmail: quote.customerEmail ?? null,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/jobs"] });
+      toast({ title: "Job created", description: "Find it in the Jobs tab to set a date and contractor." });
+      setLocation("/jobs");
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ["/settings"],
     queryFn: () => fetch("/.netlify/functions/settings").then(r => r.json()),
@@ -445,8 +474,15 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
             </Button>
           )}
           {quote.status === "accepted" && (
-            <Button variant="outline" size="sm" className="min-h-[44px]" onClick={() => toast({ title: "Convert to Job", description: "Job scheduling coming in Phase 3." })}>
-              <Briefcase className="h-4 w-4 mr-1" />Convert to Job
+            <Button
+              variant="outline"
+              size="sm"
+              className="min-h-[44px]"
+              disabled={convertToJobMutation.isPending}
+              onClick={() => convertToJobMutation.mutate()}
+            >
+              <Briefcase className="h-4 w-4 mr-1" />
+              {convertToJobMutation.isPending ? "Creating…" : "Convert to Job"}
             </Button>
           )}
           <Select value={quote.status} onValueChange={val => updateStatusMutation.mutate(val)}>
@@ -554,12 +590,30 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
             <p className="text-sm text-gray-700 whitespace-pre-wrap">{quote.notes}</p>
           </div>
         )}
-        <div className="mt-8 pt-4">
-          <div className="flex justify-between items-end gap-8">
-            <div className="flex-1"><div className="border-b border-gray-400 mb-1" /><p className="text-xs text-gray-500">Customer Signature</p></div>
-            <div className="flex-1"><div className="border-b border-gray-400 mb-1" /><p className="text-xs text-gray-500">Date</p></div>
+        {quote.signedAt ? (
+          <div className="mt-8 pt-4 border-t border-gray-200">
+            <div className="flex items-start gap-3 rounded-lg bg-green-50 border border-green-200 p-4">
+              <CheckCircle2 className="h-5 w-5 text-green-600 mt-0.5 shrink-0" />
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-green-800">E-Signed by {quote.customerName}</p>
+                <p className="text-xs text-green-700">
+                  Signed on {new Date(quote.signedAt).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} at {new Date(quote.signedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                </p>
+                {quote.signedIp && (
+                  <p className="text-xs text-green-600/70">IP address: {quote.signedIp}</p>
+                )}
+                <p className="text-xs text-green-600/70">Digital signature on file · Legally binding electronic acceptance</p>
+              </div>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="mt-8 pt-4">
+            <div className="flex justify-between items-end gap-8">
+              <div className="flex-1"><div className="border-b border-gray-400 mb-1" /><p className="text-xs text-gray-500">Customer Signature</p></div>
+              <div className="flex-1"><div className="border-b border-gray-400 mb-1" /><p className="text-xs text-gray-500">Date</p></div>
+            </div>
+          </div>
+        )}
         {settings?.quoteFooter && (
           <div className="mt-6 pt-4 border-t">
             <p className="text-xs text-gray-500 text-center">{settings.quoteFooter}</p>

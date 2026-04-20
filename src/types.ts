@@ -69,6 +69,18 @@ export interface ChangeHistoryEntry {
   summary: string;
 }
 
+// Per-service scheduling config stored on a subscription
+// dayOfWeek: 0=Sunday … 6=Saturday
+// startDate: ISO date string — the first occurrence (used to calculate bi-weekly parity)
+export interface ServiceSchedule {
+  serviceId: string;
+  serviceName: string;
+  frequency: string;        // matches SubscriptionService.frequency
+  dayOfWeek: number;        // 0–6
+  startDate: string;        // ISO 'YYYY-MM-DD'
+  contractorId: string | null;
+}
+
 export interface Subscription {
   id: string;
   customerName: string;
@@ -88,6 +100,7 @@ export interface Subscription {
   contactId: string | null;
   agreementId: string | null;
   qbInvoiceId: string | null;
+  serviceSchedules: ServiceSchedule[];
 }
 
 // ── Settings & Attachments ─────────────────────────────────────────────
@@ -290,6 +303,7 @@ export function rowToSubscription(r: any): Subscription {
     contactId: r.contact_id ?? null,
     agreementId: r.agreement_id ?? null,
     qbInvoiceId: r.qb_invoice_id ?? null,
+    serviceSchedules: Array.isArray(r.service_schedules) ? r.service_schedules : [],
   };
 }
 
@@ -422,5 +436,52 @@ export function rowToServiceAgreement(r: any): ServiceAgreement {
     qbInvoiceId: r.qb_invoice_id ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+  };
+}
+
+// ── Job Types ──────────────────────────────────────────────────────────
+export type JobType   = 'one_time' | 'subscription_visit';
+export type JobStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+
+export interface Job {
+  id: string;
+  contactId: string | null;
+  subscriptionId: string | null;
+  quoteId: string | null;
+  contractorId: string | null;
+  jobType: JobType;
+  serviceName: string;
+  status: JobStatus;
+  scheduledDate: string | null;   // ISO date 'YYYY-MM-DD'
+  customerName: string | null;
+  customerAddress: string | null;
+  customerPhone: string | null;
+  customerEmail: string | null;
+  notes: string | null;
+  internalNotes: string | null;
+  propertyInfo: Record<string, string>;  // gateCode, dogOnProperty, parkingNotes, etc.
+  createdAt: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function rowToJob(r: any): Job {
+  return {
+    id: r.id,
+    contactId: r.contact_id ?? null,
+    subscriptionId: r.subscription_id ?? null,
+    quoteId: r.quote_id ?? null,
+    contractorId: r.contractor_id ?? null,
+    jobType: r.job_type ?? 'one_time',
+    serviceName: r.service_name,
+    status: r.status,
+    scheduledDate: r.scheduled_date ?? null,
+    customerName: r.customer_name ?? null,
+    customerAddress: r.customer_address ?? null,
+    customerPhone: r.customer_phone ?? null,
+    customerEmail: r.customer_email ?? null,
+    notes: r.notes ?? null,
+    internalNotes: r.internal_notes ?? null,
+    propertyInfo: r.property_info ?? {},
+    createdAt: r.created_at,
   };
 }

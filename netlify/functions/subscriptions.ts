@@ -57,6 +57,7 @@ export const handler: Handler = async (event) => {
         contact_id: body.contactId ?? null,
         agreement_id: body.agreementId ?? null,
         qb_invoice_id: body.qbInvoiceId ?? null,
+        service_schedules: body.serviceSchedules ?? [],
       }
       const { data, error } = await supabase.from('subscriptions').insert(insert).select().single()
       if (error) throw error
@@ -83,6 +84,7 @@ export const handler: Handler = async (event) => {
       if (body.contactId !== undefined)           update.contact_id = body.contactId
       if (body.agreementId !== undefined)         update.agreement_id = body.agreementId
       if (body.qbInvoiceId !== undefined)         update.qb_invoice_id = body.qbInvoiceId
+      if (body.serviceSchedules !== undefined)    update.service_schedules = body.serviceSchedules
       const { data, error } = await supabase.from('subscriptions').update(update).eq('id', id).select().single()
       if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Subscription not found' }) }
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToSubscription(data)) }
