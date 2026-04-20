@@ -77,11 +77,10 @@ function calcUnitTotal(model: string, tierPrice: number, min: number, qty: numbe
   return tierPrice * qty
 }
 
-function describeUnit(model: string, label: string, qty: number) {
-  if (model === 'per_sqft') return `${label} — ${qty.toLocaleString()} sqft`
-  if (model === 'per_lf') return `${label} — ${qty.toLocaleString()} LF`
-  if (model === 'per_acre') return `${qty} acre${qty !== 1 ? 's' : ''}`
-  return label
+function describeUnit(_model: string, label: string, _qty: number) {
+  // Strip internal pricing details from tier labels (e.g. "Flatwork ($0.22/sqft, $85 min)" → "Flatwork")
+  // These are for internal reference only and should never appear on customer-facing quotes.
+  return label.replace(/\s*\(\$[^)]*\)/g, '').trim() || label
 }
 
 // Category → icon mapping for visual flair
