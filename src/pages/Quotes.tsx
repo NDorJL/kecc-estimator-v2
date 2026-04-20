@@ -40,7 +40,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle, Link2, CheckCircle2, Loader2 } from "lucide-react";
+import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle, Link2, CheckCircle2, Loader2, Pencil, X } from "lucide-react";
 
 function fmt(n: number): string {
   return "$" + n.toFixed(2);
@@ -256,10 +256,105 @@ function QuoteCreateForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
+interface EditLineItem extends LineItem { _key: string }
+
+function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => void; onUpdate: (q: Quote) => void }) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [showExportDialog, setShowExportDialog] = useState(false);
+
+  // ── Edit mode state ──────────────────────────────────────────────────────
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editBusiness, setEditBusiness] = useState('');
+  const [editQuoteType, setEditQuoteType] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editItems, setEditItems] = useState<EditLineItem[]>([]);
+
+  const startEdit = () => {
+    setEditName(quote.customerName);
+    setEditAddress(quote.customerAddress ?? '');
+    setEditPhone(quote.customerPhone ?? '');
+    setEditEmail(quote.customerEmail ?? '');
+    setEditBusiness(quote.businessName ?? '');
+    setEditQuoteType(quote.quoteType);
+    setEditNotes(quote.notes ?? '');
+    setEditItems(
+      (Array.isArray(quote.lineItems) ? quote.lineItems : []).map((item, i) => ({
+        ...item,
+        _key: `existing-${i}-${item.serviceId ?? i}`,
+      }))
+    );
+    setIsEditing(true);
+  };
+
+  const cancelEdit = () => setIsEditing(false);
+
+  const updateItem = (key: string, field: 'unitPrice' | 'quantity' | 'serviceName' | 'description', raw: string) => {
+    setEditItems(prev => prev.map(it => {
+      if (it._key !== key) return it;
+      if (field === 'unitPrice') {
+        const price = parseFloat(raw) || 0;
+        const lineTotal = price * it.quantity;
+        return { ...it, unitPrice: price, lineTotal };
+      }
+      if (field === 'quantity') {
+        const qty = parseFloat(raw) || 0;
+        const lineTotal = it.unitPrice * qty;
+        return { ...it, quantity: qty, lineTotal };
+      }
+      return { ...it, [field]: raw };
+    }));
+  };
+
+  const removeItem = (key: string) => setEditItems(prev => prev.filter(it => it._key !== key));
+
+  const addItem = () => {
+    const key = `new-${Date.now()}`;
+    setEditItems(prev => [...prev, {
+      _key: key,
+      serviceId: '',
+      serviceName: 'Custom Item',
+      description: '',
+      quantity: 1,
+      unitPrice: 0,
+      lineTotal: 0,
+      isSubscription: false,
+      category: '',
+    }]);
+  };
+
+  const saveEditMutation = useMutation({
+    mutationFn: async () => {
+      const items = editItems.map(({ _key: _k, ...rest }) => rest);
+      const onetimeTotal = items.filter(i => !i.isSubscription).reduce((s, i) => s + i.lineTotal, 0);
+      const monthlyTotal = items.filter(i => i.isSubscription).reduce((s, i) => s + (i.monthlyAmount ?? i.lineTotal), 0);
+      const total = onetimeTotal + monthlyTotal;
+      const res = await apiRequest('PATCH', `/quotes/${quote.id}`, {
+        customerName: editName.trim(),
+        customerAddress: editAddress.trim() || null,
+        customerPhone: editPhone.trim() || null,
+        customerEmail: editEmail.trim() || null,
+        businessName: editBusiness.trim() || null,
+        quoteType: editQuoteType,
+        lineItems: items,
+        subtotal: total,
+        total,
+        notes: editNotes.trim() || null,
+      });
+      return res.json() as Promise<Quote>;
+    },
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ['/quotes'] });
+      onUpdate(updated);
+      setIsEditing(false);
+      toast({ title: 'Quote updated' });
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  });
 
   const copyEsignLink = async () => {
     if (!quote.acceptToken) {
@@ -449,60 +544,100 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <Button variant="ghost" size="sm" onClick={onBack} className="min-h-[44px]">
-          <ChevronLeft className="h-4 w-4 mr-1" />Back
+        <Button variant="ghost" size="sm" onClick={isEditing ? cancelEdit : onBack} className="min-h-[44px]">
+          <ChevronLeft className="h-4 w-4 mr-1" />{isEditing ? 'Cancel' : 'Back'}
         </Button>
         <div className="flex gap-2 flex-wrap">
-          <Button variant="outline" size="sm" onClick={() => setShowExportDialog(true)} className="min-h-[44px]" disabled={isPdfLoading}>
-            {isPdfLoading ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Generating…</> : <><Download className="h-4 w-4 mr-1" />PDF</>}
-          </Button>
-          {quote.status !== "accepted" && quote.status !== "declined" && (
-            <Button variant="outline" size="sm" onClick={copyEsignLink} className="min-h-[44px]">
-              <Link2 className="h-4 w-4 mr-1" />E-Sign Link
-            </Button>
+          {isEditing ? (
+            <>
+              <Button variant="outline" size="sm" onClick={cancelEdit} className="min-h-[44px]">
+                <X className="h-4 w-4 mr-1" />Discard
+              </Button>
+              <Button size="sm" onClick={() => saveEditMutation.mutate()} disabled={saveEditMutation.isPending || !editName.trim()} className="min-h-[44px]">
+                {saveEditMutation.isPending ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Saving…</> : 'Save Changes'}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" size="sm" onClick={startEdit} className="min-h-[44px]">
+                <Pencil className="h-4 w-4 mr-1" />Edit
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setShowExportDialog(true)} className="min-h-[44px]" disabled={isPdfLoading}>
+                {isPdfLoading ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Generating…</> : <><Download className="h-4 w-4 mr-1" />PDF</>}
+              </Button>
+              {quote.status !== "accepted" && quote.status !== "declined" && (
+                <Button variant="outline" size="sm" onClick={copyEsignLink} className="min-h-[44px]">
+                  <Link2 className="h-4 w-4 mr-1" />E-Sign Link
+                </Button>
+              )}
+              {quote.signedAt && (
+                <span className="flex items-center gap-1 text-sm font-medium text-green-600 dark:text-green-400 px-2">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Signed {new Date(quote.signedAt).toLocaleDateString()}
+                </span>
+              )}
+              {quote.status === "accepted" && (
+                <Button variant="default" size="sm" onClick={() => activateSubMutation.mutate()} disabled={activateSubMutation.isPending} className="min-h-[44px] bg-green-700 hover:bg-green-800">
+                  <CalendarCheck className="h-4 w-4 mr-1" />
+                  {activateSubMutation.isPending ? "Activating..." : "Activate Sub"}
+                </Button>
+              )}
+              {quote.status === "accepted" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-h-[44px]"
+                  disabled={convertToJobMutation.isPending}
+                  onClick={() => convertToJobMutation.mutate()}
+                >
+                  <Briefcase className="h-4 w-4 mr-1" />
+                  {convertToJobMutation.isPending ? "Creating…" : "Convert to Job"}
+                </Button>
+              )}
+              <Select value={quote.status} onValueChange={val => updateStatusMutation.mutate(val)}>
+                <SelectTrigger className="min-h-[44px] w-[120px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="sent">Sent</SelectItem>
+                  <SelectItem value="accepted">Accepted</SelectItem>
+                  <SelectItem value="declined">Declined</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button variant="outline" size="sm" onClick={() => trashMutation.mutate()} className="min-h-[44px] text-destructive border-destructive/30 hover:bg-destructive/10">
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </>
           )}
-          {quote.signedAt && (
-            <span className="flex items-center gap-1 text-sm font-medium text-green-600 dark:text-green-400 px-2">
-              <CheckCircle2 className="h-4 w-4" />
-              Signed {new Date(quote.signedAt).toLocaleDateString()}
-            </span>
-          )}
-          {quote.status === "accepted" && (
-            <Button variant="default" size="sm" onClick={() => activateSubMutation.mutate()} disabled={activateSubMutation.isPending} className="min-h-[44px] bg-green-700 hover:bg-green-800">
-              <CalendarCheck className="h-4 w-4 mr-1" />
-              {activateSubMutation.isPending ? "Activating..." : "Activate Sub"}
-            </Button>
-          )}
-          {quote.status === "accepted" && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="min-h-[44px]"
-              disabled={convertToJobMutation.isPending}
-              onClick={() => convertToJobMutation.mutate()}
-            >
-              <Briefcase className="h-4 w-4 mr-1" />
-              {convertToJobMutation.isPending ? "Creating…" : "Convert to Job"}
-            </Button>
-          )}
-          <Select value={quote.status} onValueChange={val => updateStatusMutation.mutate(val)}>
-            <SelectTrigger className="min-h-[44px] w-[120px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="draft">Draft</SelectItem>
-              <SelectItem value="sent">Sent</SelectItem>
-              <SelectItem value="accepted">Accepted</SelectItem>
-              <SelectItem value="declined">Declined</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button variant="outline" size="sm" onClick={() => trashMutation.mutate()} className="min-h-[44px] text-destructive border-destructive/30 hover:bg-destructive/10">
-            <Trash2 className="h-4 w-4" />
-          </Button>
         </div>
       </div>
 
       <PdfExportDialog open={showExportDialog} onClose={() => setShowExportDialog(false)} onExport={handleDownloadPdf} />
 
+      {/* Edit mode: quote type selector above the card */}
+      {isEditing && (
+        <div className="flex items-center gap-3 px-1">
+          <Label className="text-xs text-muted-foreground whitespace-nowrap">Quote Type</Label>
+          <Select value={editQuoteType} onValueChange={setEditQuoteType}>
+            <SelectTrigger className="min-h-[36px] text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="residential_onetime">Residential One-Time</SelectItem>
+              <SelectItem value="commercial_onetime">Commercial One-Time</SelectItem>
+              <SelectItem value="residential_tcep">Residential TCEP/TCP</SelectItem>
+              <SelectItem value="commercial_tcep">Commercial TCEP/TCP</SelectItem>
+              <SelectItem value="residential_autopilot">Residential Autopilot</SelectItem>
+              <SelectItem value="commercial_autopilot">Commercial Autopilot</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       <div className="bg-white text-black p-6 rounded-lg border dark:bg-white dark:text-black">
+        {isEditing && (
+          <div className="mb-4 rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-700 flex items-center gap-1.5">
+            <Pencil className="h-3.5 w-3.5 shrink-0" />
+            Editing quote — changes save when you tap <strong>Save Changes</strong> above.
+          </div>
+        )}
         <div className="flex items-start justify-between mb-6">
           <div>
             <h2 className="text-xl font-bold">{settings?.companyName ?? "Knox Exterior Care Co."}</h2>
@@ -518,21 +653,58 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
           </div>
         </div>
         <hr className="mb-4" />
-        {planBadgeLabel && (
+        {planBadgeLabel && !isEditing && (
           <div className="mb-3">
             <Badge variant="outline" className="text-xs text-green-700 border-green-300">{planBadgeLabel}</Badge>
           </div>
         )}
-        <div className="flex justify-between mb-4">
-          <div>
-            <p className="text-xs text-gray-500 uppercase font-semibold">Estimate For</p>
-            <p className="font-semibold">{quote.customerName}</p>
-            {quote.businessName && <p className="text-sm text-gray-600">{quote.businessName}</p>}
-            {quote.customerAddress && <p className="text-sm text-gray-600">{quote.customerAddress}</p>}
-            {quote.customerPhone && <p className="text-sm text-gray-600">{quote.customerPhone}</p>}
-            {quote.customerEmail && <p className="text-sm text-gray-600">{quote.customerEmail}</p>}
+        <div className="flex justify-between mb-4 gap-4">
+          <div className="flex-1">
+            <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Estimate For</p>
+            {isEditing ? (
+              <div className="space-y-1.5">
+                <input
+                  className="w-full border border-gray-300 rounded px-2 py-1 text-sm font-semibold bg-white text-black"
+                  placeholder="Customer name *"
+                  value={editName}
+                  onChange={e => setEditName(e.target.value)}
+                />
+                <input
+                  className="w-full border border-gray-300 rounded px-2 py-1 text-sm bg-white text-black"
+                  placeholder="Business name (optional)"
+                  value={editBusiness}
+                  onChange={e => setEditBusiness(e.target.value)}
+                />
+                <input
+                  className="w-full border border-gray-300 rounded px-2 py-1 text-sm bg-white text-black"
+                  placeholder="Address"
+                  value={editAddress}
+                  onChange={e => setEditAddress(e.target.value)}
+                />
+                <input
+                  className="w-full border border-gray-300 rounded px-2 py-1 text-sm bg-white text-black"
+                  placeholder="Phone"
+                  value={editPhone}
+                  onChange={e => setEditPhone(e.target.value)}
+                />
+                <input
+                  className="w-full border border-gray-300 rounded px-2 py-1 text-sm bg-white text-black"
+                  placeholder="Email"
+                  value={editEmail}
+                  onChange={e => setEditEmail(e.target.value)}
+                />
+              </div>
+            ) : (
+              <>
+                <p className="font-semibold">{quote.customerName}</p>
+                {quote.businessName && <p className="text-sm text-gray-600">{quote.businessName}</p>}
+                {quote.customerAddress && <p className="text-sm text-gray-600">{quote.customerAddress}</p>}
+                {quote.customerPhone && <p className="text-sm text-gray-600">{quote.customerPhone}</p>}
+                {quote.customerEmail && <p className="text-sm text-gray-600">{quote.customerEmail}</p>}
+              </>
+            )}
           </div>
-          <div className="text-right">
+          <div className="text-right shrink-0">
             <p className="text-xs text-gray-500 uppercase font-semibold">Estimate #</p>
             <p className="font-mono text-sm">{quote.id.slice(0, 8).toUpperCase()}</p>
             <p className="text-xs text-gray-500 mt-1">{new Date(quote.createdAt).toLocaleDateString()}</p>
@@ -540,56 +712,139 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
           </div>
         </div>
 
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="text-black">Service</TableHead>
-              <TableHead className="text-black">Description</TableHead>
-              <TableHead className="text-right text-black">Qty</TableHead>
-              <TableHead className="text-right text-black">Unit Price</TableHead>
-              <TableHead className="text-right text-black">Frequency</TableHead>
-              <TableHead className="text-right text-black">Total</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {lineItems.map((item, idx) => (
-              <TableRow key={idx}>
-                <TableCell className="font-medium">{item.serviceName}</TableCell>
-                <TableCell className="text-sm text-gray-600">{item.description ?? ""}</TableCell>
-                <TableCell className="text-right">{item.quantity}</TableCell>
-                <TableCell className="text-right">{fmt(item.unitPrice)}</TableCell>
-                <TableCell className="text-right">{item.frequency ?? "One-Time"}</TableCell>
-                <TableCell className="text-right font-semibold">{fmt(item.lineTotal)}{item.isSubscription ? "/mo" : ""}</TableCell>
-              </TableRow>
+        {/* Line items — editable when isEditing */}
+        {isEditing ? (
+          <div className="space-y-2">
+            <p className="text-xs text-gray-500 uppercase font-semibold">Line Items</p>
+            {editItems.map(item => (
+              <div key={item._key} className="grid grid-cols-[1fr_60px_80px_80px_32px] gap-1.5 items-center border-b pb-2">
+                <div>
+                  <input
+                    className="w-full border border-gray-300 rounded px-2 py-1 text-xs font-medium bg-white text-black"
+                    value={item.serviceName}
+                    onChange={e => updateItem(item._key, 'serviceName', e.target.value)}
+                    placeholder="Service name"
+                  />
+                  <input
+                    className="w-full border border-gray-200 rounded px-2 py-0.5 text-xs text-gray-500 bg-white mt-0.5"
+                    value={item.description ?? ''}
+                    onChange={e => updateItem(item._key, 'description', e.target.value)}
+                    placeholder="Description (optional)"
+                  />
+                </div>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  className="border border-gray-300 rounded px-2 py-1 text-xs text-right bg-white text-black w-full"
+                  value={item.quantity}
+                  onChange={e => updateItem(item._key, 'quantity', e.target.value)}
+                  title="Quantity"
+                />
+                <div className="flex items-center">
+                  <span className="text-xs text-gray-400 mr-0.5">$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="border border-gray-300 rounded px-1 py-1 text-xs text-right bg-white text-black w-full"
+                    value={item.unitPrice}
+                    onChange={e => updateItem(item._key, 'unitPrice', e.target.value)}
+                    title="Unit price"
+                  />
+                </div>
+                <div className="text-xs font-semibold text-right text-gray-700">
+                  {fmt(item.lineTotal)}{item.isSubscription ? '/mo' : ''}
+                </div>
+                <button
+                  onClick={() => removeItem(item._key)}
+                  className="p-1 text-red-400 hover:text-red-600 rounded"
+                  title="Remove line"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
             ))}
-          </TableBody>
-        </Table>
-
-        <div className="mt-4 space-y-1 text-right">
-          {onetimeSubtotal > 0 && (
-            <div className="flex justify-end gap-4">
-              <span className="text-sm text-gray-600">One-Time Subtotal:</span>
-              <span className="font-semibold w-24">{fmt(onetimeSubtotal)}</span>
-            </div>
-          )}
-          {monthlySubtotal > 0 && (
-            <div className="flex justify-end gap-4">
-              <span className="text-sm text-gray-600">Monthly Subscription:</span>
-              <span className="font-semibold w-24">{fmt(monthlySubtotal)}/mo</span>
-            </div>
-          )}
-          <div className="flex justify-end gap-4 border-t pt-2 mt-2">
-            <span className="font-semibold">Total:</span>
-            <span className="text-lg font-bold w-24">{fmt(quote.total)}</span>
+            <button
+              onClick={addItem}
+              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 mt-1"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add line item
+            </button>
           </div>
-        </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-black">Service</TableHead>
+                <TableHead className="text-black">Description</TableHead>
+                <TableHead className="text-right text-black">Qty</TableHead>
+                <TableHead className="text-right text-black">Unit Price</TableHead>
+                <TableHead className="text-right text-black">Frequency</TableHead>
+                <TableHead className="text-right text-black">Total</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {lineItems.map((item, idx) => (
+                <TableRow key={idx}>
+                  <TableCell className="font-medium">{item.serviceName}</TableCell>
+                  <TableCell className="text-sm text-gray-600">{item.description ?? ""}</TableCell>
+                  <TableCell className="text-right">{item.quantity}</TableCell>
+                  <TableCell className="text-right">{fmt(item.unitPrice)}</TableCell>
+                  <TableCell className="text-right">{item.frequency ?? "One-Time"}</TableCell>
+                  <TableCell className="text-right font-semibold">{fmt(item.lineTotal)}{item.isSubscription ? "/mo" : ""}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
 
-        {quote.notes && (
+        {/* Totals */}
+        {(() => {
+          const displayItems = isEditing ? editItems : lineItems;
+          const dispOnetime = displayItems.filter(i => !i.isSubscription).reduce((s, i) => s + i.lineTotal, 0);
+          const dispMonthly = displayItems.filter(i => i.isSubscription).reduce((s, i) => s + (i.monthlyAmount ?? i.lineTotal), 0);
+          const dispTotal = dispOnetime + dispMonthly;
+          return (
+            <div className="mt-4 space-y-1 text-right">
+              {dispOnetime > 0 && (
+                <div className="flex justify-end gap-4">
+                  <span className="text-sm text-gray-600">One-Time Subtotal:</span>
+                  <span className="font-semibold w-24">{fmt(dispOnetime)}</span>
+                </div>
+              )}
+              {dispMonthly > 0 && (
+                <div className="flex justify-end gap-4">
+                  <span className="text-sm text-gray-600">Monthly Subscription:</span>
+                  <span className="font-semibold w-24">{fmt(dispMonthly)}/mo</span>
+                </div>
+              )}
+              <div className="flex justify-end gap-4 border-t pt-2 mt-2">
+                <span className="font-semibold">Total:</span>
+                <span className="text-lg font-bold w-24">{fmt(dispTotal)}</span>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Notes */}
+        {isEditing ? (
+          <div className="mt-6">
+            <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Notes</p>
+            <textarea
+              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm bg-white text-black resize-none"
+              rows={3}
+              placeholder="Add notes…"
+              value={editNotes}
+              onChange={e => setEditNotes(e.target.value)}
+            />
+          </div>
+        ) : quote.notes ? (
           <div className="mt-6">
             <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Notes</p>
             <p className="text-sm text-gray-700 whitespace-pre-wrap">{quote.notes}</p>
           </div>
-        )}
+        ) : null}
         {quote.signedAt ? (
           <div className="mt-8 pt-4 border-t border-gray-200">
             <div className="flex items-start gap-3 rounded-lg bg-green-50 border border-green-200 p-4">
@@ -754,7 +1009,11 @@ export default function Quotes() {
   if (viewingQuote) {
     return (
       <div className="p-4">
-        <QuoteDetail quote={viewingQuote} onBack={() => setViewingQuote(null)} />
+        <QuoteDetail
+          quote={viewingQuote}
+          onBack={() => setViewingQuote(null)}
+          onUpdate={(updated) => setViewingQuote(updated)}
+        />
       </div>
     );
   }
