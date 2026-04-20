@@ -146,7 +146,7 @@ function PdfExportDialog({
 }
 
 function QuoteCreateForm({ onDone }: { onDone: () => void }) {
-  const { cartItems, bundleDiscount, clearCart } = useQuoteContext();
+  const { cartItems, clearCart } = useQuoteContext();
   const { toast } = useToast();
   const [customerName, setCustomerName] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
@@ -160,7 +160,7 @@ function QuoteCreateForm({ onDone }: { onDone: () => void }) {
   const subItems = cartItems.filter(i => i.isSubscription);
   const onetimeTotal = onetimeItems.reduce((s, i) => s + i.lineTotal, 0);
   const monthlySubtotal = subItems.reduce((s, i) => s + (i.monthlyAmount ?? i.lineTotal), 0);
-  const total = onetimeTotal + monthlySubtotal - bundleDiscount;
+  const total = onetimeTotal + monthlySubtotal;
 
   const createMutation = useMutation({
     mutationFn: async (data: Record<string, unknown>) => {
@@ -187,8 +187,7 @@ function QuoteCreateForm({ onDone }: { onDone: () => void }) {
       businessName: businessName.trim() || null,
       quoteType,
       lineItems: cartItems,
-      subtotal: onetimeTotal + monthlySubtotal,
-      discount: bundleDiscount > 0 ? bundleDiscount : undefined,
+      subtotal: total,
       total,
       notes: notes.trim() || null,
     });
@@ -245,12 +244,6 @@ function QuoteCreateForm({ onDone }: { onDone: () => void }) {
               <span className="shrink-0 font-medium">{fmt(item.lineTotal)}{item.isSubscription ? "/mo" : ""}</span>
             </div>
           ))}
-          {bundleDiscount > 0 && (
-            <div className="flex justify-between text-xs text-green-700 dark:text-green-400">
-              <span>Bundle Discount</span>
-              <span>-{fmt(bundleDiscount)}/mo</span>
-            </div>
-          )}
           <div className="border-t pt-2 mt-2 flex justify-between text-sm font-semibold">
             <span>Total</span><span>{fmt(total)}{subItems.length > 0 ? "/mo" : ""}</span>
           </div>
@@ -362,8 +355,6 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
   const subItems = lineItems.filter(i => i.isSubscription);
   const onetimeSubtotal = onetimeItems.reduce((s, i) => s + i.lineTotal, 0);
   const monthlySubtotal = subItems.reduce((s, i) => s + (i.monthlyAmount ?? i.lineTotal), 0);
-  const bundleDiscount = quote.discount ?? 0;
-
   const [isPdfLoading, setIsPdfLoading] = useState(false);
 
   const handleDownloadPdf = async (selectedManualIds: string[]) => {
@@ -521,18 +512,6 @@ function QuoteDetail({ quote, onBack }: { quote: Quote; onBack: () => void }) {
               <span className="text-sm text-gray-600">One-Time Subtotal:</span>
               <span className="font-semibold w-24">{fmt(onetimeSubtotal)}</span>
             </div>
-          )}
-          {monthlySubtotal > 0 && bundleDiscount > 0 && (
-            <>
-              <div className="flex justify-end gap-4">
-                <span className="text-sm text-gray-600">Monthly Subtotal:</span>
-                <span className="font-semibold w-24 line-through text-gray-400">{fmt(monthlySubtotal + bundleDiscount)}/mo</span>
-              </div>
-              <div className="flex justify-end gap-4">
-                <span className="text-sm text-green-700">Bundle Discount:</span>
-                <span className="font-semibold w-24 text-green-700">-{fmt(bundleDiscount)}/mo</span>
-              </div>
-            </>
           )}
           {monthlySubtotal > 0 && (
             <div className="flex justify-end gap-4">

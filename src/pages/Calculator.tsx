@@ -2,8 +2,6 @@ import { useState, useMemo, useCallback, useRef } from 'react'
 import {
   calculateSubscriptionPrice,
   calculatePerSqftPrice,
-  getBundleDiscountPct,
-  applyBundleDiscount,
   rtcepLite,
   ctcepLite,
   type ServiceDefinition,
@@ -41,7 +39,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
-  ShoppingCart, Trash2, Tag, TrendingUp, Send, ChevronRight, Plus,
+  ShoppingCart, Trash2, Send, ChevronRight, Plus,
   Droplets, Leaf, Sparkles, Home, Building2, Layers,
 } from 'lucide-react'
 // Leaf, Sparkles used in categoryIcons fallback; Droplets in categoryIcons map
@@ -130,34 +128,6 @@ function QtyInput({
       placeholder={placeholder}
       className="min-h-[44px] text-sm"
     />
-  )
-}
-
-/* ── Bundle discount callout ─────────────────────────────────────────── */
-function BundleCallout({ recurringCount }: { recurringCount: number }) {
-  const pct = getBundleDiscountPct(recurringCount)
-  if (recurringCount === 0) return null
-  if (pct === 0) {
-    return (
-      <div className="flex items-center gap-2 rounded-md bg-muted/50 border px-3 py-2 text-xs text-muted-foreground">
-        <Tag className="h-3.5 w-3.5 shrink-0" />
-        <span>Bundle Discount: None yet — add one more recurring service to unlock <span className="font-semibold text-foreground">10% off</span></span>
-      </div>
-    )
-  }
-  if (pct === 10) {
-    return (
-      <div className="flex items-center gap-2 rounded-md bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 px-3 py-2 text-xs">
-        <TrendingUp className="h-3.5 w-3.5 shrink-0 text-green-600" />
-        <span className="text-green-700 dark:text-green-400"><span className="font-semibold">10% bundle discount applied</span> — add one more service to unlock <span className="font-semibold">15%</span></span>
-      </div>
-    )
-  }
-  return (
-    <div className="flex items-center gap-2 rounded-md bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 px-3 py-2 text-xs">
-      <TrendingUp className="h-3.5 w-3.5 shrink-0 text-green-600" />
-      <span className="text-green-700 dark:text-green-400"><span className="font-semibold">15% bundle discount applied</span> — maximum savings unlocked</span>
-    </div>
   )
 }
 
@@ -490,12 +460,10 @@ function SubPlanBuilder({
   customerType,
   planType,
   onAddToCart,
-  onSetDiscount,
 }: {
   customerType: 'residential' | 'commercial'
   planType: 'tcep' | 'autopilot'
   onAddToCart: (items: LineItem[]) => void
-  onSetDiscount?: (v: number) => void
 }) {
   const { getServicesByType } = useServices()
   const litePlan = customerType === 'residential' ? rtcepLite : ctcepLite
@@ -531,11 +499,9 @@ function SubPlanBuilder({
     setLines(prev => prev.filter((_, i) => i !== idx))
   }, [])
 
-  const recurringCount = lines.filter(l => l.frequency.frequency !== 'onetime').length
-
   const totals = useMemo(() => {
-    let preDiscountMonthly = 0
-    let preDiscountAnnual = 0
+    let monthlyTotal = 0
+    let annualTotal = 0
     const lineDetails = lines.map(line => {
       const tier = line.service.tiers[line.tierIndex]
       const isUnit = isUnitPriced(line.service.pricingModel)
@@ -555,27 +521,17 @@ function SubPlanBuilder({
         ? effectiveMonthly * (rawAnnual / rawMonthly)
         : effectiveMonthly > 0 ? effectiveMonthly * 12 : 0
 
-      preDiscountMonthly += effectiveMonthly
-      preDiscountAnnual += effectiveAnnual
+      monthlyTotal += effectiveMonthly
+      annualTotal += effectiveAnnual
       return { rawTotal, sub, effectiveMonthly }
     })
 
-    const { discountPct, discountAmount, discountedTotal } = isAutopilot
-      ? { discountPct: 0, discountAmount: 0, discountedTotal: preDiscountMonthly }
-      : applyBundleDiscount(preDiscountMonthly, recurringCount)
-
-    const annualDiscountFactor = 1 - discountPct / 100
-    const annualTotal = Math.round(preDiscountAnnual * annualDiscountFactor * 100) / 100
-
     return {
       lineDetails,
-      preDiscountMonthly,
-      discountPct,
-      discountAmount,
-      monthlyTotal: discountedTotal,
-      annualTotal,
+      monthlyTotal,
+      annualTotal: Math.round(annualTotal * 100) / 100,
     }
-  }, [lines, isAutopilot, recurringCount])
+  }, [lines, isAutopilot])
 
   const handleAddLiteToCart = () => {
     onAddToCart([{
@@ -622,7 +578,6 @@ function SubPlanBuilder({
       }
     })
     onAddToCart(items)
-    onSetDiscount?.(totals.discountAmount)
   }
 
   return (
@@ -699,31 +654,9 @@ function SubPlanBuilder({
           />
         ))}
 
-        {lines.length > 0 && !isAutopilot && (
-          <BundleCallout recurringCount={recurringCount} />
-        )}
-
         {lines.length > 0 && (
           <Card className="border-primary/30">
             <CardContent className="pt-4 space-y-2">
-              {!isAutopilot && totals.discountPct > 0 && (
-                <>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-muted-foreground">Subtotal</span>
-                    <span className="text-sm line-through text-muted-foreground">
-                      {fmt(totals.preDiscountMonthly)}/mo
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-green-700 dark:text-green-400">
-                      Bundle Discount ({totals.discountPct}%)
-                    </span>
-                    <span className="text-sm font-medium text-green-700 dark:text-green-400">
-                      -{fmt(totals.discountAmount)}/mo
-                    </span>
-                  </div>
-                </>
-              )}
               <div className="flex justify-between items-center">
                 <span className="text-sm font-medium">Monthly Total</span>
                 <span className="text-lg font-bold text-primary">{fmt(totals.monthlyTotal)}/mo</span>
@@ -893,7 +826,7 @@ type ServiceMode = 'onetime' | 'subscription'
 type PlanType = 'tcep' | 'autopilot'
 
 export default function Calculator() {
-  const { cartItems, addToCart, removeFromCart, clearCart, setIsCreatingQuote, setBundleDiscount } = useQuoteContext()
+  const { cartItems, addToCart, removeFromCart, clearCart, setIsCreatingQuote } = useQuoteContext()
   const [, navigate] = useLocation()
   const { isLoading, getServicesByType } = useServices()
 
@@ -1033,7 +966,6 @@ export default function Calculator() {
             customerType={customerType}
             planType={planType}
             onAddToCart={addToCart}
-            onSetDiscount={setBundleDiscount}
           />
         )}
       </div>
