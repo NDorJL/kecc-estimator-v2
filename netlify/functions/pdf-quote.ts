@@ -45,8 +45,6 @@ export const handler: Handler = async (event) => {
     const subItems = lineItems.filter(i => i.isSubscription)
     const onetimeSubtotal = onetimeItems.reduce((s, i) => s + i.lineTotal, 0)
     const monthlySubtotal = subItems.reduce((s, i) => s + (i.monthlyAmount ?? i.lineTotal), 0)
-    const bundleDiscount = quote.discount ?? 0
-
     const qt = quote.quoteType ?? ''
     let planLabel = ''
     if (qt.includes('autopilot')) planLabel = 'One-Service Autopilot Plan'
@@ -133,15 +131,6 @@ export const handler: Handler = async (event) => {
       doc.font('Helvetica-Bold').fillColor('#000000').text(fmt(onetimeSubtotal), 485, y, { width: 75, align: 'right' })
       y += 16
     }
-    if (monthlySubtotal > 0 && bundleDiscount > 0) {
-      const preDiscountMonthly = monthlySubtotal + bundleDiscount
-      doc.font('Helvetica').fillColor('#555555').text('Monthly Subtotal:', 350, y, { width: 130, align: 'right' })
-      doc.font('Helvetica-Bold').fillColor('#000000').text(fmt(preDiscountMonthly) + '/mo', 485, y, { width: 75, align: 'right' })
-      y += 14
-      doc.font('Helvetica').fillColor('#4a6741').text('Bundle Discount:', 350, y, { width: 130, align: 'right' })
-      doc.font('Helvetica-Bold').fillColor('#4a6741').text('-' + fmt(bundleDiscount) + '/mo', 485, y, { width: 75, align: 'right' })
-      y += 16
-    }
     if (monthlySubtotal > 0) {
       doc.font('Helvetica').fillColor('#555555').text('Monthly Subscription:', 350, y, { width: 130, align: 'right' })
       doc.font('Helvetica-Bold').fillColor('#000000').text(fmt(monthlySubtotal) + '/mo', 485, y, { width: 75, align: 'right' })
@@ -169,6 +158,17 @@ export const handler: Handler = async (event) => {
     doc.fontSize(8).font('Helvetica').fillColor('#888888')
     doc.text('Customer Signature', 50, y)
     doc.text('Date', 310, y)
+
+    // E-sign URL so customer can sign digitally from the PDF
+    if (quoteRow.accept_token) {
+      const host = event.headers?.host ?? ''
+      const origin = host.includes('localhost') ? `http://${host}` : `https://${host}`
+      const esignUrl = `${origin}/.netlify/functions/esign?token=${quoteRow.accept_token}`
+      y += 18
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#333333').text('Sign digitally:', 50, y)
+      doc.fontSize(8).font('Helvetica').fillColor('#2563eb').text(esignUrl, 50, y + 11, { width: pageW, link: esignUrl })
+      y += 10
+    }
 
     if (settings.quoteFooter) {
       y += 30

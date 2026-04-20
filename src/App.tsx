@@ -8,13 +8,10 @@ import { ThemeProvider, useTheme } from '@/components/theme-provider'
 import { QuoteProvider } from '@/lib/quote-context'
 import { ServicesProvider } from '@/lib/services-context'
 import { Button } from '@/components/ui/button'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import {
-  LayoutDashboard, Users, Calendar, Briefcase, MoreHorizontal,
-  Calculator as CalcIcon, FileText, CalendarCheck, FileStack,
-  BookOpen, BarChart2, Settings, MessageSquare, Sun, Moon, TrendingUp,
+  LayoutDashboard, Calendar, Calculator as CalcIcon, FileText,
+  Settings, Sun, Moon,
 } from 'lucide-react'
-import { useState } from 'react'
 import Dashboard from '@/pages/Dashboard'
 import Contacts from '@/pages/Contacts'
 import ContactDetail from '@/pages/ContactDetail'
@@ -43,89 +40,34 @@ function AppHeader() {
 
 const primaryTabs = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/contacts', label: 'Contacts', icon: Users },
-  { path: '/calendar', label: 'Calendar', icon: Calendar },
-  { path: '/jobs', label: 'Jobs', icon: Briefcase },
-] as const
-
-const moreItems = [
   { path: '/calculator', label: 'Calculator', icon: CalcIcon },
+  { path: '/calendar', label: 'Calendar', icon: Calendar },
   { path: '/quotes', label: 'Quotes', icon: FileText },
-  { path: '/subscriptions', label: 'Subscriptions', icon: CalendarCheck },
-  { path: '/leads', label: 'Leads', icon: FileStack },
-  { path: '/pricebook', label: 'Price Book', icon: BookOpen },
-  { path: '/reports', label: 'Reports', icon: BarChart2 },
   { path: '/settings', label: 'Settings', icon: Settings },
-  { path: '/sms', label: 'Send SMS', icon: MessageSquare },
-  { path: '/finance', label: 'Finance', icon: TrendingUp },
 ] as const
-
-function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [, navigate] = useLocation()
-  return (
-    <Sheet open={open} onOpenChange={onClose}>
-      <SheetContent side="bottom" className="rounded-t-2xl pb-safe">
-        <SheetHeader className="mb-4">
-          <SheetTitle className="text-left">More</SheetTitle>
-        </SheetHeader>
-        <div className="grid grid-cols-4 gap-3 pb-4">
-          {moreItems.map((item) => {
-            const Icon = item.icon
-            return (
-              <button
-                key={item.path}
-                onClick={() => { navigate(item.path); onClose() }}
-                className="flex flex-col items-center gap-1.5 rounded-xl border bg-muted/40 py-3 text-xs font-medium text-muted-foreground transition-colors active:bg-muted"
-              >
-                <Icon className="h-5 w-5 text-foreground" />
-                <span className="leading-tight text-center">{item.label}</span>
-              </button>
-            )
-          })}
-        </div>
-      </SheetContent>
-    </Sheet>
-  )
-}
 
 function BottomTabBar() {
   const [location] = useLocation()
-  const [moreOpen, setMoreOpen] = useState(false)
-
-  // Consider "more" active when on a more-sheet page
-  const moreActive = moreItems.some(i => location === i.path)
 
   return (
-    <>
-      <nav className="sticky bottom-0 z-50 flex items-center justify-around border-t bg-card" style={{ minHeight: 64, paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        {primaryTabs.map((tab) => {
-          const isActive = location === tab.path
-          const Icon = tab.icon
-          return (
-            <Link
-              key={tab.path}
-              href={tab.path}
-              className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-xs font-medium transition-colors min-h-[56px] ${
-                isActive ? 'text-primary' : 'text-muted-foreground'
-              }`}
-            >
-              <Icon className="h-6 w-6" />
-              <span>{tab.label}</span>
-            </Link>
-          )
-        })}
-        <button
-          onClick={() => setMoreOpen(true)}
-          className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-xs font-medium transition-colors min-h-[56px] ${
-            moreActive ? 'text-primary' : 'text-muted-foreground'
-          }`}
-        >
-          <MoreHorizontal className="h-6 w-6" />
-          <span>More</span>
-        </button>
-      </nav>
-      <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} />
-    </>
+    <nav className="sticky bottom-0 z-50 flex items-center justify-around border-t bg-card" style={{ minHeight: 64, paddingBottom: 'env(safe-area-inset-bottom)' }}>
+      {primaryTabs.map((tab) => {
+        const isActive = tab.path === '/' ? location === '/' : location.startsWith(tab.path)
+        const Icon = tab.icon
+        return (
+          <Link
+            key={tab.path}
+            href={tab.path}
+            className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-xs font-medium transition-colors min-h-[56px] ${
+              isActive ? 'text-primary' : 'text-muted-foreground'
+            }`}
+          >
+            <Icon className="h-6 w-6" />
+            <span>{tab.label}</span>
+          </Link>
+        )
+      })}
+    </nav>
   )
 }
 
