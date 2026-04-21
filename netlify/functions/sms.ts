@@ -13,34 +13,33 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 }
 
-/** Send SMS via Quo API
+/** Send SMS via OpenPhone API
  *
- * Set the QUO_BASE_URL Netlify env var to your Quo API base URL.
- * The function posts to {QUO_BASE_URL}/messages with:
- *   { from, to, body }
- * and Authorization: Bearer {apiKey}
+ * OpenPhone auth: the API key goes directly in the Authorization header
+ * with NO "Bearer" prefix.
+ * Message body uses "content" (not "body"), and "to" is an array.
  *
- * If your Quo account uses a different field name or endpoint path,
- * update QUO_BASE_URL and the JSON body below accordingly.
+ * Set QUO_BASE_URL = https://api.openphone.com/v1 in Netlify env vars.
  */
-async function sendQuoSms(apiKey: string, fromNumber: string, toNumber: string, body: string): Promise<void> {
-  const baseUrl = (process.env.QUO_BASE_URL ?? '').replace(/\/$/, '')
-  if (!baseUrl) {
-    throw new Error('QUO_BASE_URL environment variable is not set. Add it to Netlify → Site configuration → Environment variables.')
-  }
-
+async function sendQuoSms(apiKey: string, fromNumber: string, toNumber: string, content: string): Promise<void> {
+  const baseUrl = (process.env.QUO_BASE_URL ?? 'https://api.openphone.com/v1').replace(/\/$/, '')
   const url = `${baseUrl}/messages`
+
   const res = await fetch(url, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${apiKey}`,
+      'Authorization': apiKey,           // OpenPhone: raw key, no "Bearer"
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ from: fromNumber, to: toNumber, body }),
+    body: JSON.stringify({
+      from:    fromNumber,
+      to:      [toNumber],               // OpenPhone expects an array
+      content,                           // OpenPhone uses "content" not "body"
+    }),
   })
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)
-    throw new Error(`Quo API error ${res.status} at ${url}: ${text}`)
+    throw new Error(`OpenPhone API error ${res.status} at ${url}: ${text}`)
   }
 }
 
