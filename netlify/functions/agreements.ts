@@ -61,27 +61,34 @@ export const handler: Handler = async (event) => {
     }
 
     // ── POST ?action=generate-for-subscription ───────────────────────────────
-    // Creates a ready-to-sign agreement from a subscription + contact.
+    // Creates a ready-to-sign agreement from a subscription (+ optional contact).
     // No PDF is generated — the agreement is rendered live as HTML by esign.ts.
     if (method === 'POST' && !id && action === 'generate-for-subscription') {
       const body = JSON.parse(event.body ?? '{}')
       const { subscriptionId, contactId, quoteType } = body
 
-      if (!subscriptionId || !contactId) {
-        return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'subscriptionId and contactId required' }) }
+      if (!subscriptionId) {
+        return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'subscriptionId required' }) }
       }
 
-      // Fetch subscription + contact in parallel
-      const [subRes, contactRes] = await Promise.all([
-        supabase.from('subscriptions').select('*').eq('id', subscriptionId).single(),
-        supabase.from('contacts').select('*').eq('id', contactId).single(),
-      ])
-
-      if (!subRes.data)     return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Subscription not found' }) }
-      if (!contactRes.data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Contact not found' }) }
-
+      // Always fetch the subscription; contact is optional (may not be linked yet)
+      const subRes = await supabase.from('subscriptions').select('*').eq('id', subscriptionId).single()
+      if (!subRes.data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Subscription not found' }) }
       const s = subRes.data
-      const c = contactRes.data
+
+      // Resolve contactId: use provided value, else fall back to subscription's contact_id
+      const resolvedContactId: string | null = contactId ?? s.contact_id ?? null
+
+      // Fetch contact if we have an id
+      let contactName: string = s.customer_name
+      let contactAddress: string | null = s.customer_address ?? null
+      if (resolvedContactId) {
+        const contactRes = await supabase.from('contacts').select('*').eq('id', resolvedContactId).single()
+        if (contactRes.data) {
+          contactName = contactRes.data.name
+          contactAddress = s.customer_address ?? contactRes.data.address ?? null
+        }
+      }
 
       // Void any existing pending/draft agreements for this subscription
       await supabase
@@ -94,25 +101,25 @@ export const handler: Handler = async (event) => {
       const { data: agreementRow, error: insertError } = await supabase
         .from('service_agreements')
         .insert({
-          contact_id:      contactId,
-          subscription_id: subscriptionId,
-          customer_name:   c.name,
-          customer_address: s.customer_address ?? c.address ?? null,
-          status:          'pending_signature',
-          accept_token:    token,
-          quote_type:      quoteType ?? null,
+          contact_id:       resolvedContactId,
+          subscription_id:  subscriptionId,
+          customer_name:    contactName,
+          customer_address: contactAddress,
+          status:           'pending_signature',
+          accept_token:     token,
+          quote_type:       quoteType ?? null,
         })
         .select()
         .single()
 
       if (insertError) throw insertError
 
-      // Log activity
-      if (contactId) {
+      // Log activity (non-fatal)
+      if (resolvedContactId) {
         await supabase.from('activities').insert({
-          contact_id: contactId,
+          contact_id: resolvedContactId,
           type:       'esign_sent',
-          summary:    `Service agreement generated for ${c.name}`,
+          summary:    `Service agreement generated for ${contactName}`,
           metadata:   { agreementId: agreementRow.id, subscriptionId },
         }).catch(() => {/* non-fatal */})
       }

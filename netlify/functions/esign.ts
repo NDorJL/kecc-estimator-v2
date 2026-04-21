@@ -48,7 +48,7 @@ function errPage(title: string, msg: string): string {
 
 // ── subscription quote types (no e-sign, use service agreement instead) ───
 
-const SUB_QUOTE_TYPES = ['residential_tcep','commercial_tcep','residential_autopilot','commercial_autopilot']
+const SUB_QUOTE_TYPES = ['residential_tcep','commercial_tcep','residential_autopilot','commercial_autopilot','residential_tpc','commercial_tpc']
 
 function isSubscriptionQuote(quoteType: string | null | undefined): boolean {
   return SUB_QUOTE_TYPES.includes(quoteType ?? '')
@@ -377,9 +377,11 @@ function buildFullAgreementPage(opts: {
 
   const qt = (quoteType ?? '').toLowerCase()
   const isAutopilot = qt.includes('autopilot')
-  const isTCEP = qt.includes('tcep') && isResidential
-  const isTPC  = qt.includes('tcep') && !isResidential
-  const planLabel = isAutopilot ? 'One-Service Autopilot' : isTCEP ? 'Total Care Exterior Plan (TCEP)' : isTPC ? 'Total Property Command (TPC)' : ''
+  // TCEP = Total Care Exterior Plan (includes 'tcep' in type)
+  // TPC  = Total Property Care (includes 'tpc' but not 'tcep', or explicit _tpc suffix)
+  const isTCEP = qt.includes('tcep')
+  const isTPC  = qt.includes('_tpc') || (qt.includes('tpc') && !qt.includes('tcep'))
+  const planLabel = isAutopilot ? 'One-Service Autopilot' : isTCEP ? 'Total Care Exterior Plan (TCEP)' : isTPC ? 'Total Property Care (TPC)' : ''
   const today = new Date()
   const agreementDate = today.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
   const reviewDate = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate())
@@ -408,7 +410,7 @@ function buildFullAgreementPage(opts: {
 <p style="margin:0 0 8px;font-size:11px;color:#6b7280;">Bonuses have no cash value, are non-transferable, and may not be redeemed for cash or combined with other offers except at KECC's discretion. One-Service Autopilot plans do not receive bonuses reserved for higher-tier plans unless expressly stated in writing.</p>`
 
   const tcepTpcBonuses = `
-<p style="margin:10px 0 4px;font-size:13px;font-weight:700;color:#1a1a1a;">${isTCEP ? 'Total Care Exterior Plan (TCEP)' : 'Total Property Command (TPC)'} — Guarantees &amp; Bonuses</p>
+<p style="margin:10px 0 4px;font-size:13px;font-weight:700;color:#1a1a1a;">${isTCEP ? 'Total Care Exterior Plan (TCEP)' : 'Total Property Care (TPC)'} — Guarantees &amp; Bonuses</p>
 <p style="margin:0 0 4px;font-size:12px;color:#374151;">Includes all One-Service Autopilot guarantees and bonuses (Zero-Risk First Month, Show Up or It's Free, Loyalty Price Lock, Property Shield Report, Curb Appeal Photo Set, Neighbor Referral Credit, Service Reminders) on a broader basis, plus:</p>
 <p style="margin:0 0 6px;font-size:12px;color:#374151;"><strong>"Beat Any Comparable Quote"</strong> — KECC will attempt to beat or match a current written quote from another insured provider for comparable recurring exterior services at the same property. ${isResidential ? 'Customer' : 'Client'} must provide a quote dated within 30 days that clearly describes services and frequency. KECC alone decides comparability and is not required to match prices that are unsustainably low, promotional, or inconsistent with KECC's safety or insurance standards.</p>
 <p style="margin:0 0 6px;font-size:12px;color:#374151;"><strong>"Seasonal Plan Adjustments"</strong> — KECC may shift tasks seasonally (e.g., more mowing in growth season, more ice/leaf work in fall/winter) while keeping the overall annual service level and blended subscription value roughly consistent. Routine seasonal adjustments do not change the agreed monthly rate unless a specific service is explicitly paused for more than one month.</p>
@@ -567,7 +569,7 @@ function buildFullAgreementPage(opts: {
         </div>
         <div class="check-row">
           <div class="check-box ${isTPC ? 'checked' : ''}">${isTPC ? '✓' : ''}</div>
-          <span style="font-size:13px;">Total Property Command (TPC)</span>
+          <span style="font-size:13px;">Total Property Care (TPC)</span>
         </div>
       </div>
       <div class="field-row">

@@ -174,9 +174,11 @@ const AGREEMENT_STATUS_STYLES: Record<string, string> = {
 
 const PLAN_OPTIONS = [
   { value: "residential_autopilot", label: "One-Service Autopilot (Residential)" },
-  { value: "commercial_autopilot", label: "One-Service Autopilot (Commercial)" },
-  { value: "residential_tcep", label: "TCEP — Total Care Exterior Plan (Residential)" },
-  { value: "commercial_tcep", label: "TPC — Total Property Care (Commercial)" },
+  { value: "commercial_autopilot",  label: "One-Service Autopilot (Commercial)" },
+  { value: "residential_tcep",      label: "TCEP — Total Care Exterior Plan (Residential)" },
+  { value: "commercial_tcep",       label: "TCEP — Total Care Exterior Plan (Commercial)" },
+  { value: "residential_tpc",       label: "TPC — Total Property Care (Residential)" },
+  { value: "commercial_tpc",        label: "TPC — Total Property Care (Commercial)" },
 ];
 
 function AgreementSection({ sub }: { sub: Subscription }) {
