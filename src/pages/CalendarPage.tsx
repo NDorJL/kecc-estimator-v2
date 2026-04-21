@@ -48,49 +48,67 @@ const SUB_COLORS = [
 
 function generateSubEvents(subs: Subscription[], year: number, month: number): Map<string, CalEvent[]> {
   const map = new Map<string, CalEvent[]>()
-  const firstDay = new Date(year, month, 1)
-  const lastDay  = new Date(year, month + 1, 0)
 
   subs.forEach((sub, subIdx) => {
     if (sub.status !== 'ACTIVE') return
     const color = SUB_COLORS[subIdx % SUB_COLORS.length]
 
-    for (const sch of (sub.serviceSchedules ?? [])) {
-      const startDate = new Date(sch.startDate + 'T12:00:00')
+    const schedules = sub.serviceSchedules ?? []
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+
+    for (const sch of schedules) {
+      // Parse start year/month/day — avoid Date constructor timezone issues entirely
+      const [sy, sm, sd] = sch.startDate.split('-').map(Number)
+      // sm and sd are 1-based (e.g. month 5 = May)
       const freq = (sch.frequency ?? '').toLowerCase()
+      const isDateBased = freq.includes('quarter') || freq.includes('annual')
 
-      for (let d = new Date(firstDay); d <= lastDay; d.setDate(d.getDate() + 1)) {
-        if (d.getDay() !== sch.dayOfWeek) continue
-        if (d < startDate) continue
+      for (let day = 1; day <= daysInMonth; day++) {
+        // Skip days before the service start date
+        if (year < sy) continue
+        if (year === sy && month + 1 < sm) continue
+        if (year === sy && month + 1 === sm && day < sd) continue
 
-        let include = false
-        if (freq.includes('bi') && freq.includes('week')) {
-          include = (getWeekNumber(d) - getWeekNumber(startDate)) % 2 === 0
-        } else if (freq.includes('week')) {
-          include = true
-        } else if (freq.includes('month')) {
-          const targetDay = startDate.getDate()
-          const occs: Date[] = []
-          const first = new Date(year, month, 1)
-          while (first.getDay() !== sch.dayOfWeek) first.setDate(first.getDate() + 1)
-          for (let od = new Date(first); od.getMonth() === month; od.setDate(od.getDate() + 7)) {
-            occs.push(new Date(od))
-          }
-          const best = occs.reduce((a, b) =>
-            Math.abs(a.getDate() - targetDay) <= Math.abs(b.getDate() - targetDay) ? a : b
-          )
-          include = d.getDate() === best.getDate()
-        } else if (freq.includes('quarter')) {
-          const monthDiff = (d.getMonth() - startDate.getMonth() + 12) % 12
-          include = monthDiff % 3 === 0 && d.getDate() === startDate.getDate()
-        } else if (freq.includes('annual')) {
-          include = d.getMonth() === startDate.getMonth() && d.getDate() === startDate.getDate()
+        if (isDateBased) {
+          // Quarterly / Annual: fires on the same calendar date, every N months
+          const totalMonths = (year - sy) * 12 + ((month + 1) - sm)
+          const interval = freq.includes('quarter') ? 3 : 12
+          if (totalMonths % interval !== 0) continue   // wrong month
+          if (day !== sd) continue                      // wrong day-of-month
         } else {
-          include = true
-        }
-        if (!include) continue
+          // Week-based / Monthly: must land on the right day-of-week first
+          const dow = new Date(year, month, day).getDay()
+          if (dow !== sch.dayOfWeek) continue
 
-        const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+          if (freq.includes('bi') && freq.includes('week')) {
+            // Bi-weekly: same parity of week as the start date
+            const startDow = new Date(sy, sm - 1, sd).getDay()
+            const startSunday = new Date(sy, sm - 1, sd - startDow)
+            const thisSunday  = new Date(year, month, day - dow)
+            const weekDiff = Math.round((thisSunday.getTime() - startSunday.getTime()) / (7 * 86400000))
+            if (weekDiff % 2 !== 0) continue
+          } else if (freq.includes('month') || freq.includes('bi')) {
+            // Monthly (and bi-monthly): fire on the occurrence of this weekday closest
+            // to the original day-of-month within this month
+            const targetDom = sd
+            const occs: number[] = []
+            for (let d2 = 1; d2 <= daysInMonth; d2++) {
+              if (new Date(year, month, d2).getDay() === sch.dayOfWeek) occs.push(d2)
+            }
+            const best = occs.reduce((a, b) =>
+              Math.abs(a - targetDom) <= Math.abs(b - targetDom) ? a : b
+            )
+            if (day !== best) continue
+            if (freq.includes('bi') && !freq.includes('week')) {
+              // Bi-monthly: only every other month from start
+              const totalMonths = (year - sy) * 12 + ((month + 1) - sm)
+              if (totalMonths % 2 !== 0) continue
+            }
+          }
+          // Weekly: every matching weekday — no extra check needed
+        }
+
+        const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
         const arr = map.get(key) ?? []
         arr.push({
           id: `${sub.id}-${sch.serviceId}-${key}`,
@@ -102,6 +120,53 @@ function generateSubEvents(subs: Subscription[], year: number, month: number): M
           contractorId: sch.contractorId,
         })
         map.set(key, arr)
+      }
+    }
+
+    // Fallback for subs that have services[] but no serviceSchedules yet
+    if (schedules.length === 0 && (sub.services ?? []).length > 0) {
+      const [sy, sm, sd] = (sub.startDate ?? '').split('-').map(Number)
+      if (!sy) return
+
+      for (const svc of sub.services) {
+        const freq = (svc.frequency ?? '').toLowerCase()
+        const isDateBased = freq.includes('quarter') || freq.includes('annual')
+
+        for (let day = 1; day <= daysInMonth; day++) {
+          if (year < sy) continue
+          if (year === sy && month + 1 < sm) continue
+          if (year === sy && month + 1 === sm && day < sd) continue
+
+          if (isDateBased) {
+            const totalMonths = (year - sy) * 12 + ((month + 1) - sm)
+            const interval = freq.includes('quarter') ? 3 : 12
+            if (totalMonths % interval !== 0) continue
+            if (day !== sd) continue
+          } else {
+            const startDow = new Date(sy, sm - 1, sd).getDay()
+            const dow = new Date(year, month, day).getDay()
+            if (dow !== startDow) continue
+            if (freq.includes('bi') && freq.includes('week')) {
+              const startSunday = new Date(sy, sm - 1, sd - startDow)
+              const thisSunday  = new Date(year, month, day - dow)
+              const weekDiff = Math.round((thisSunday.getTime() - startSunday.getTime()) / (7 * 86400000))
+              if (weekDiff % 2 !== 0) continue
+            }
+          }
+
+          const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+          const arr = map.get(key) ?? []
+          arr.push({
+            id: `${sub.id}-${svc.id}-${key}`,
+            title: sub.customerName,
+            subtitle: svc.serviceName,
+            type: 'subscription',
+            color,
+            sub,
+            contractorId: null,
+          })
+          map.set(key, arr)
+        }
       }
     }
   })
@@ -463,8 +528,12 @@ export default function CalendarPage() {
 
   // Unscheduled one-time jobs (no scheduledDate, not cancelled)
   const unscheduled = jobs.filter(j => j.jobType === 'one_time' && !j.scheduledDate && j.status !== 'cancelled')
-  // Active subs with no schedule configured
-  const unscheduledSubs = subs.filter(s => s.status === 'ACTIVE' && (!s.serviceSchedules || s.serviceSchedules.length === 0))
+  // Active subs with no schedule configured AND no services to fall back on
+  const unscheduledSubs = subs.filter(s =>
+    s.status === 'ACTIVE' &&
+    (!s.serviceSchedules || s.serviceSchedules.length === 0) &&
+    (!s.services || s.services.length === 0)
+  )
 
   const selectedDateKey = selectedDate
     ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`

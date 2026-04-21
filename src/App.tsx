@@ -10,7 +10,7 @@ import { ServicesProvider } from '@/lib/services-context'
 import { Button } from '@/components/ui/button'
 import {
   LayoutDashboard, Calendar, Calculator as CalcIcon, FileText,
-  Settings, Sun, Moon,
+  Settings, Sun, Moon, RefreshCw,
 } from 'lucide-react'
 import Dashboard from '@/pages/Dashboard'
 import Contacts from '@/pages/Contacts'
@@ -43,6 +43,7 @@ const primaryTabs = [
   { path: '/calculator', label: 'Calculator', icon: CalcIcon },
   { path: '/calendar', label: 'Calendar', icon: Calendar },
   { path: '/quotes', label: 'Quotes', icon: FileText },
+  { path: '/subscriptions', label: 'Subs', icon: RefreshCw },
   { path: '/settings', label: 'Settings', icon: Settings },
 ] as const
 
