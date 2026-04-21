@@ -4,6 +4,10 @@ import {
   calculatePerSqftPrice,
   rtcepLite,
   ctcepLite,
+  mulchDefaults,
+  MULCH_DIFFICULTY,
+  MULCH_DEPTHS,
+  calcMulchPrice,
   type ServiceDefinition,
   type FrequencyDiscount,
 } from '@/lib/pricing'
@@ -296,6 +300,197 @@ function OnetimeServiceCard({
           className="w-full min-h-[44px]"
           onClick={handleAdd}
           disabled={!pricing || pricing.onetimeTotal === 0}
+        >
+          <ShoppingCart className="h-4 w-4 mr-2" />
+          Add to Cart
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ── Mulch Service Card ──────────────────────────────────────────────── */
+function MulchServiceCard({ onAdd }: { onAdd: (item: LineItem) => void }) {
+  const [sqft, setSqft] = useState(0)
+  const [depth, setDepth] = useState<number>(2)
+  const [typeId, setTypeId] = useState(mulchDefaults.types[0].id)
+  const [diffId, setDiffId] = useState<string>('average')
+  const [addOnState, setAddOnState] = useState<Record<string, { enabled: boolean; qty: number }>>(() =>
+    Object.fromEntries(mulchDefaults.addOns.map(a => [a.id, { enabled: false, qty: a.unit === 'flat' ? 1 : 0 }]))
+  )
+
+  const mulchType = mulchDefaults.types.find(t => t.id === typeId) ?? mulchDefaults.types[0]
+  const difficulty = MULCH_DIFFICULTY.find(d => d.id === diffId) ?? MULCH_DIFFICULTY[1]
+
+  const addOnsInput = mulchDefaults.addOns.map(a => ({
+    id: a.id,
+    enabled: addOnState[a.id]?.enabled ?? false,
+    qty: addOnState[a.id]?.qty ?? 1,
+    price: a.price,
+  }))
+
+  const result = useMemo(() => {
+    if (sqft <= 0) return null
+    return calcMulchPrice({
+      sqft,
+      depthInches: depth,
+      sellPerYard: mulchType.sellPerYard,
+      laborPerYard: mulchDefaults.laborPerYard,
+      difficultyMultiplier: difficulty.multiplier,
+      deliveryFee: mulchDefaults.deliveryFee,
+      minimumJob: mulchDefaults.minimumJob,
+      addOns: addOnsInput,
+    })
+  }, [sqft, depth, mulchType, difficulty, addOnsInput])
+
+  const toggleAddOn = (id: string) =>
+    setAddOnState(s => ({ ...s, [id]: { ...s[id], enabled: !s[id].enabled } }))
+  const setAddOnQty = (id: string, qty: number) =>
+    setAddOnState(s => ({ ...s, [id]: { ...s[id], qty } }))
+
+  const handleAdd = () => {
+    if (!result) return
+    const enabledAddOns = mulchDefaults.addOns
+      .filter(a => addOnState[a.id]?.enabled)
+      .map(a => {
+        const qty = addOnState[a.id]?.qty ?? 1
+        if (a.unit === 'flat') return a.label
+        if (a.unit === 'per_lf') return `${a.label} (${qty} LF)`
+        return `${a.label} (×${qty})`
+      })
+    const desc = [
+      `${result.roundedYards} yds · ${mulchType.name} · ${depth}" deep`,
+      `Difficulty: ${difficulty.label}`,
+      ...enabledAddOns,
+    ].join(' · ')
+
+    onAdd({
+      serviceId: 'mulch_install',
+      serviceName: 'Mulch Installation',
+      category: 'Landscaping',
+      description: desc,
+      quantity: result.roundedYards,
+      unitLabel: 'yds',
+      frequency: 'One-Time',
+      unitPrice: result.finalPrice / result.roundedYards,
+      lineTotal: result.finalPrice,
+      isSubscription: false,
+    })
+    setSqft(0)
+    setDepth(2)
+    setDiffId('average')
+    setAddOnState(Object.fromEntries(mulchDefaults.addOns.map(a => [a.id, { enabled: false, qty: a.unit === 'flat' ? 1 : 0 }])))
+  }
+
+  return (
+    <Card className="border-l-2 border-l-primary/30">
+      <CardContent className="pt-3 pb-3 space-y-3">
+        <div>
+          <p className="text-sm font-semibold">Mulch Installation</p>
+          <p className="text-xs text-muted-foreground">per cubic yard installed</p>
+        </div>
+
+        {/* Row 1: sqft + depth */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Bed Sq Ft</Label>
+            <QtyInput value={sqft} onChange={setSqft} placeholder="e.g. 800" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Depth (in)</Label>
+            <Select value={String(depth)} onValueChange={v => setDepth(parseFloat(v))}>
+              <SelectTrigger className="min-h-[44px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {MULCH_DEPTHS.map(d => <SelectItem key={d} value={String(d)}>{d}"</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Row 2: mulch type + difficulty */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1">
+            <Label className="text-xs">Mulch Type</Label>
+            <Select value={typeId} onValueChange={setTypeId}>
+              <SelectTrigger className="min-h-[44px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {mulchDefaults.types.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Difficulty</Label>
+            <Select value={diffId} onValueChange={setDiffId}>
+              <SelectTrigger className="min-h-[44px] text-xs"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {MULCH_DIFFICULTY.map(d => (
+                  <SelectItem key={d.id} value={d.id}>{d.label} (×{d.multiplier})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        {/* Add-ons */}
+        <div className="space-y-1.5">
+          <Label className="text-xs">Add-Ons</Label>
+          {mulchDefaults.addOns.map(a => {
+            const state = addOnState[a.id]
+            return (
+              <div key={a.id} className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => toggleAddOn(a.id)}
+                  className={`h-5 w-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${state.enabled ? 'bg-primary border-primary' : 'border-muted-foreground/40'}`}
+                >
+                  {state.enabled && <span className="text-primary-foreground text-[10px] font-bold">✓</span>}
+                </button>
+                <span className="text-xs flex-1">{a.label}
+                  {a.unit !== 'flat' && <span className="text-muted-foreground ml-1">
+                    ({a.unit === 'per_lf' ? `$${a.price}/LF` : `$${a.price}/shrub`})
+                  </span>}
+                  {a.unit === 'flat' && <span className="text-muted-foreground ml-1">(${a.price})</span>}
+                </span>
+                {state.enabled && a.unit !== 'flat' && (
+                  <Input
+                    type="number"
+                    min={1}
+                    value={state.qty || ''}
+                    onChange={e => setAddOnQty(a.id, Math.max(1, parseInt(e.target.value) || 1))}
+                    className="w-16 h-8 text-xs"
+                    placeholder={a.unit === 'per_lf' ? 'LF' : 'qty'}
+                  />
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Live breakdown */}
+        {result && sqft > 0 && (
+          <div className="rounded-md bg-primary/5 border border-primary/20 px-3 py-2 text-xs space-y-1">
+            <div className="flex justify-between text-muted-foreground">
+              <span>{result.rawYards.toFixed(2)} raw yds → <strong className="text-foreground">{result.roundedYards} yds</strong> (rounded up)</span>
+            </div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Material ({result.roundedYards} yds × ${mulchType.sellPerYard}/yd)</span><span>${result.materialTotal.toFixed(2)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Labor ({difficulty.label})</span><span>${result.laborTotal.toFixed(2)}</span></div>
+            <div className="flex justify-between"><span className="text-muted-foreground">Delivery</span><span>${result.delivery.toFixed(2)}</span></div>
+            {result.addOnsTotal > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Add-ons</span><span>${result.addOnsTotal.toFixed(2)}</span></div>}
+            <div className="border-t border-primary/20 pt-1 flex justify-between font-semibold">
+              <span className="text-primary">Total</span>
+              <span className="text-primary">${result.finalPrice.toFixed(2)}</span>
+            </div>
+            {result.hitMinimum && (
+              <p className="text-amber-600 dark:text-amber-400 text-[10px]">Minimum job charge of ${mulchDefaults.minimumJob} applied</p>
+            )}
+          </div>
+        )}
+
+        <Button
+          size="sm"
+          className="w-full min-h-[44px]"
+          onClick={handleAdd}
+          disabled={!result || sqft <= 0}
         >
           <ShoppingCart className="h-4 w-4 mr-2" />
           Add to Cart
@@ -948,11 +1143,9 @@ export default function Calculator() {
                     </AccordionTrigger>
                     <AccordionContent className="space-y-3 pt-2">
                       {svcs.map((svc) => (
-                        <OnetimeServiceCard
-                          key={svc.id}
-                          service={svc}
-                          onAdd={(item) => addToCart([item])}
-                        />
+                        svc.pricingModel === 'mulch'
+                          ? <MulchServiceCard key={svc.id} onAdd={(item) => addToCart([item])} />
+                          : <OnetimeServiceCard key={svc.id} service={svc} onAdd={(item) => addToCart([item])} />
                       ))}
                     </AccordionContent>
                   </AccordionItem>

@@ -14,7 +14,16 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/hooks/use-toast'
-import { ChevronLeft, ChevronRight, MapPin, Phone, Wrench, RefreshCw, Calendar, Clock, GripVertical } from 'lucide-react'
+import { ChevronLeft, ChevronRight, MapPin, Phone, Wrench, RefreshCw, Calendar, Clock, GripVertical, ClipboardList, Plus, MessageSquare } from 'lucide-react'
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+function fmtTime12(hhmm: string): string {
+  const [hh, mm] = hhmm.split(':').map(Number)
+  const ampm = hh >= 12 ? 'PM' : 'AM'
+  const h = hh % 12 || 12
+  return `${h}:${String(mm).padStart(2, '0')} ${ampm}`
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,7 +31,7 @@ interface CalEvent {
   id: string
   title: string
   subtitle: string
-  type: 'one_time' | 'subscription'
+  type: 'one_time' | 'subscription' | 'quote_visit'
   color: string
   job?: Job
   sub?: Subscription
@@ -181,12 +190,13 @@ function generateJobEvents(jobs: Job[], year: number, month: number): Map<string
     if (d.getFullYear() !== year || d.getMonth() !== month) continue
     const key = job.scheduledDate
     const arr = map.get(key) ?? []
+    const isQuoteVisit = job.jobType === 'quote_visit'
     arr.push({
       id: `job-${job.id}`,
       title: job.customerName ?? 'Unknown',
-      subtitle: job.serviceName,
-      type: 'one_time',
-      color: 'bg-green-500',
+      subtitle: isQuoteVisit ? `📋 Quote Visit${job.scheduledTime ? ' · ' + fmtTime12(job.scheduledTime) : ''}` : job.serviceName,
+      type: isQuoteVisit ? 'quote_visit' : 'one_time',
+      color: isQuoteVisit ? 'bg-purple-500' : 'bg-green-500',
       job,
       window: job.scheduledWindow,
     })
@@ -439,6 +449,152 @@ function DayDetailSheet({
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const DAY_ABBR    = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']
 
+/* ── New Quote Visit Sheet ───────────────────────────────────────────────── */
+function NewQuoteVisitSheet({
+  open, onClose, defaultDate, onCreated,
+}: {
+  open: boolean
+  onClose: () => void
+  defaultDate: string
+  onCreated: () => void
+}) {
+  const { toast } = useToast()
+  const [customerName, setCustomerName] = useState('')
+  const [customerPhone, setCustomerPhone] = useState('')
+  const [customerAddress, setCustomerAddress] = useState('')
+  const [scheduledDate, setScheduledDate] = useState(defaultDate)
+  const [scheduledTime, setScheduledTime] = useState('09:00')
+  const [notes, setNotes] = useState('')
+  const [sendSms, setSendSms] = useState(true)
+  const [loading, setLoading] = useState(false)
+
+  // Reset when opened with a new date
+  useState(() => { setScheduledDate(defaultDate) })
+
+  const handleSubmit = async () => {
+    if (!customerName || !scheduledDate) return
+    setLoading(true)
+    try {
+      // Create the job as a quote_visit
+      const jobRes = await fetch('/.netlify/functions/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jobType: 'quote_visit',
+          serviceName: 'In-Person Quote',
+          status: 'scheduled',
+          scheduledDate,
+          scheduledTime,
+          customerName,
+          customerPhone: customerPhone || null,
+          customerAddress: customerAddress || null,
+          notes: notes || null,
+        }),
+      })
+      if (!jobRes.ok) throw new Error('Failed to create quote visit')
+
+      // Send SMS confirmation if enabled and phone provided
+      if (sendSms && customerPhone) {
+        const smsRes = await fetch('/.netlify/functions/sms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'quote-visit-confirmation',
+            to: customerPhone,
+            customerName,
+            scheduledDate,
+            scheduledTime,
+          }),
+        })
+        if (!smsRes.ok) {
+          // SMS failure is non-fatal — job was already created
+          toast({ title: 'Quote visit added', description: 'SMS failed to send. Check Quo settings.', variant: 'destructive' })
+        } else {
+          toast({ title: 'Quote visit added', description: `Confirmation text sent to ${customerPhone}` })
+        }
+      } else {
+        toast({ title: 'Quote visit added' })
+      }
+
+      onCreated()
+      onClose()
+      setCustomerName('')
+      setCustomerPhone('')
+      setCustomerAddress('')
+      setNotes('')
+      setSendSms(true)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      toast({ title: 'Error', description: msg, variant: 'destructive' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onClose}>
+      <SheetContent side="bottom" className="max-h-[90dvh] overflow-y-auto rounded-t-xl">
+        <SheetHeader className="pb-3">
+          <SheetTitle className="flex items-center gap-2">
+            <ClipboardList className="h-5 w-5 text-purple-500" />
+            New Quote Visit
+          </SheetTitle>
+        </SheetHeader>
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Customer Name *</Label>
+            <Input value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Full name" className="min-h-[44px]" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-xs">Date *</Label>
+              <Input type="date" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} className="min-h-[44px]" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Time</Label>
+              <Input type="time" value={scheduledTime} onChange={e => setScheduledTime(e.target.value)} className="min-h-[44px]" />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Customer Phone</Label>
+            <Input type="tel" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} placeholder="+18651234567" className="min-h-[44px]" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Property Address</Label>
+            <Input value={customerAddress} onChange={e => setCustomerAddress(e.target.value)} placeholder="123 Main St" className="min-h-[44px]" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Notes (internal)</Label>
+            <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Gate code, parking, etc." className="min-h-[44px]" />
+          </div>
+          {customerPhone && (
+            <div className="flex items-center gap-3 rounded-md bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 px-3 py-2.5">
+              <MessageSquare className="h-4 w-4 text-purple-600 shrink-0" />
+              <div className="flex-1 text-xs text-purple-800 dark:text-purple-200">
+                Auto-send confirmation text to {customerPhone}
+              </div>
+              <button
+                type="button"
+                onClick={() => setSendSms(s => !s)}
+                className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors ${sendSms ? 'bg-purple-600' : 'bg-muted'}`}
+              >
+                <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${sendSms ? 'translate-x-4' : 'translate-x-0'}`} />
+              </button>
+            </div>
+          )}
+          <Button
+            onClick={handleSubmit}
+            disabled={loading || !customerName || !scheduledDate}
+            className="w-full min-h-[44px]"
+          >
+            {loading ? 'Saving…' : 'Add Quote Visit'}
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 export default function CalendarPage() {
   const today = new Date()
   const [year, setYear]   = useState(today.getFullYear())
@@ -446,6 +602,7 @@ export default function CalendarPage() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [pendingDrop, setPendingDrop] = useState<{ job: Job; dateKey: string } | null>(null)
   const [activeJob, setActiveJob] = useState<Job | null>(null)
+  const [showNewQuoteVisit, setShowNewQuoteVisit] = useState(false)
   const { toast } = useToast()
   const qc = useQueryClient()
 
@@ -568,13 +725,21 @@ export default function CalendarPage() {
           </div>
         </div>
 
-        {/* Legend */}
+        {/* Legend + New Quote Visit */}
         <div className="px-4 py-2 flex items-center gap-4 border-b">
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <div className="w-2.5 h-2.5 rounded-full bg-green-500" />One-time
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />Subscription
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />Quote Visit
+          </div>
+          <div className="ml-auto">
+            <Button size="sm" variant="outline" className="min-h-[34px] text-xs border-purple-300 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30" onClick={() => setShowNewQuoteVisit(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1" />Quote Visit
+            </Button>
           </div>
         </div>
 
@@ -659,6 +824,14 @@ export default function CalendarPage() {
         contractors={contractors}
         open={!!selectedDate}
         onClose={() => setSelectedDate(null)}
+      />
+
+      {/* New Quote Visit */}
+      <NewQuoteVisitSheet
+        open={showNewQuoteVisit}
+        onClose={() => setShowNewQuoteVisit(false)}
+        defaultDate={`${year}-${String(month + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`}
+        onCreated={() => qc.invalidateQueries({ queryKey: ['/jobs'] })}
       />
 
       {/* Time picker after drop */}

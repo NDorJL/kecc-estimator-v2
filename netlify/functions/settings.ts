@@ -69,6 +69,8 @@ export const handler: Handler = async (event) => {
       if (body.qbAccessToken !== undefined)            update.qb_access_token = body.qbAccessToken
       if (body.qbRefreshToken !== undefined)           update.qb_refresh_token = body.qbRefreshToken
       if (body.qbTokenExpiresAt !== undefined)         update.qb_token_expires_at = body.qbTokenExpiresAt
+      if (body.quoApiKey !== undefined)                update.quo_api_key = body.quoApiKey
+      if (body.quoFromNumber !== undefined)            update.quo_from_number = body.quoFromNumber
 
       // Get the existing settings ID
       const { data: existing } = await supabase.from('company_settings').select('id').limit(1).single()

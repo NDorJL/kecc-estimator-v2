@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ServiceDefinition, PricingModel, ServiceType } from '@/lib/pricing'
+import { mulchDefaults, MULCH_DIFFICULTY } from '@/lib/pricing'
 import { apiRequest, apiGet } from '@/lib/queryClient'
 import { useServices } from '@/lib/services-context'
 import {
@@ -147,6 +148,125 @@ function FrequencyDiscountsCard({
         <p className="text-[11px] text-muted-foreground mt-2">
           These override the default discounts built into the price list. Set to 0 to remove discount.
         </p>
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ── Mulch Price Card ─────────────────────────────────────────────────── */
+function MulchPriceCard({
+  overrides,
+  onSave,
+}: {
+  overrides: PriceOverrideRow[]
+  onSave: (serviceId: string, field: string, value: number) => void
+}) {
+  const getOverride = (field: string, fallback: number) => {
+    const o = overrides.find(r => r.service_id === 'mulch_install' && r.field === field)
+    return o !== undefined ? o.value : fallback
+  }
+
+  const laborPerYard = getOverride('labor_per_yard', mulchDefaults.laborPerYard)
+  const deliveryFee  = getOverride('delivery_fee',   mulchDefaults.deliveryFee)
+  const minimumJob   = getOverride('minimum_job',    mulchDefaults.minimumJob)
+
+  const [editing, setEditing] = useState<string | null>(null)
+  const [editVal, setEditVal] = useState('')
+
+  const startEdit = (key: string, current: number) => { setEditing(key); setEditVal(current.toFixed(2)) }
+  const cancel = () => { setEditing(null); setEditVal('') }
+  const save = (key: string) => {
+    const v = parseFloat(editVal)
+    if (!isNaN(v) && v >= 0) onSave('mulch_install', key, v)
+    cancel()
+  }
+
+  const EditableRow = ({ label, fieldKey, current, prefix = '$' }: { label: string; fieldKey: string; current: number; prefix?: string }) => (
+    <div className="flex items-center justify-between py-1.5 border-b last:border-b-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      {editing === fieldKey ? (
+        <div className="flex items-center gap-1">
+          <span className="text-sm text-muted-foreground">{prefix}</span>
+          <Input type="number" min={0} step={0.01} value={editVal} onChange={e => setEditVal(e.target.value)}
+            className="w-20 h-8 text-sm" autoFocus
+            onKeyDown={e => { if (e.key === 'Enter') save(fieldKey); if (e.key === 'Escape') cancel() }} />
+          <Button size="icon" variant="ghost" className="h-8 w-8 text-green-600" onClick={() => save(fieldKey)}><Check className="h-3.5 w-3.5" /></Button>
+          <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={cancel}><X className="h-3.5 w-3.5" /></Button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-1">
+          <span className="text-sm font-semibold">{prefix}{current.toFixed(2)}</span>
+          <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => startEdit(fieldKey, current)}><Pencil className="h-3.5 w-3.5" /></Button>
+        </div>
+      )}
+    </div>
+  )
+
+  return (
+    <Card>
+      <CardContent className="py-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-semibold">Mulch Installation</p>
+            <p className="text-xs text-muted-foreground">Landscaping · One-Time · Both</p>
+          </div>
+          <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">onetime</Badge>
+        </div>
+
+        {/* Per-type pricing table */}
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Mulch Types — Sell Price / Yard</p>
+          <div className="space-y-0">
+            {mulchDefaults.types.map(t => {
+              const fieldKey = `type_${t.id}_sell`
+              const current = getOverride(fieldKey, t.sellPerYard)
+              return (
+                <div key={t.id} className="flex items-center justify-between py-1.5 border-b last:border-b-0">
+                  <div>
+                    <span className="text-sm">{t.name}</span>
+                    <span className="text-xs text-muted-foreground ml-2">(cost: ${t.costPerYard}/yd)</span>
+                  </div>
+                  {editing === fieldKey ? (
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm text-muted-foreground">$</span>
+                      <Input type="number" min={0} step={0.01} value={editVal} onChange={e => setEditVal(e.target.value)}
+                        className="w-20 h-8 text-sm" autoFocus
+                        onKeyDown={e => { if (e.key === 'Enter') save(fieldKey); if (e.key === 'Escape') cancel() }} />
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-green-600" onClick={() => save(fieldKey)}><Check className="h-3.5 w-3.5" /></Button>
+                      <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive" onClick={cancel}><X className="h-3.5 w-3.5" /></Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <span className="text-sm font-semibold">${current.toFixed(2)}/yd</span>
+                      <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => startEdit(fieldKey, current)}><Pencil className="h-3.5 w-3.5" /></Button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Labor + Delivery + Minimum */}
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Labor &amp; Fees</p>
+          <EditableRow label="Base Labor / Yard" fieldKey="labor_per_yard" current={laborPerYard} />
+          <EditableRow label="Delivery Fee (flat)" fieldKey="delivery_fee" current={deliveryFee} />
+          <EditableRow label="Minimum Job Charge" fieldKey="minimum_job" current={minimumJob} />
+        </div>
+
+        {/* Difficulty multipliers — read-only reference */}
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Difficulty Multipliers (labor only)</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+            {MULCH_DIFFICULTY.map(d => (
+              <div key={d.id} className="flex justify-between text-xs py-0.5">
+                <span className="text-muted-foreground">{d.label}</span>
+                <span className="font-medium">×{d.multiplier}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </CardContent>
     </Card>
   )
@@ -695,15 +815,17 @@ export default function PriceBook() {
               </AccordionTrigger>
               <AccordionContent className="space-y-3 pt-2">
                 {svcs.map((svc) => (
-                  <ServiceCard
-                    key={svc.id}
-                    service={svc}
-                    onSaveOverride={(serviceId, field, value) =>
-                      createOverride.mutate({ serviceId, field, value })
-                    }
-                    onDelete={(id, isCustom) => deleteService.mutate({ id, isCustom })}
-                    isCustom={svc.id.startsWith('custom_')}
-                  />
+                  svc.pricingModel === 'mulch'
+                    ? <MulchPriceCard key={svc.id} overrides={allOverrides} onSave={(serviceId, field, value) => createOverride.mutate({ serviceId, field, value })} />
+                    : <ServiceCard
+                        key={svc.id}
+                        service={svc}
+                        onSaveOverride={(serviceId, field, value) =>
+                          createOverride.mutate({ serviceId, field, value })
+                        }
+                        onDelete={(id, isCustom) => deleteService.mutate({ id, isCustom })}
+                        isCustom={svc.id.startsWith('custom_')}
+                      />
                 ))}
               </AccordionContent>
             </AccordionItem>

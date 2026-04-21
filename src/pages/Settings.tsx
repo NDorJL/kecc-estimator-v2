@@ -529,6 +529,90 @@ function QuickBooksSection({ settings }: { settings: CompanySettings | null }) {
   )
 }
 
+/* ── SMS / Quo Section ────────────────────────────────────────────────── */
+function SmsSection({ settings }: { settings: CompanySettings | null }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const [apiKey, setApiKey] = useState(settings?.quoApiKey ?? '')
+  const [fromNumber, setFromNumber] = useState(settings?.quoFromNumber ?? '')
+  const [showKey, setShowKey] = useState(false)
+
+  useEffect(() => {
+    setApiKey(settings?.quoApiKey ?? '')
+    setFromNumber(settings?.quoFromNumber ?? '')
+  }, [settings?.quoApiKey, settings?.quoFromNumber])
+
+  const saveMutation = useMutation({
+    mutationFn: () => apiRequest('PATCH', '/settings', {
+      quoApiKey: apiKey || null,
+      quoFromNumber: fromNumber || null,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/settings'] })
+      toast({ title: 'SMS settings saved' })
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  const configured = !!(settings?.quoApiKey && settings?.quoFromNumber)
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-semibold">SMS — Quo Integration</CardTitle>
+          {configured
+            ? <span className="flex items-center gap-1 text-xs text-green-600 font-medium"><CheckCircle2 className="h-3.5 w-3.5" /> Configured</span>
+            : <span className="flex items-center gap-1 text-xs text-muted-foreground"><AlertCircle className="h-3.5 w-3.5" /> Not configured</span>
+          }
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Used to send automated quote visit confirmation texts to customers. Enter your Quo API credentials below.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-1">
+          <label className="text-xs font-medium">Quo API Key</label>
+          <div className="flex gap-2">
+            <Input
+              type={showKey ? 'text' : 'password'}
+              value={apiKey}
+              onChange={e => setApiKey(e.target.value)}
+              placeholder="Your Quo API key"
+              className="min-h-[40px] font-mono text-sm"
+            />
+            <Button variant="ghost" size="sm" onClick={() => setShowKey(s => !s)} className="shrink-0">
+              {showKey ? 'Hide' : 'Show'}
+            </Button>
+          </div>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium">From Phone Number</label>
+          <Input
+            type="tel"
+            value={fromNumber}
+            onChange={e => setFromNumber(e.target.value)}
+            placeholder="+18655551234"
+            className="min-h-[40px]"
+          />
+          <p className="text-[11px] text-muted-foreground">Your Quo outbound number in E.164 format (e.g. +18651234567)</p>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          If your Quo API endpoint differs from the default, set <code className="bg-muted px-1 rounded">QUO_BASE_URL</code> in your Netlify environment variables.
+        </p>
+        <Button
+          onClick={() => saveMutation.mutate()}
+          disabled={saveMutation.isPending}
+          size="sm"
+          className="min-h-[40px]"
+        >
+          {saveMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : <><Save className="h-4 w-4 mr-2" />Save SMS Settings</>}
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
 /* ── Main Settings Page ───────────────────────────────────────────────── */
 export default function SettingsPage() {
   const queryClient = useQueryClient()
@@ -714,6 +798,9 @@ export default function SettingsPage() {
 
       {/* QuickBooks */}
       <QuickBooksSection settings={settings ?? null} />
+
+      {/* SMS / Quo */}
+      <SmsSection settings={settings ?? null} />
     </div>
   )
 }

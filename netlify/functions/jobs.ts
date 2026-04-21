@@ -48,6 +48,7 @@ export const handler: Handler = async (event) => {
         service_name:     body.serviceName ?? '',
         status:           body.status ?? 'scheduled',
         scheduled_date:   body.scheduledDate ?? null,
+        scheduled_time:   body.scheduledTime ?? null,
         scheduled_window: body.scheduledWindow ?? null,
         customer_name:    body.customerName ?? null,
         customer_address: body.customerAddress ?? null,
@@ -76,6 +77,7 @@ export const handler: Handler = async (event) => {
       if ('contractorId'    in body) patch.contractor_id    = body.contractorId ?? null
       if ('status'          in body) patch.status           = body.status
       if ('scheduledDate'   in body) patch.scheduled_date   = body.scheduledDate ?? null
+      if ('scheduledTime'   in body) patch.scheduled_time   = body.scheduledTime ?? null
       if ('scheduledWindow' in body) patch.scheduled_window = body.scheduledWindow ?? null
       if ('startTime'       in body) patch.start_time       = body.startTime ?? null
       if ('endTime'         in body) patch.end_time         = body.endTime ?? null

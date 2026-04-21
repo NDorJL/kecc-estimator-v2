@@ -8,7 +8,7 @@
 // ============================================================
 
 export type ServiceType = "residential" | "commercial" | "both";
-export type PricingModel = "flat" | "per_unit" | "tiered" | "hourly" | "per_sqft" | "per_lf" | "per_acre";
+export type PricingModel = "flat" | "per_unit" | "tiered" | "hourly" | "per_sqft" | "per_lf" | "per_acre" | "mulch";
 
 export interface PriceTier {
   label: string;
@@ -888,7 +888,121 @@ export const services: ServiceDefinition[] = [
     notes: "Sealcoat + minor crack repair. Minimum charge $95.",
     subCostPct: 0.78,
   },
+
+  // ──────────────────────────────────────────
+  // LANDSCAPING / MULCH
+  // ──────────────────────────────────────────
+  {
+    id: "mulch_install",
+    name: "Mulch Installation",
+    category: "Landscaping",
+    subcategory: "Mulch",
+    serviceType: "both",
+    tags: ["onetime"],
+    pricingModel: "mulch",
+    unitLabel: "per cubic yard",
+    tiers: [],
+    frequencies: [FREQ_ONETIME],
+    notes: "Priced by cubic yards: (sqft × depth_in) ÷ 324, rounded up to nearest 0.5 yd. Includes material, delivery, and labor. Add-ons: bed weeding, edging, shrub trimming, debris haul-off.",
+    subCostPct: 0.72,
+    minimum: 175,
+  },
 ];
+
+// ============================================================
+// MULCH PRICING ENGINE
+// ============================================================
+
+export interface MulchType {
+  id: string;
+  name: string;
+  costPerYard: number;
+  sellPerYard: number;
+}
+
+export interface MulchAddOn {
+  id: string;
+  label: string;
+  price: number;
+  unit: 'flat' | 'per_lf' | 'per_shrub';
+}
+
+export interface MulchDefaults {
+  types: MulchType[];
+  laborPerYard: number;
+  deliveryFee: number;
+  minimumJob: number;
+  addOns: MulchAddOn[];
+}
+
+export const mulchDefaults: MulchDefaults = {
+  types: [
+    { id: 'hardwood',     name: 'Hardwood',              costPerYard: 32, sellPerYard: 55 },
+    { id: 'double_shred', name: 'Double-Shred Hardwood', costPerYard: 36, sellPerYard: 62 },
+    { id: 'cedar',        name: 'Cedar',                 costPerYard: 42, sellPerYard: 72 },
+    { id: 'dyed',         name: 'Dyed Black/Red',        costPerYard: 38, sellPerYard: 65 },
+    { id: 'rubber',       name: 'Rubber Mulch',          costPerYard: 75, sellPerYard: 120 },
+  ],
+  laborPerYard: 35,
+  deliveryFee: 65,
+  minimumJob: 175,
+  addOns: [
+    { id: 'weeding',  label: 'Bed Weeding',    price: 55,  unit: 'flat'      },
+    { id: 'edging',   label: 'Bed Edging',     price: 1.5, unit: 'per_lf'   },
+    { id: 'shrub',    label: 'Shrub Trimming', price: 20,  unit: 'per_shrub' },
+    { id: 'haul_off', label: 'Debris Haul-Off',price: 65,  unit: 'flat'      },
+  ],
+};
+
+export const MULCH_DIFFICULTY = [
+  { id: 'easy',      label: 'Easy',      multiplier: 1.0  },
+  { id: 'average',   label: 'Average',   multiplier: 1.15 },
+  { id: 'difficult', label: 'Difficult', multiplier: 1.3  },
+  { id: 'extreme',   label: 'Extreme',   multiplier: 1.5  },
+] as const;
+
+export const MULCH_DEPTHS = [1, 1.5, 2, 2.5, 3, 4] as const;
+
+/** Calculate raw and rounded (up to nearest 0.5 yd) cubic yards */
+export function calcMulchYards(sqft: number, depthInches: number): { raw: number; rounded: number } {
+  const raw = (sqft * depthInches) / 324;
+  const rounded = Math.ceil(raw * 2) / 2;
+  return { raw, rounded };
+}
+
+/** Full mulch job price breakdown */
+export function calcMulchPrice(opts: {
+  sqft: number;
+  depthInches: number;
+  sellPerYard: number;
+  laborPerYard: number;
+  difficultyMultiplier: number;
+  deliveryFee: number;
+  minimumJob: number;
+  addOns: { id: string; enabled: boolean; qty: number; price: number }[];
+}): {
+  rawYards: number;
+  roundedYards: number;
+  materialTotal: number;
+  laborTotal: number;
+  delivery: number;
+  addOnsTotal: number;
+  subtotal: number;
+  finalPrice: number;
+  hitMinimum: boolean;
+} {
+  const { raw, rounded } = calcMulchYards(opts.sqft, opts.depthInches);
+  const materialTotal = Math.round(rounded * opts.sellPerYard * 100) / 100;
+  const laborTotal = Math.round(rounded * opts.laborPerYard * opts.difficultyMultiplier * 100) / 100;
+  const delivery = opts.deliveryFee;
+  const addOnsTotal = opts.addOns
+    .filter(a => a.enabled)
+    .reduce((sum, a) => sum + a.price * a.qty, 0);
+  const subtotal = materialTotal + laborTotal + delivery + addOnsTotal;
+  const hitMinimum = subtotal < opts.minimumJob;
+  const finalPrice = Math.round(Math.max(subtotal, opts.minimumJob) * 100) / 100;
+  return { rawYards: raw, roundedYards: rounded, materialTotal, laborTotal, delivery, addOnsTotal, subtotal, finalPrice, hitMinimum };
+}
 
 // ============================================================
 // RTCEP / CTCEP PLAN DEFINITIONS

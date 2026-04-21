@@ -116,6 +116,8 @@ export interface CompanySettings {
   qbConnected: boolean;
   qbRealmId: string | null;
   qbTokenExpiresAt: string | null;
+  quoApiKey: string | null;
+  quoFromNumber: string | null;
 }
 
 export interface QuoteAttachment {
@@ -332,6 +334,8 @@ export function rowToSettings(r: any): CompanySettings {
     qbConnected: !!r.qb_realm_id,
     qbRealmId: r.qb_realm_id ?? null,
     qbTokenExpiresAt: r.qb_token_expires_at ?? null,
+    quoApiKey: r.quo_api_key ?? null,
+    quoFromNumber: r.quo_from_number ?? null,
   };
 }
 
@@ -453,7 +457,7 @@ export function rowToServiceAgreement(r: any): ServiceAgreement {
 }
 
 // ── Job Types ──────────────────────────────────────────────────────────
-export type JobType   = 'one_time' | 'subscription_visit';
+export type JobType   = 'one_time' | 'subscription_visit' | 'quote_visit';
 export type JobStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
 
 export interface Job {
@@ -466,6 +470,7 @@ export interface Job {
   serviceName: string;
   status: JobStatus;
   scheduledDate: string | null;     // ISO date 'YYYY-MM-DD'
+  scheduledTime: string | null;     // 'HH:MM' 24-hour, for quote visits
   scheduledWindow: string | null;   // 'morning' | 'afternoon' | 'evening' | 'anytime'
   startTime: string | null;         // ISO timestamptz
   endTime: string | null;           // ISO timestamptz
@@ -491,6 +496,7 @@ export function rowToJob(r: any): Job {
     serviceName: r.service_name,
     status: r.status ?? 'scheduled',
     scheduledDate: r.scheduled_date ?? null,
+    scheduledTime: r.scheduled_time ?? null,
     scheduledWindow: r.scheduled_window ?? null,
     startTime: r.start_time ?? null,
     endTime: r.end_time ?? null,
