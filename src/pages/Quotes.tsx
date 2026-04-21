@@ -40,7 +40,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle, Link2, CheckCircle2, Loader2, Pencil, X } from "lucide-react";
+import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle, Send, CheckCircle2, Loader2, Pencil, X } from "lucide-react";
 
 function fmt(n: number): string {
   return "$" + n.toFixed(2);
@@ -358,15 +358,16 @@ function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => 
 
   const copyEsignLink = async () => {
     if (!quote.acceptToken) {
-      toast({ title: 'No e-sign token', description: 'This quote has no signing link yet.', variant: 'destructive' });
+      toast({ title: 'No link available', description: 'This quote has no signing link. Try re-saving it.', variant: 'destructive' });
       return;
     }
     const url = `${window.location.origin}/.netlify/functions/esign?token=${quote.acceptToken}`;
     try {
       await navigator.clipboard.writeText(url);
-      toast({ title: 'E-sign link copied!', description: 'Paste and send to your customer.' });
+      toast({ title: 'Quote link copied!', description: 'Paste it into a text message or email and send to your customer. They\'ll see the full quote and can sign right there.' });
     } catch {
-      toast({ title: 'E-sign link', description: url });
+      // Clipboard blocked — show the URL so they can copy manually
+      toast({ title: 'Copy this link and send to your customer', description: url });
     }
   };
 
@@ -559,23 +560,19 @@ function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => 
             </>
           ) : (
             <>
-              <Button variant="outline" size="sm" onClick={startEdit} className="min-h-[44px]">
-                <Pencil className="h-4 w-4 mr-1" />Edit
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setShowExportDialog(true)} className="min-h-[44px]" disabled={isPdfLoading}>
-                {isPdfLoading ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Generating…</> : <><Download className="h-4 w-4 mr-1" />PDF</>}
-              </Button>
-              {quote.status !== "accepted" && quote.status !== "declined" && (
-                <Button variant="outline" size="sm" onClick={copyEsignLink} className="min-h-[44px]">
-                  <Link2 className="h-4 w-4 mr-1" />E-Sign Link
+              {/* ── Primary: Send Quote link ── */}
+              {quote.status !== "accepted" && quote.status !== "declined" ? (
+                <Button size="sm" onClick={copyEsignLink} className="min-h-[44px] bg-green-700 hover:bg-green-800 text-white">
+                  <Send className="h-4 w-4 mr-1.5" />Send Quote
                 </Button>
-              )}
-              {quote.signedAt && (
-                <span className="flex items-center gap-1 text-sm font-medium text-green-600 dark:text-green-400 px-2">
+              ) : quote.signedAt ? (
+                <span className="flex items-center gap-1 text-sm font-medium text-green-600 dark:text-green-400 px-1">
                   <CheckCircle2 className="h-4 w-4" />
                   Signed {new Date(quote.signedAt).toLocaleDateString()}
                 </span>
-              )}
+              ) : null}
+
+              {/* ── Post-acceptance actions ── */}
               {quote.status === "accepted" && (
                 <Button variant="default" size="sm" onClick={() => activateSubMutation.mutate()} disabled={activateSubMutation.isPending} className="min-h-[44px] bg-green-700 hover:bg-green-800">
                   <CalendarCheck className="h-4 w-4 mr-1" />
@@ -583,17 +580,16 @@ function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => 
                 </Button>
               )}
               {quote.status === "accepted" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="min-h-[44px]"
-                  disabled={convertToJobMutation.isPending}
-                  onClick={() => convertToJobMutation.mutate()}
-                >
+                <Button variant="outline" size="sm" className="min-h-[44px]" disabled={convertToJobMutation.isPending} onClick={() => convertToJobMutation.mutate()}>
                   <Briefcase className="h-4 w-4 mr-1" />
                   {convertToJobMutation.isPending ? "Creating…" : "Convert to Job"}
                 </Button>
               )}
+
+              {/* ── Secondary: Edit, status, PDF (small), trash ── */}
+              <Button variant="outline" size="sm" onClick={startEdit} className="min-h-[44px]">
+                <Pencil className="h-4 w-4 mr-1" />Edit
+              </Button>
               <Select value={quote.status} onValueChange={val => updateStatusMutation.mutate(val)}>
                 <SelectTrigger className="min-h-[44px] w-[120px]"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -603,7 +599,10 @@ function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => 
                   <SelectItem value="declined">Declined</SelectItem>
                 </SelectContent>
               </Select>
-              <Button variant="outline" size="sm" onClick={() => trashMutation.mutate()} className="min-h-[44px] text-destructive border-destructive/30 hover:bg-destructive/10">
+              <Button variant="ghost" size="icon" className="min-h-[44px] min-w-[44px] text-muted-foreground" onClick={() => setShowExportDialog(true)} disabled={isPdfLoading} title="Download PDF">
+                {isPdfLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              </Button>
+              <Button variant="outline" size="icon" className="min-h-[44px] min-w-[44px] text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => trashMutation.mutate()}>
                 <Trash2 className="h-4 w-4" />
               </Button>
             </>

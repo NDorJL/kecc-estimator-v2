@@ -159,16 +159,6 @@ export const handler: Handler = async (event) => {
     doc.text('Customer Signature', 50, y)
     doc.text('Date', 310, y)
 
-    // E-sign URL so customer can sign digitally from the PDF
-    if (quoteRow.accept_token) {
-      const host = event.headers?.host ?? ''
-      const origin = host.includes('localhost') ? `http://${host}` : `https://${host}`
-      const esignUrl = `${origin}/.netlify/functions/esign?token=${quoteRow.accept_token}`
-      y += 18
-      doc.fontSize(8).font('Helvetica-Bold').fillColor('#333333').text('Sign digitally:', 50, y)
-      doc.fontSize(8).font('Helvetica').fillColor('#2563eb').text(esignUrl, 50, y + 11, { width: pageW, link: esignUrl })
-      y += 10
-    }
 
     if (settings.quoteFooter) {
       y += 30
