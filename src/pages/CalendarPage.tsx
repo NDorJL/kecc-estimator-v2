@@ -459,11 +459,18 @@ function DayDetailSheet({
                         <p className="text-xs text-muted-foreground mt-1 bg-muted/50 rounded p-1.5">{ev.job.notes}</p>
                       )}
                       {ev.job && !isConfirming && (
-                        <span className={`mt-2 inline-block text-xs font-medium px-2 py-0.5 rounded-full ${
-                          ev.job.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' :
-                          ev.job.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
-                        }`}>{ev.job.status.replace('_', ' ')}</span>
+                        <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                          <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${
+                            ev.job.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' :
+                            ev.job.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
+                          }`}>{ev.job.status.replace('_', ' ')}</span>
+                          {ev.job.jobType === 'one_time' && ev.job.customerPhone && (
+                            ev.job.reminderSentAt
+                              ? <span className="inline-block text-xs px-2 py-0.5 rounded-full bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400">📱 Reminder sent</span>
+                              : <span className="inline-block text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">📱 Reminder pending</span>
+                          )}
+                        </div>
                       )}
 
                       {/* Inline delete confirm */}

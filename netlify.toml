@@ -25,6 +25,9 @@
   memory_size = 1024
   external_node_modules = ["pdfkit"]
 
+[functions."send-reminders"]
+  schedule = "0 14 * * *"
+
 [[headers]]
   for = "/*"
   [headers.values]
