@@ -205,8 +205,12 @@ export const handler: Handler = async (event) => {
 
     return { statusCode: 405, headers: CORS, body: JSON.stringify({ error: 'Method not allowed' }) }
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.error('agreements error:', message)
+    const message = err instanceof Error
+      ? err.message
+      : (err && typeof err === 'object' && 'message' in err)
+        ? String((err as Record<string,unknown>).message)
+        : String(err)
+    console.error('agreements error:', err)
     return { statusCode: 500, headers: CORS, body: JSON.stringify({ error: message }) }
   }
 }
