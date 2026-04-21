@@ -13,11 +13,24 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 }
 
-/** Send SMS via Quo API */
+/** Send SMS via Quo API
+ *
+ * Set the QUO_BASE_URL Netlify env var to your Quo API base URL.
+ * The function posts to {QUO_BASE_URL}/messages with:
+ *   { from, to, body }
+ * and Authorization: Bearer {apiKey}
+ *
+ * If your Quo account uses a different field name or endpoint path,
+ * update QUO_BASE_URL and the JSON body below accordingly.
+ */
 async function sendQuoSms(apiKey: string, fromNumber: string, toNumber: string, body: string): Promise<void> {
-  // Quo API endpoint — update QUO_BASE_URL env var if your endpoint differs
-  const baseUrl = process.env.QUO_BASE_URL ?? 'https://api.quobell.com/v1'
-  const res = await fetch(`${baseUrl}/messages`, {
+  const baseUrl = (process.env.QUO_BASE_URL ?? '').replace(/\/$/, '')
+  if (!baseUrl) {
+    throw new Error('QUO_BASE_URL environment variable is not set. Add it to Netlify → Site configuration → Environment variables.')
+  }
+
+  const url = `${baseUrl}/messages`
+  const res = await fetch(url, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
@@ -27,7 +40,7 @@ async function sendQuoSms(apiKey: string, fromNumber: string, toNumber: string, 
   })
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)
-    throw new Error(`Quo API error ${res.status}: ${text}`)
+    throw new Error(`Quo API error ${res.status} at ${url}: ${text}`)
   }
 }
 
@@ -136,6 +149,14 @@ export const handler: Handler = async (event) => {
       }
 
       return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true, message }) }
+    }
+
+    // ── Test SMS (send a short test message to the company phone) ──────────
+    if (action === 'test') {
+      const { to } = body
+      if (!to) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'to required' }) }
+      await sendQuoSms(apiKey, fromNumber, to, `✅ Test message from ${companyName} CRM. SMS is working correctly.`)
+      return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true }) }
     }
 
     return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'Unknown action' }) }

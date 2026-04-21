@@ -536,6 +536,8 @@ function SmsSection({ settings }: { settings: CompanySettings | null }) {
   const [apiKey, setApiKey] = useState(settings?.quoApiKey ?? '')
   const [fromNumber, setFromNumber] = useState(settings?.quoFromNumber ?? '')
   const [showKey, setShowKey] = useState(false)
+  const [testPhone, setTestPhone] = useState('')
+  const [testing, setTesting] = useState(false)
 
   useEffect(() => {
     setApiKey(settings?.quoApiKey ?? '')
@@ -553,6 +555,28 @@ function SmsSection({ settings }: { settings: CompanySettings | null }) {
     },
     onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
   })
+
+  async function handleTestSms() {
+    if (!testPhone) return
+    setTesting(true)
+    try {
+      const res = await fetch('/.netlify/functions/sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'test', to: testPhone }),
+      })
+      const data = await res.json().catch(() => ({ message: `HTTP ${res.status}` }))
+      if (!res.ok) {
+        toast({ title: 'SMS test failed', description: data?.message ?? `HTTP ${res.status}`, variant: 'destructive' })
+      } else {
+        toast({ title: 'Test SMS sent!', description: `Check ${testPhone} for a test message.` })
+      }
+    } catch (err: unknown) {
+      toast({ title: 'SMS test failed', description: err instanceof Error ? err.message : String(err), variant: 'destructive' })
+    } finally {
+      setTesting(false)
+    }
+  }
 
   const configured = !!(settings?.quoApiKey && settings?.quoFromNumber)
 
@@ -598,16 +622,44 @@ function SmsSection({ settings }: { settings: CompanySettings | null }) {
           <p className="text-[11px] text-muted-foreground">Your Quo outbound number in E.164 format (e.g. +18651234567)</p>
         </div>
         <p className="text-[11px] text-muted-foreground">
-          If your Quo API endpoint differs from the default, set <code className="bg-muted px-1 rounded">QUO_BASE_URL</code> in your Netlify environment variables.
+          Set <code className="bg-muted px-1 rounded">QUO_BASE_URL</code> in your Netlify environment variables to your Quo API base URL (e.g. <code className="bg-muted px-1 rounded">https://api.yourdomain.com/v1</code>). The function will POST to <code className="bg-muted px-1 rounded">QUO_BASE_URL/messages</code>.
         </p>
         <Button
           onClick={() => saveMutation.mutate()}
           disabled={saveMutation.isPending}
           size="sm"
-          className="min-h-[40px]"
+          className="min-h-[40px] w-full"
         >
           {saveMutation.isPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</> : <><Save className="h-4 w-4 mr-2" />Save SMS Settings</>}
         </Button>
+
+        {/* Test SMS */}
+        {configured && (
+          <div className="pt-1 border-t space-y-2">
+            <label className="text-xs font-medium">Send a Test Message</label>
+            <div className="flex gap-2">
+              <Input
+                type="tel"
+                value={testPhone}
+                onChange={e => setTestPhone(e.target.value)}
+                placeholder="+18651234567"
+                className="min-h-[40px] flex-1"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleTestSms}
+                disabled={testing || !testPhone}
+                className="shrink-0 min-h-[40px]"
+              >
+                {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Send Test'}
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Sends a short test message to the number above. The actual error will appear here if it fails.
+            </p>
+          </div>
+        )}
       </CardContent>
     </Card>
   )

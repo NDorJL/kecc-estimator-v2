@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
-import { ChevronLeft, ChevronRight, MapPin, Phone, Wrench, RefreshCw, Calendar, Clock, GripVertical, ClipboardList, Plus, MessageSquare, Search, X, User } from 'lucide-react'
+import { ChevronLeft, ChevronRight, MapPin, Phone, Wrench, RefreshCw, Calendar, Clock, GripVertical, ClipboardList, Plus, MessageSquare, Search, X, User, Trash2, AlertTriangle } from 'lucide-react'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -358,19 +358,37 @@ const WINDOW_LABELS: Record<string, string> = {
 }
 
 function DayDetailSheet({
-  date, events, contractors, open, onClose,
+  date, events, contractors, open, onClose, onDeleteJob,
 }: {
-  date: Date | null; events: CalEvent[]; contractors: Contractor[]; open: boolean; onClose: () => void
+  date: Date | null
+  events: CalEvent[]
+  contractors: Contractor[]
+  open: boolean
+  onClose: () => void
+  onDeleteJob: (jobId: string) => Promise<void>
 }) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
   if (!date) return null
   const label = date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
 
+  async function handleConfirmDelete(jobId: string) {
+    setDeleting(true)
+    try {
+      await onDeleteJob(jobId)
+      setConfirmDeleteId(null)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   return (
-    <Sheet open={open} onOpenChange={onClose}>
+    <Sheet open={open} onOpenChange={(v) => { if (!v) { setConfirmDeleteId(null); onClose() } }}>
       <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[85dvh] overflow-y-auto">
         <SheetHeader className="mb-4">
           <SheetTitle>{label}</SheetTitle>
-          <p className="text-sm text-muted-foreground">{events.length} job{events.length !== 1 ? 's' : ''}</p>
+          <p className="text-sm text-muted-foreground">{events.length} event{events.length !== 1 ? 's' : ''}</p>
         </SheetHeader>
 
         {events.length === 0 ? (
@@ -379,16 +397,30 @@ function DayDetailSheet({
           <div className="space-y-3">
             {events.map(ev => {
               const contractor = contractors.find(c => c.id === (ev.job?.contractorId ?? ev.contractorId))
+              const isDeletable = !!ev.job  // only one-time jobs and quote visits (not subscription events)
+              const isConfirming = confirmDeleteId === ev.job?.id
+
               return (
-                <div key={ev.id} className="rounded-xl border bg-card p-3">
+                <div key={ev.id} className={`rounded-xl border bg-card p-3 transition-colors ${isConfirming ? 'border-destructive/50 bg-destructive/5' : ''}`}>
                   <div className="flex items-start gap-2">
                     <div className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${ev.color}`} />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <p className="font-semibold text-sm truncate">{ev.title}</p>
-                        <Badge variant="secondary" className="text-xs shrink-0">
-                          {ev.type === 'subscription' ? 'Sub' : 'One-Time'}
-                        </Badge>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <Badge variant="secondary" className="text-xs">
+                            {ev.type === 'subscription' ? 'Sub' : ev.type === 'quote_visit' ? 'Quote Visit' : 'One-Time'}
+                          </Badge>
+                          {isDeletable && !isConfirming && (
+                            <button
+                              onClick={() => setConfirmDeleteId(ev.job!.id)}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                              title="Delete event"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <p className="text-xs text-muted-foreground">{ev.subtitle}</p>
 
@@ -426,12 +458,41 @@ function DayDetailSheet({
                       {ev.job?.notes && (
                         <p className="text-xs text-muted-foreground mt-1 bg-muted/50 rounded p-1.5">{ev.job.notes}</p>
                       )}
-                      {ev.job && (
+                      {ev.job && !isConfirming && (
                         <span className={`mt-2 inline-block text-xs font-medium px-2 py-0.5 rounded-full ${
                           ev.job.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' :
                           ev.job.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' :
                           'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
                         }`}>{ev.job.status.replace('_', ' ')}</span>
+                      )}
+
+                      {/* Inline delete confirm */}
+                      {isConfirming && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />
+                          <span className="text-xs text-destructive flex-1">Delete this event?</span>
+                          <button
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="text-xs px-2.5 py-1 rounded-md border hover:bg-muted transition-colors"
+                            disabled={deleting}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={() => handleConfirmDelete(ev.job!.id)}
+                            className="text-xs px-2.5 py-1 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
+                            disabled={deleting}
+                          >
+                            {deleting ? '…' : 'Delete'}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Subscription events: explain why no delete */}
+                      {ev.type === 'subscription' && (
+                        <p className="text-xs text-muted-foreground mt-1.5 italic">
+                          Recurring visit — manage in Subscriptions tab.
+                        </p>
                       )}
                     </div>
                   </div>
@@ -593,21 +654,27 @@ function NewQuoteVisitSheet({
 
       // 3. Send SMS confirmation if enabled and phone provided
       if (sendSms && customerPhone) {
-        const smsRes = await fetch('/.netlify/functions/sms', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'quote-visit-confirmation',
-            to: customerPhone,
-            customerName,
-            scheduledDate,
-            scheduledTime,
-          }),
-        })
-        if (!smsRes.ok) {
-          toast({ title: 'Quote visit added', description: 'SMS failed to send. Check Quo settings.', variant: 'destructive' })
-        } else {
-          toast({ title: 'Quote visit added', description: `Confirmation text sent to ${customerPhone}` })
+        try {
+          const smsRes = await fetch('/.netlify/functions/sms', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'quote-visit-confirmation',
+              to: customerPhone,
+              customerName,
+              scheduledDate,
+              scheduledTime,
+            }),
+          })
+          if (!smsRes.ok) {
+            const errData = await smsRes.json().catch(() => ({ message: `HTTP ${smsRes.status}` }))
+            const errMsg = errData?.message ?? `HTTP ${smsRes.status}`
+            toast({ title: 'Quote visit added — SMS failed', description: errMsg, variant: 'destructive' })
+          } else {
+            toast({ title: 'Quote visit added', description: `Confirmation text sent to ${customerPhone}` })
+          }
+        } catch {
+          toast({ title: 'Quote visit added — SMS failed', description: 'Could not reach SMS function.', variant: 'destructive' })
         }
       } else {
         toast({ title: 'Quote visit added' })
@@ -816,6 +883,15 @@ export default function CalendarPage() {
     queryFn: () => apiGet('/contractors'),
   })
 
+  const deleteJobMutation = useMutation({
+    mutationFn: (id: string) => apiRequest('DELETE', `/jobs/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/jobs'] })
+      toast({ title: 'Event deleted' })
+    },
+    onError: (err: Error) => toast({ title: 'Delete failed', description: err.message, variant: 'destructive' }),
+  })
+
   const scheduleJobMutation = useMutation({
     mutationFn: ({ id, scheduledDate, scheduledWindow, startTime }: {
       id: string; scheduledDate: string; scheduledWindow: string; startTime?: string
@@ -1019,6 +1095,13 @@ export default function CalendarPage() {
         contractors={contractors}
         open={!!selectedDate}
         onClose={() => setSelectedDate(null)}
+        onDeleteJob={async (jobId) => {
+          await deleteJobMutation.mutateAsync(jobId)
+          // Close sheet automatically if no events will remain
+          if (selectedEvents.filter(e => e.job?.id !== jobId).length === 0) {
+            setSelectedDate(null)
+          }
+        }}
       />
 
       {/* New Quote Visit */}
