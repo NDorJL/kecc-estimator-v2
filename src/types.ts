@@ -171,6 +171,7 @@ export interface ServiceAgreement {
   customerName: string;
   customerAddress: string | null;
   status: AgreementStatus;
+  quoteType: string | null;
   pdfPath: string | null;
   pdfUrl: string | null;
   acceptToken: string | null;
@@ -440,6 +441,7 @@ export function rowToServiceAgreement(r: any): ServiceAgreement {
     customerName: r.customer_name,
     customerAddress: r.customer_address ?? null,
     status: r.status,
+    quoteType: r.quote_type ?? null,
     pdfPath: r.pdf_path ?? null,
     pdfUrl: r.pdf_url ?? null,
     acceptToken: r.accept_token ?? null,

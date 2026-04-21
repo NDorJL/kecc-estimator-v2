@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useServices } from "@/lib/services-context";
-import type { Subscription, SubscriptionService, ChangeHistoryEntry } from "@/types";
+import type { Subscription, SubscriptionService, ChangeHistoryEntry, ServiceAgreement } from "@/types";
 import { MOWING_MONTHS, ALL_MONTHS, SEASONAL_CATEGORIES, computeSeasonalTotals } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ChevronLeft, Download, Plus, Trash2, Pause, Play, XCircle, History, Archive, RotateCcw, ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronLeft, Download, Plus, Trash2, Pause, Play, XCircle, History, Archive, RotateCcw, ChevronDown, ChevronRight, FileSignature, Copy, CheckCircle2, Send } from "lucide-react";
 
 const fmt = (n: number) => "$" + n.toFixed(2);
 const MONTH_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -165,6 +165,178 @@ function MonthSelector({ value, onChange }: { value: number[]; onChange: (months
   );
 }
 
+const AGREEMENT_STATUS_STYLES: Record<string, string> = {
+  draft: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+  pending_signature: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+  signed: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
+  void: "bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300",
+};
+
+const PLAN_OPTIONS = [
+  { value: "residential_autopilot", label: "One-Service Autopilot (Residential)" },
+  { value: "commercial_autopilot", label: "One-Service Autopilot (Commercial)" },
+  { value: "residential_tcep", label: "TCEP — Total Care Exterior Plan (Residential)" },
+  { value: "commercial_tcep", label: "TPC — Total Property Care (Commercial)" },
+];
+
+function AgreementSection({ sub }: { sub: Subscription }) {
+  const { toast } = useToast();
+  const [showPlanPicker, setShowPlanPicker] = useState(false);
+  const [selectedPlan, setSelectedPlan] = useState<string>("");
+
+  const { data: agreements = [], isLoading, refetch } = useQuery<ServiceAgreement[]>({
+    queryKey: ["/agreements", sub.id],
+    queryFn: () =>
+      fetch(`/.netlify/functions/agreements?subscriptionId=${sub.id}`)
+        .then(r => r.json()),
+  });
+
+  // Most recent non-void agreement
+  const activeAgreement = agreements.find(a => a.status !== "void") ?? null;
+
+  const generateMutation = useMutation({
+    mutationFn: async (quoteType: string) => {
+      const res = await apiRequest("POST", "/agreements?action=generate-for-subscription", {
+        subscriptionId: sub.id,
+        contactId: sub.contactId,
+        quoteType,
+      });
+      return res.json();
+    },
+    onSuccess: (data: { signUrl: string }) => {
+      queryClient.invalidateQueries({ queryKey: ["/agreements", sub.id] });
+      queryClient.invalidateQueries({ queryKey: ["/subscriptions"] });
+      refetch();
+      setShowPlanPicker(false);
+      // Copy sign URL to clipboard
+      navigator.clipboard.writeText(data.signUrl).catch(() => {});
+      toast({ title: "Agreement generated", description: "Sign link copied to clipboard." });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  const handleGenerate = () => {
+    if (!selectedPlan) return;
+    generateMutation.mutate(selectedPlan);
+  };
+
+  const handleCopyLink = () => {
+    if (!activeAgreement?.acceptToken) return;
+    const baseUrl = window.location.origin;
+    const url = `${baseUrl}/.netlify/functions/esign?token=${activeAgreement.acceptToken}`;
+    navigator.clipboard.writeText(url).then(() => {
+      toast({ title: "Sign link copied", description: "Send this link to the customer to sign." });
+    }).catch(() => {
+      toast({ title: "Copy failed", description: url, variant: "destructive" });
+    });
+  };
+
+  const handleOpenLink = () => {
+    if (!activeAgreement?.acceptToken) return;
+    const baseUrl = window.location.origin;
+    const url = `${baseUrl}/.netlify/functions/esign?token=${activeAgreement.acceptToken}`;
+    window.open(url, "_blank");
+  };
+
+  return (
+    <>
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm flex items-center gap-1.5">
+              <FileSignature className="h-4 w-4" /> Service Agreement
+            </CardTitle>
+            {!activeAgreement && !isLoading && (
+              <Button size="sm" variant="outline" onClick={() => { setSelectedPlan(""); setShowPlanPicker(true); }} className="min-h-[36px]">
+                <Send className="h-3.5 w-3.5 mr-1" /> Generate
+              </Button>
+            )}
+            {activeAgreement && activeAgreement.status !== "signed" && (
+              <Button size="sm" variant="outline" onClick={() => { setSelectedPlan(activeAgreement.quoteType ?? ""); setShowPlanPicker(true); }} className="min-h-[36px]">
+                <Send className="h-3.5 w-3.5 mr-1" /> Regenerate
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {isLoading && <p className="text-xs text-muted-foreground">Loading...</p>}
+          {!isLoading && !activeAgreement && (
+            <p className="text-xs text-muted-foreground">No service agreement yet. Generate one to send to the customer for signing.</p>
+          )}
+          {activeAgreement && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge className={AGREEMENT_STATUS_STYLES[activeAgreement.status] ?? ""}>
+                  {activeAgreement.status.replace("_", " ").replace(/\b\w/g, c => c.toUpperCase())}
+                </Badge>
+                {activeAgreement.quoteType && (
+                  <span className="text-xs text-muted-foreground">
+                    {PLAN_OPTIONS.find(p => p.value === activeAgreement.quoteType)?.label ?? activeAgreement.quoteType}
+                  </span>
+                )}
+              </div>
+              {activeAgreement.status === "signed" && activeAgreement.signedAt && (
+                <div className="flex items-center gap-1.5 text-sm text-green-700 dark:text-green-400 font-medium">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Signed {new Date(activeAgreement.signedAt).toLocaleDateString()}
+                </div>
+              )}
+              {activeAgreement.status === "pending_signature" && (
+                <div className="flex gap-2 flex-wrap">
+                  <Button size="sm" variant="outline" onClick={handleCopyLink} className="min-h-[36px]">
+                    <Copy className="h-3.5 w-3.5 mr-1" /> Copy Sign Link
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={handleOpenLink} className="min-h-[36px] text-muted-foreground">
+                    Preview
+                  </Button>
+                </div>
+              )}
+              <p className="text-[10px] text-muted-foreground">
+                Created {new Date(activeAgreement.createdAt).toLocaleDateString()}
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Plan Type Picker Dialog */}
+      <Dialog open={showPlanPicker} onOpenChange={setShowPlanPicker}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Select Agreement Plan Type</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            <p className="text-sm text-muted-foreground">Choose the plan type for this service agreement. This determines which legal template and benefit sections are included.</p>
+            <div className="space-y-2">
+              {PLAN_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setSelectedPlan(opt.value)}
+                  className={`w-full text-left px-3 py-2.5 rounded-md border text-sm transition-colors ${
+                    selectedPlan === opt.value
+                      ? "border-primary bg-primary/5 font-medium"
+                      : "border-border hover:border-primary/50"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <Button
+              onClick={handleGenerate}
+              disabled={!selectedPlan || generateMutation.isPending}
+              className="w-full min-h-[44px]"
+            >
+              {generateMutation.isPending ? "Generating..." : "Generate Agreement"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function SubscriptionDetail({ sub, onBack }: { sub: Subscription; onBack: () => void }) {
   const { toast } = useToast();
   const [services, setServices] = useState<SubscriptionService[]>([]);
@@ -307,6 +479,8 @@ function SubscriptionDetail({ sub, onBack }: { sub: Subscription; onBack: () => 
           </div>
         </CardContent>
       </Card>
+
+      <AgreementSection sub={activeSub} />
 
       {!isReadOnly && (
         <div className="flex items-center gap-2">
