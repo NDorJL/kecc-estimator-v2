@@ -539,6 +539,7 @@ function NewQuoteVisitSheet({
   // Form fields (auto-filled from contact or typed manually)
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
+  const [customerEmail, setCustomerEmail] = useState('')
   const [customerAddress, setCustomerAddress] = useState('')
   const [scheduledDate, setScheduledDate] = useState(defaultDate)
   const [scheduledTime, setScheduledTime] = useState('09:00')
@@ -581,18 +582,31 @@ function NewQuoteVisitSheet({
     return () => document.removeEventListener('mousedown', handler)
   }, [showDropdown])
 
-  function selectContact(c: Contact) {
+  async function selectContact(c: Contact) {
     setSelectedContact(c)
     setCustomerName(c.name)
     setCustomerPhone(c.phone ?? '')
+    setCustomerEmail(c.email ?? '')
     setContactSearch('')
     setShowDropdown(false)
+
+    // Fetch their first property to auto-fill address
+    try {
+      const props = await apiGet<Array<{ address: string }>>(`/properties?contactId=${c.id}`)
+      if (props && props.length > 0 && props[0].address) {
+        setCustomerAddress(props[0].address)
+      }
+    } catch {
+      // non-fatal — address stays blank
+    }
   }
 
   function clearContact() {
     setSelectedContact(null)
     setCustomerName('')
     setCustomerPhone('')
+    setCustomerEmail('')
+    setCustomerAddress('')
     setContactSearch('')
   }
 
@@ -601,6 +615,7 @@ function NewQuoteVisitSheet({
     setContactSearch('')
     setCustomerName('')
     setCustomerPhone('')
+    setCustomerEmail('')
     setCustomerAddress('')
     setVisitNotes('')
     setSendSms(true)
@@ -624,6 +639,7 @@ function NewQuoteVisitSheet({
           contactId: selectedContact?.id ?? null,
           customerName,
           customerPhone: customerPhone || null,
+          customerEmail: customerEmail || null,
           customerAddress: customerAddress || null,
           notes: visitNotes || null,
         }),
@@ -803,6 +819,17 @@ function NewQuoteVisitSheet({
               value={customerPhone}
               onChange={e => setCustomerPhone(e.target.value)}
               placeholder="+18651234567"
+              className="min-h-[44px]"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <Label className="text-xs">Customer Email</Label>
+            <Input
+              type="email"
+              value={customerEmail}
+              onChange={e => setCustomerEmail(e.target.value)}
+              placeholder="email@example.com"
               className="min-h-[44px]"
             />
           </div>

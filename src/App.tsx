@@ -1,16 +1,25 @@
 import { Switch, Route, Router, Link, useLocation } from 'wouter'
 import { useHashLocation } from 'wouter/use-hash-location'
 import { queryClient } from './lib/queryClient'
-import { QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { Toaster } from '@/components/ui/toaster'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ThemeProvider, useTheme } from '@/components/theme-provider'
 import { QuoteProvider } from '@/lib/quote-context'
 import { ServicesProvider } from '@/lib/services-context'
 import { Button } from '@/components/ui/button'
+import { useEffect } from 'react'
+import { apiGet } from '@/lib/queryClient'
+import { CompanySettings } from '@/types'
+import {
+  applyTheme, clearTheme,
+  ALL_NAV_ITEMS, DEFAULT_NAV,
+  type NavItemConfig,
+} from '@/lib/theme'
 import {
   LayoutDashboard, Calendar, Calculator as CalcIcon, FileText,
-  Settings, Sun, Moon, RefreshCw,
+  Settings, Sun, Moon, RefreshCw, Users, Briefcase,
+  BookOpen, TrendingUp, Megaphone,
 } from 'lucide-react'
 import Dashboard from '@/pages/Dashboard'
 import Contacts from '@/pages/Contacts'
@@ -25,12 +34,56 @@ import PriceBook from '@/pages/PriceBook'
 import SettingsPage from '@/pages/Settings'
 import Finance from '@/pages/Finance'
 
+// Map nav id → lucide icon
+const NAV_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  dashboard:     LayoutDashboard,
+  contacts:      Users,
+  calendar:      Calendar,
+  jobs:          Briefcase,
+  calculator:    CalcIcon,
+  quotes:        FileText,
+  subscriptions: RefreshCw,
+  finance:       TrendingUp,
+  pricebook:     BookOpen,
+  leads:         Megaphone,
+  settings:      Settings,
+}
+
+// ── Theme applicator — runs whenever settings change ─────────────────────────
+
+function ThemeApplicator() {
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ['/settings'],
+    queryFn: () => apiGet<CompanySettings>('/settings'),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  useEffect(() => {
+    if (!settings?.themeConfig || Object.keys(settings.themeConfig).length === 0) {
+      clearTheme()
+      return
+    }
+    applyTheme(settings.themeConfig)
+  }, [settings?.themeConfig])
+
+  return null
+}
+
+// ── Header ───────────────────────────────────────────────────────────────────
 
 function AppHeader() {
   const { theme, toggleTheme } = useTheme()
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ['/settings'],
+    queryFn: () => apiGet<CompanySettings>('/settings'),
+    staleTime: 5 * 60 * 1000,
+  })
+
   return (
     <header className="sticky top-0 z-50 flex items-center justify-between border-b bg-card px-4" style={{ minHeight: 48 }}>
-      <h1 className="text-base font-bold tracking-tight">Knox Exterior Care Co.</h1>
+      <h1 className="text-base font-bold tracking-tight">
+        {settings?.companyName ?? 'Knox Exterior Care Co.'}
+      </h1>
       <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-9 w-9">
         {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
       </Button>
@@ -38,23 +91,39 @@ function AppHeader() {
   )
 }
 
-const primaryTabs = [
-  { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/calculator', label: 'Calculator', icon: CalcIcon },
-  { path: '/calendar', label: 'Calendar', icon: Calendar },
-  { path: '/quotes', label: 'Quotes', icon: FileText },
-  { path: '/subscriptions', label: 'Subs', icon: RefreshCw },
-  { path: '/settings', label: 'Settings', icon: Settings },
-] as const
+// ── Dynamic bottom nav ───────────────────────────────────────────────────────
 
 function BottomTabBar() {
   const [location] = useLocation()
+  const { data: settings } = useQuery<CompanySettings>({
+    queryKey: ['/settings'],
+    queryFn: () => apiGet<CompanySettings>('/settings'),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // Merge saved config with defaults
+  const savedItems: NavItemConfig[] = settings?.navConfig?.items ?? []
+  const mergedItems: NavItemConfig[] = ALL_NAV_ITEMS.map(def => {
+    const saved = savedItems.find(s => s.id === def.id)
+    if (saved) return saved
+    const defaultItem = DEFAULT_NAV.find(d => d.id === def.id)
+    return { id: def.id, visible: defaultItem?.visible ?? false }
+  })
+
+  const visibleItems = mergedItems
+    .filter(item => item.visible)
+    .map(item => ALL_NAV_ITEMS.find(n => n.id === item.id)!)
+    .filter(Boolean)
+    .slice(0, 7)   // hard cap at 7 to prevent overflow
 
   return (
-    <nav className="sticky bottom-0 z-50 flex items-center justify-around border-t bg-card" style={{ minHeight: 64, paddingBottom: 'env(safe-area-inset-bottom)' }}>
-      {primaryTabs.map((tab) => {
+    <nav
+      className="sticky bottom-0 z-50 flex items-center justify-around border-t bg-card"
+      style={{ minHeight: 64, paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
+      {visibleItems.map(tab => {
         const isActive = tab.path === '/' ? location === '/' : location.startsWith(tab.path)
-        const Icon = tab.icon
+        const Icon = NAV_ICONS[tab.id] ?? Settings
         return (
           <Link
             key={tab.path}
@@ -64,7 +133,7 @@ function BottomTabBar() {
             }`}
           >
             <Icon className="h-6 w-6" />
-            <span>{tab.label}</span>
+            <span className="truncate max-w-[52px] text-center leading-tight">{tab.label}</span>
           </Link>
         )
       })}
@@ -72,9 +141,12 @@ function BottomTabBar() {
   )
 }
 
+// ── App layout ───────────────────────────────────────────────────────────────
+
 function AppLayout() {
   return (
     <div className="flex flex-col h-[100dvh]">
+      <ThemeApplicator />
       <AppHeader />
 
       <main className="flex-1 overflow-y-auto">

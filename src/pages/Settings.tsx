@@ -27,6 +27,7 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { Save, Loader2, Upload, X, ImageIcon, Paperclip, FileText, Trash2, Plus, Link2, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react'
+import { applyTheme, clearTheme, THEME_PRESETS, ALL_NAV_ITEMS, DEFAULT_NAV, type ThemeConfig, type NavItemConfig } from '@/lib/theme'
 
 const settingsFormSchema = z.object({
   companyName: z.string().min(1, 'Company name is required'),
@@ -427,6 +428,251 @@ function ServiceAgreementTemplateSection({ settings }: { settings: CompanySettin
           {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
           Save Template
         </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ── Appearance Section ────────────────────────────────────────────────── */
+
+function AppearanceSection({ settings }: { settings: CompanySettings | null }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+
+  const saved = (settings?.themeConfig ?? {}) as Partial<ThemeConfig>
+  const [colors, setColors] = useState<Partial<ThemeConfig>>(saved)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setColors((settings?.themeConfig ?? {}) as Partial<ThemeConfig>)
+  }, [settings?.themeConfig])
+
+  function setColor(key: keyof ThemeConfig, value: string) {
+    const next = { ...colors, [key]: value }
+    setColors(next)
+    applyTheme(next)  // live preview
+  }
+
+  function applyPreset(presetKey: string) {
+    const preset = THEME_PRESETS[presetKey]
+    if (!preset) return
+    setColors(preset)
+    applyTheme(preset)
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      await fetch('/.netlify/functions/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ themeConfig: colors }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['/settings'] })
+      toast({ title: 'Appearance saved' })
+    } catch {
+      toast({ title: 'Save failed', variant: 'destructive' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleReset() {
+    setColors({})
+    clearTheme()
+    await fetch('/.netlify/functions/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ themeConfig: {} }),
+    })
+    queryClient.invalidateQueries({ queryKey: ['/settings'] })
+    toast({ title: 'Theme reset to default' })
+  }
+
+  const colorFields: Array<{ key: keyof ThemeConfig; label: string; description: string }> = [
+    { key: 'primaryColor',      label: 'Primary Color',      description: 'Buttons, active nav, links' },
+    { key: 'primaryForeground', label: 'Button Text',        description: 'Text on primary-colored backgrounds' },
+    { key: 'backgroundColor',   label: 'Page Background',    description: 'Main app background' },
+    { key: 'cardColor',         label: 'Card / Nav Color',   description: 'Cards, header, bottom nav' },
+    { key: 'foregroundColor',   label: 'Text Color',         description: 'Main body text' },
+    { key: 'borderColor',       label: 'Border Color',       description: 'Input borders, dividers' },
+    { key: 'mutedColor',        label: 'Muted Background',   description: 'Chips, secondary surfaces' },
+    { key: 'mutedForeground',   label: 'Muted Text',         description: 'Secondary / placeholder text' },
+  ]
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Appearance</CardTitle>
+        <p className="text-xs text-muted-foreground">Customize colors across the entire app. Changes preview instantly.</p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Presets */}
+        <div className="space-y-2">
+          <label className="text-xs font-medium">Color Presets</label>
+          <div className="grid grid-cols-3 gap-2">
+            {Object.entries(THEME_PRESETS).map(([key, preset]) => (
+              <button
+                key={key}
+                onClick={() => applyPreset(key)}
+                className="flex flex-col items-center gap-1.5 rounded-lg border p-2 hover:bg-muted/50 transition-colors text-center"
+              >
+                <div className="flex gap-1">
+                  <div className="w-4 h-4 rounded-full border" style={{ background: preset.primaryColor }} />
+                  <div className="w-4 h-4 rounded-full border" style={{ background: preset.backgroundColor }} />
+                  <div className="w-4 h-4 rounded-full border" style={{ background: preset.cardColor }} />
+                </div>
+                <span className="text-[10px] leading-tight text-muted-foreground">{preset.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Individual color pickers */}
+        <div className="space-y-2">
+          <label className="text-xs font-medium">Custom Colors</label>
+          <div className="space-y-2">
+            {colorFields.map(({ key, label, description }) => (
+              <div key={key} className="flex items-center gap-3">
+                <input
+                  type="color"
+                  value={(colors[key] as string | undefined) ?? '#888888'}
+                  onChange={e => setColor(key, e.target.value)}
+                  className="h-9 w-9 rounded-md border cursor-pointer shrink-0"
+                  title={label}
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium leading-tight">{label}</p>
+                  <p className="text-[10px] text-muted-foreground leading-tight">{description}</p>
+                </div>
+                <span className="text-[10px] font-mono text-muted-foreground shrink-0">
+                  {(colors[key] as string | undefined) ?? '—'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-1">
+          <Button variant="outline" size="sm" className="flex-1 min-h-[40px]" onClick={handleReset}>
+            Reset to Default
+          </Button>
+          <Button size="sm" className="flex-1 min-h-[40px]" onClick={handleSave} disabled={saving}>
+            {saving ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Saving…</> : <><Save className="h-4 w-4 mr-1" />Save Theme</>}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/* ── Nav Customization Section ─────────────────────────────────────────── */
+function NavSection({ settings }: { settings: CompanySettings | null }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const [saving, setSaving] = useState(false)
+
+  const savedItems: NavItemConfig[] = settings?.navConfig?.items ?? []
+  const [items, setItems] = useState<NavItemConfig[]>(() =>
+    ALL_NAV_ITEMS.map(def => {
+      const saved = savedItems.find(s => s.id === def.id)
+      if (saved) return { ...saved }
+      const dflt = DEFAULT_NAV.find(d => d.id === def.id)
+      return { id: def.id, visible: dflt?.visible ?? false }
+    })
+  )
+
+  useEffect(() => {
+    const saved: NavItemConfig[] = settings?.navConfig?.items ?? []
+    setItems(ALL_NAV_ITEMS.map(def => {
+      const s = saved.find(x => x.id === def.id)
+      if (s) return { ...s }
+      const d = DEFAULT_NAV.find(x => x.id === def.id)
+      return { id: def.id, visible: d?.visible ?? false }
+    }))
+  }, [settings?.navConfig])
+
+  function toggle(id: string) {
+    setItems(prev => prev.map(item => item.id === id ? { ...item, visible: !item.visible } : item))
+  }
+
+  function moveUp(index: number) {
+    if (index === 0) return
+    setItems(prev => {
+      const next = [...prev]
+      ;[next[index - 1], next[index]] = [next[index], next[index - 1]]
+      return next
+    })
+  }
+
+  function moveDown(index: number) {
+    if (index === items.length - 1) return
+    setItems(prev => {
+      const next = [...prev]
+      ;[next[index], next[index + 1]] = [next[index + 1], next[index]]
+      return next
+    })
+  }
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      await fetch('/.netlify/functions/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ navConfig: { items } }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['/settings'] })
+      toast({ title: 'Nav saved — changes apply immediately' })
+    } catch {
+      toast({ title: 'Save failed', variant: 'destructive' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const visibleCount = items.filter(i => i.visible).length
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Navigation Bar</CardTitle>
+        <p className="text-xs text-muted-foreground">
+          Choose which pages appear in the bottom nav. Drag with ↑↓ to reorder.
+          {visibleCount > 7 && <span className="text-amber-600"> Max 7 shown.</span>}
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-1">
+        {items.map((item, idx) => {
+          const def = ALL_NAV_ITEMS.find(n => n.id === item.id)!
+          return (
+            <div
+              key={item.id}
+              className={`flex items-center gap-3 rounded-lg px-2 py-2.5 transition-colors ${item.visible ? 'bg-muted/40' : 'opacity-50'}`}
+            >
+              {/* Visibility toggle */}
+              <button
+                type="button"
+                onClick={() => toggle(item.id)}
+                className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors ${item.visible ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+              >
+                <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${item.visible ? 'translate-x-4' : 'translate-x-0'}`} />
+              </button>
+              <span className="flex-1 text-sm font-medium">{def?.label}</span>
+              <span className="text-[10px] font-mono text-muted-foreground">{def?.path}</span>
+              {/* Reorder arrows */}
+              <div className="flex flex-col gap-0.5">
+                <button onClick={() => moveUp(idx)} disabled={idx === 0} className="text-muted-foreground hover:text-foreground disabled:opacity-20 leading-none p-0.5">▲</button>
+                <button onClick={() => moveDown(idx)} disabled={idx === items.length - 1} className="text-muted-foreground hover:text-foreground disabled:opacity-20 leading-none p-0.5">▼</button>
+              </div>
+            </div>
+          )
+        })}
+        <div className="pt-2">
+          <Button size="sm" className="w-full min-h-[40px]" onClick={handleSave} disabled={saving}>
+            {saving ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Saving…</> : <><Save className="h-4 w-4 mr-1" />Save Navigation</>}
+          </Button>
+        </div>
       </CardContent>
     </Card>
   )
@@ -967,6 +1213,12 @@ export default function SettingsPage() {
 
       {/* Service Agreement Template */}
       <ServiceAgreementTemplateSection settings={settings ?? null} />
+
+      {/* Appearance */}
+      <AppearanceSection settings={settings ?? null} />
+
+      {/* Navigation */}
+      <NavSection settings={settings ?? null} />
 
       {/* QuickBooks */}
       <QuickBooksSection settings={settings ?? null} />
