@@ -1,6 +1,7 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { rowToJob } from '../../src/types'
+import { syncJobToGoogle, deleteGoogleEvent } from './_google'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -67,7 +68,10 @@ export const handler: Handler = async (event) => {
 
       const { data, error } = await supabase.from('jobs').insert(insert).select().single()
       if (error) throw new Error(error.message)
-      return { statusCode: 201, headers: CORS, body: JSON.stringify(rowToJob(data)) }
+      const job = rowToJob(data)
+      // Fire-and-forget Google Calendar sync — do not await, don't block response
+      syncJobToGoogle({ ...job, googleEventId: null }).catch(() => {})
+      return { statusCode: 201, headers: CORS, body: JSON.stringify(job) }
     }
 
     // PATCH
@@ -92,13 +96,22 @@ export const handler: Handler = async (event) => {
 
       const { data, error } = await supabase.from('jobs').update(patch).eq('id', id).select().single()
       if (error) throw new Error(error.message)
-      return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToJob(data)) }
+      const job = rowToJob(data)
+      // Fire-and-forget Google Calendar sync
+      syncJobToGoogle({ ...job, googleEventId: data.google_event_id ?? null }).catch(() => {})
+      return { statusCode: 200, headers: CORS, body: JSON.stringify(job) }
     }
 
     // DELETE
     if (method === 'DELETE' && id) {
+      // Fetch google_event_id before deleting so we can remove the calendar event
+      const { data: toDelete } = await supabase.from('jobs').select('google_event_id').eq('id', id).single()
       const { error } = await supabase.from('jobs').delete().eq('id', id)
       if (error) throw new Error(error.message)
+      // Fire-and-forget Google Calendar event deletion
+      if (toDelete?.google_event_id) {
+        deleteGoogleEvent(toDelete.google_event_id).catch(() => {})
+      }
       return { statusCode: 204, headers: CORS, body: '' }
     }
 

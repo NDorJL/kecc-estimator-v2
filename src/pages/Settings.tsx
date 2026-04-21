@@ -613,6 +613,104 @@ function SmsSection({ settings }: { settings: CompanySettings | null }) {
   )
 }
 
+/* ── Google Calendar Section ──────────────────────────────────────────── */
+function GoogleCalSection({ settings }: { settings: CompanySettings | null }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+
+  // Live status from the google-cal function (more accurate than settings cache)
+  const { data: gcStatus, isLoading: statusLoading } = useQuery<{
+    connected: boolean
+    calendarId: string | null
+    expiresAt: string | null
+  }>({
+    queryKey: ['/google-cal-status'],
+    queryFn: () => fetch('/.netlify/functions/google-cal?action=status').then(r => r.json()),
+  })
+
+  const disconnectMutation = useMutation({
+    mutationFn: () =>
+      fetch('/.netlify/functions/google-cal?action=disconnect', { method: 'POST' }).then(r => r.json()),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/google-cal-status'] })
+      queryClient.invalidateQueries({ queryKey: ['/settings'] })
+      toast({ title: 'Google Calendar disconnected' })
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  const connected = gcStatus?.connected ?? settings?.googleCalConnected ?? false
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Link2 className="h-4 w-4" />
+          Google Calendar
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {statusLoading ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />Checking status…
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              {connected ? (
+                <span className="flex items-center gap-1.5 text-sm font-medium text-green-600 dark:text-green-400">
+                  <CheckCircle2 className="h-4 w-4" />Connected
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  <AlertCircle className="h-4 w-4" />Not connected
+                </span>
+              )}
+            </div>
+
+            {connected && gcStatus?.calendarId && (
+              <p className="text-xs text-muted-foreground">
+                Syncing to: <span className="font-medium">{gcStatus.calendarId}</span>
+              </p>
+            )}
+
+            {connected ? (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Jobs and quote visits are automatically pushed to Google Calendar when created or updated in the CRM. This is a one-way sync — changes made directly in Google Calendar are not reflected here.
+                </p>
+                <Button
+                  variant="outline"
+                  className="w-full min-h-[44px] text-destructive border-destructive/30 hover:bg-destructive/10"
+                  disabled={disconnectMutation.isPending}
+                  onClick={() => disconnectMutation.mutate()}
+                >
+                  {disconnectMutation.isPending
+                    ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    : <RefreshCw className="h-4 w-4 mr-2" />}
+                  Disconnect Google Calendar
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Connect Google Calendar to automatically push jobs and quote visits to your calendar when they're created or updated. Requires <code className="bg-muted px-1 rounded text-xs">GOOGLE_CLIENT_ID</code> and <code className="bg-muted px-1 rounded text-xs">GOOGLE_CLIENT_SECRET</code> env vars set in Netlify.
+                </p>
+                <Button
+                  className="w-full min-h-[44px]"
+                  onClick={() => { window.location.href = '/.netlify/functions/google-cal?action=connect' }}
+                >
+                  <Link2 className="h-4 w-4 mr-2" />Connect Google Calendar
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 /* ── Main Settings Page ───────────────────────────────────────────────── */
 export default function SettingsPage() {
   const queryClient = useQueryClient()
@@ -645,6 +743,28 @@ export default function SettingsPage() {
       })
     }
   }, [settings, form])
+
+  // Handle Google Calendar OAuth redirect params
+  useEffect(() => {
+    const hash = window.location.hash  // e.g. '#/settings?google_connected=1'
+    const search = hash.includes('?') ? hash.slice(hash.indexOf('?')) : ''
+    const params = new URLSearchParams(search)
+    if (params.get('google_connected') === '1') {
+      toast({ title: 'Google Calendar connected', description: 'Jobs will now sync automatically.' })
+      queryClient.invalidateQueries({ queryKey: ['/google-cal-status'] })
+      queryClient.invalidateQueries({ queryKey: ['/settings'] })
+      // Clean the URL
+      window.history.replaceState(null, '', window.location.pathname + '#/settings')
+    } else if (params.get('google_error')) {
+      const errCode = params.get('google_error')
+      const msg = errCode === 'denied' ? 'Authorization was cancelled.'
+        : errCode === 'token'          ? 'Failed to exchange authorization code.'
+        : 'An error occurred during Google authorization.'
+      toast({ title: 'Google Calendar error', description: msg, variant: 'destructive' })
+      window.history.replaceState(null, '', window.location.pathname + '#/settings')
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const updateSettings = useMutation({
     mutationFn: (data: SettingsFormValues) => apiRequest('PATCH', '/settings', data),
@@ -801,6 +921,9 @@ export default function SettingsPage() {
 
       {/* SMS / Quo */}
       <SmsSection settings={settings ?? null} />
+
+      {/* Google Calendar */}
+      <GoogleCalSection settings={settings ?? null} />
     </div>
   )
 }

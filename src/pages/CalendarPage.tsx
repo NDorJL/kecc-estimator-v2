@@ -1,7 +1,7 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import { Job, Subscription, Contractor } from '@/types'
+import { Job, Subscription, Contractor, Contact } from '@/types'
 import {
   DndContext, DragEndEvent, DragStartEvent, DragOverlay,
   useDraggable, useDroppable, PointerSensor, useSensor, useSensors,
@@ -13,8 +13,9 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
-import { ChevronLeft, ChevronRight, MapPin, Phone, Wrench, RefreshCw, Calendar, Clock, GripVertical, ClipboardList, Plus, MessageSquare } from 'lucide-react'
+import { ChevronLeft, ChevronRight, MapPin, Phone, Wrench, RefreshCw, Calendar, Clock, GripVertical, ClipboardList, Plus, MessageSquare, Search, X, User } from 'lucide-react'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -459,23 +460,90 @@ function NewQuoteVisitSheet({
   onCreated: () => void
 }) {
   const { toast } = useToast()
+
+  // Contact picker state
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null)
+  const [contactSearch, setContactSearch] = useState('')
+  const [showDropdown, setShowDropdown] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Form fields (auto-filled from contact or typed manually)
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
   const [customerAddress, setCustomerAddress] = useState('')
   const [scheduledDate, setScheduledDate] = useState(defaultDate)
   const [scheduledTime, setScheduledTime] = useState('09:00')
-  const [notes, setNotes] = useState('')
+  const [visitNotes, setVisitNotes] = useState('')
   const [sendSms, setSendSms] = useState(true)
   const [loading, setLoading] = useState(false)
 
-  // Reset when opened with a new date
-  useState(() => { setScheduledDate(defaultDate) })
+  // Sync defaultDate when sheet opens
+  useEffect(() => {
+    if (open) setScheduledDate(defaultDate)
+  }, [open, defaultDate])
+
+  // Load contacts for picker
+  const { data: contacts = [] } = useQuery<Contact[]>({
+    queryKey: ['/contacts'],
+    queryFn: () => apiGet('/contacts'),
+    enabled: open,
+  })
+
+  // Filtered list based on search text
+  const filteredContacts = contactSearch.trim().length > 0
+    ? contacts.filter(c =>
+        c.name.toLowerCase().includes(contactSearch.toLowerCase()) ||
+        (c.phone ?? '').includes(contactSearch)
+      ).slice(0, 8)
+    : contacts.slice(0, 8)
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!showDropdown) return
+    const handler = (e: MouseEvent) => {
+      if (
+        dropdownRef.current && !dropdownRef.current.contains(e.target as Node) &&
+        searchRef.current && !searchRef.current.contains(e.target as Node)
+      ) {
+        setShowDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showDropdown])
+
+  function selectContact(c: Contact) {
+    setSelectedContact(c)
+    setCustomerName(c.name)
+    setCustomerPhone(c.phone ?? '')
+    setContactSearch('')
+    setShowDropdown(false)
+  }
+
+  function clearContact() {
+    setSelectedContact(null)
+    setCustomerName('')
+    setCustomerPhone('')
+    setContactSearch('')
+  }
+
+  function resetForm() {
+    setSelectedContact(null)
+    setContactSearch('')
+    setCustomerName('')
+    setCustomerPhone('')
+    setCustomerAddress('')
+    setVisitNotes('')
+    setSendSms(true)
+    setShowDropdown(false)
+  }
 
   const handleSubmit = async () => {
     if (!customerName || !scheduledDate) return
     setLoading(true)
     try {
-      // Create the job as a quote_visit
+      // 1. Create the quote visit job
       const jobRes = await fetch('/.netlify/functions/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -485,15 +553,45 @@ function NewQuoteVisitSheet({
           status: 'scheduled',
           scheduledDate,
           scheduledTime,
+          contactId: selectedContact?.id ?? null,
           customerName,
           customerPhone: customerPhone || null,
           customerAddress: customerAddress || null,
-          notes: notes || null,
+          notes: visitNotes || null,
         }),
       })
       if (!jobRes.ok) throw new Error('Failed to create quote visit')
+      const createdJob = await jobRes.json()
 
-      // Send SMS confirmation if enabled and phone provided
+      // 2. Log activity on the contact's timeline (fire-and-forget, non-fatal)
+      if (selectedContact?.id) {
+        const dateLabel = new Date(scheduledDate + 'T12:00:00').toLocaleDateString(undefined, {
+          weekday: 'short', month: 'short', day: 'numeric',
+        })
+        const timeLabel = fmtTime12(scheduledTime)
+        const summary = visitNotes
+          ? `Quote visit on ${dateLabel} at ${timeLabel} — ${visitNotes}`
+          : `Quote visit scheduled on ${dateLabel} at ${timeLabel}`
+
+        fetch('/.netlify/functions/activities', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contactId: selectedContact.id,
+            type: 'note',
+            summary,
+            metadata: {
+              jobId: createdJob.id,
+              scheduledDate,
+              scheduledTime,
+              visitNotes: visitNotes || null,
+              customerAddress: customerAddress || null,
+            },
+          }),
+        }).catch(() => {})
+      }
+
+      // 3. Send SMS confirmation if enabled and phone provided
       if (sendSms && customerPhone) {
         const smsRes = await fetch('/.netlify/functions/sms', {
           method: 'POST',
@@ -507,7 +605,6 @@ function NewQuoteVisitSheet({
           }),
         })
         if (!smsRes.ok) {
-          // SMS failure is non-fatal — job was already created
           toast({ title: 'Quote visit added', description: 'SMS failed to send. Check Quo settings.', variant: 'destructive' })
         } else {
           toast({ title: 'Quote visit added', description: `Confirmation text sent to ${customerPhone}` })
@@ -518,11 +615,7 @@ function NewQuoteVisitSheet({
 
       onCreated()
       onClose()
-      setCustomerName('')
-      setCustomerPhone('')
-      setCustomerAddress('')
-      setNotes('')
-      setSendSms(true)
+      resetForm()
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
       toast({ title: 'Error', description: msg, variant: 'destructive' })
@@ -532,8 +625,8 @@ function NewQuoteVisitSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onClose}>
-      <SheetContent side="bottom" className="max-h-[90dvh] overflow-y-auto rounded-t-xl">
+    <Sheet open={open} onOpenChange={(v) => { if (!v) { onClose(); resetForm() } }}>
+      <SheetContent side="bottom" className="max-h-[92dvh] overflow-y-auto rounded-t-xl">
         <SheetHeader className="pb-3">
           <SheetTitle className="flex items-center gap-2">
             <ClipboardList className="h-5 w-5 text-purple-500" />
@@ -541,10 +634,83 @@ function NewQuoteVisitSheet({
           </SheetTitle>
         </SheetHeader>
         <div className="space-y-3">
+
+          {/* ── Contact picker ────────────────────────────────────────── */}
+          <div className="space-y-1">
+            <Label className="text-xs">Link to Existing Contact</Label>
+
+            {selectedContact ? (
+              /* Selected contact pill */
+              <div className="flex items-center gap-2 rounded-lg bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 px-3 py-2">
+                <User className="h-4 w-4 text-purple-600 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{selectedContact.name}</p>
+                  {selectedContact.phone && (
+                    <p className="text-xs text-muted-foreground">{selectedContact.phone}</p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={clearContact}
+                  className="p-1 rounded hover:bg-purple-100 dark:hover:bg-purple-900/40"
+                >
+                  <X className="h-3.5 w-3.5 text-muted-foreground" />
+                </button>
+              </div>
+            ) : (
+              /* Search input + dropdown */
+              <div className="relative">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  <Input
+                    ref={searchRef}
+                    value={contactSearch}
+                    onChange={e => { setContactSearch(e.target.value); setShowDropdown(true) }}
+                    onFocus={() => setShowDropdown(true)}
+                    placeholder="Search contacts by name or phone…"
+                    className="pl-9 min-h-[44px]"
+                  />
+                </div>
+
+                {showDropdown && filteredContacts.length > 0 && (
+                  <div
+                    ref={dropdownRef}
+                    className="absolute z-50 left-0 right-0 mt-1 bg-popover border rounded-lg shadow-lg overflow-hidden max-h-52 overflow-y-auto"
+                  >
+                    {filteredContacts.map(c => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onMouseDown={e => { e.preventDefault(); selectContact(c) }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-muted/60 text-left border-b last:border-b-0"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{c.name}</p>
+                          {c.phone && <p className="text-xs text-muted-foreground">{c.phone}</p>}
+                        </div>
+                        <Badge variant="outline" className="text-xs shrink-0 capitalize">{c.type}</Badge>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Visit notes will be saved to this contact's activity timeline.
+            </p>
+          </div>
+
+          {/* ── Customer details (auto-filled or manual) ─────────────── */}
           <div className="space-y-1">
             <Label className="text-xs">Customer Name *</Label>
-            <Input value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Full name" className="min-h-[44px]" />
+            <Input
+              value={customerName}
+              onChange={e => setCustomerName(e.target.value)}
+              placeholder="Full name"
+              className="min-h-[44px]"
+            />
           </div>
+
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-1">
               <Label className="text-xs">Date *</Label>
@@ -555,18 +721,46 @@ function NewQuoteVisitSheet({
               <Input type="time" value={scheduledTime} onChange={e => setScheduledTime(e.target.value)} className="min-h-[44px]" />
             </div>
           </div>
+
           <div className="space-y-1">
             <Label className="text-xs">Customer Phone</Label>
-            <Input type="tel" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} placeholder="+18651234567" className="min-h-[44px]" />
+            <Input
+              type="tel"
+              value={customerPhone}
+              onChange={e => setCustomerPhone(e.target.value)}
+              placeholder="+18651234567"
+              className="min-h-[44px]"
+            />
           </div>
+
           <div className="space-y-1">
             <Label className="text-xs">Property Address</Label>
-            <Input value={customerAddress} onChange={e => setCustomerAddress(e.target.value)} placeholder="123 Main St" className="min-h-[44px]" />
+            <Input
+              value={customerAddress}
+              onChange={e => setCustomerAddress(e.target.value)}
+              placeholder="123 Main St"
+              className="min-h-[44px]"
+            />
           </div>
+
+          {/* ── Visit Notes ───────────────────────────────────────────── */}
           <div className="space-y-1">
-            <Label className="text-xs">Notes (internal)</Label>
-            <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Gate code, parking, etc." className="min-h-[44px]" />
+            <Label className="text-xs">Visit Notes</Label>
+            <Textarea
+              value={visitNotes}
+              onChange={e => setVisitNotes(e.target.value)}
+              placeholder={`Scope discussed, measurements taken, adjustments to quote, property details, customer concerns, next steps…`}
+              className="min-h-[110px] resize-none text-sm"
+            />
+            {selectedContact && (
+              <p className="text-xs text-purple-700 dark:text-purple-400 flex items-center gap-1">
+                <User className="h-3 w-3" />
+                These notes will appear in {selectedContact.name}'s activity timeline.
+              </p>
+            )}
           </div>
+
+          {/* ── SMS toggle ────────────────────────────────────────────── */}
           {customerPhone && (
             <div className="flex items-center gap-3 rounded-md bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 px-3 py-2.5">
               <MessageSquare className="h-4 w-4 text-purple-600 shrink-0" />
@@ -582,6 +776,7 @@ function NewQuoteVisitSheet({
               </button>
             </div>
           )}
+
           <Button
             onClick={handleSubmit}
             disabled={loading || !customerName || !scheduledDate}

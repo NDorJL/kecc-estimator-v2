@@ -118,6 +118,9 @@ export interface CompanySettings {
   qbTokenExpiresAt: string | null;
   quoApiKey: string | null;
   quoFromNumber: string | null;
+  googleCalConnected: boolean;
+  googleCalId: string | null;
+  googleCalExpiresAt: string | null;
 }
 
 export interface QuoteAttachment {
@@ -336,6 +339,9 @@ export function rowToSettings(r: any): CompanySettings {
     qbTokenExpiresAt: r.qb_token_expires_at ?? null,
     quoApiKey: r.quo_api_key ?? null,
     quoFromNumber: r.quo_from_number ?? null,
+    googleCalConnected: !!r.google_cal_refresh_token,
+    googleCalId: r.google_cal_id ?? null,
+    googleCalExpiresAt: r.google_cal_token_expires_at ?? null,
   };
 }
 
@@ -481,6 +487,7 @@ export interface Job {
   notes: string | null;
   internalNotes: string | null;
   propertyInfo: Record<string, string>;  // gateCode, dogOnProperty, parkingNotes, etc.
+  googleEventId: string | null;
   createdAt: string;
 }
 
@@ -507,6 +514,7 @@ export function rowToJob(r: any): Job {
     notes: r.notes ?? null,
     internalNotes: r.internal_notes ?? null,
     propertyInfo: r.property_info ?? {},
+    googleEventId: r.google_event_id ?? null,
     createdAt: r.created_at,
   };
 }
