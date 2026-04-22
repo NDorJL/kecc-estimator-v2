@@ -241,7 +241,7 @@ export interface Property {
   createdAt: string;
 }
 
-export type LeadStage = 'new' | 'contacted' | 'quoted' | 'follow_up' | 'won' | 'lost';
+export type LeadStage = 'new' | 'contacted' | 'quoted' | 'follow_up' | 'won' | 'lost' | 'paid' | 'unpaid';
 
 export interface Lead {
   id: string;

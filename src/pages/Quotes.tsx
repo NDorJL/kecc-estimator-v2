@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiGet } from "@/lib/queryClient";
 import { useQuoteContext } from "@/lib/quote-context";
 import { useToast } from "@/hooks/use-toast";
-import type { Quote, LineItem, CompanySettings, SubscriptionService } from "@/types";
+import type { Quote, LineItem, CompanySettings, SubscriptionService, Contact } from "@/types";
 import { MOWING_MONTHS, ALL_MONTHS, SEASONAL_CATEGORIES, computeSeasonalTotals } from "@/types";
 import { useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -156,6 +156,55 @@ function QuoteCreateForm({ onDone }: { onDone: () => void }) {
   const [quoteType, setQuoteType] = useState("residential_onetime");
   const [notes, setNotes] = useState("");
 
+  // Contact picker state
+  const [contactSearch, setContactSearch] = useState("");
+  const [showContactDrop, setShowContactDrop] = useState(false);
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const contactDropRef = useRef<HTMLDivElement>(null);
+
+  const { data: allContacts = [] } = useQuery<Contact[]>({
+    queryKey: ['/contacts'],
+    queryFn: () => apiGet('/contacts'),
+    staleTime: 60_000,
+  });
+
+  const filteredContacts = contactSearch.length >= 1
+    ? allContacts.filter(c =>
+        c.name.toLowerCase().includes(contactSearch.toLowerCase()) ||
+        (c.phone ?? '').includes(contactSearch)
+      ).slice(0, 8)
+    : [];
+
+  function selectContact(contact: Contact) {
+    setSelectedContact(contact);
+    setCustomerName(contact.name);
+    setCustomerPhone(contact.phone ?? '');
+    setCustomerEmail(contact.email ?? '');
+    setBusinessName(contact.businessName ?? '');
+    setContactSearch('');
+    setShowContactDrop(false);
+  }
+
+  function clearContact() {
+    setSelectedContact(null);
+    setCustomerName('');
+    setCustomerPhone('');
+    setCustomerEmail('');
+    setCustomerAddress('');
+    setBusinessName('');
+  }
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (contactDropRef.current && !contactDropRef.current.contains(e.target as Node)) {
+        setShowContactDrop(false);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   const onetimeItems = cartItems.filter(i => !i.isSubscription);
   const subItems = cartItems.filter(i => i.isSubscription);
   const onetimeTotal = onetimeItems.reduce((s, i) => s + i.lineTotal, 0);
@@ -195,6 +244,52 @@ function QuoteCreateForm({ onDone }: { onDone: () => void }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+
+      {/* ── Contact picker ── */}
+      <div className="space-y-1.5" ref={contactDropRef}>
+        <Label className="text-xs">Link to Existing Contact (optional)</Label>
+        {selectedContact ? (
+          <div className="flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold truncate">{selectedContact.name}</p>
+              {selectedContact.phone && <p className="text-xs text-muted-foreground">{selectedContact.phone}</p>}
+            </div>
+            <button type="button" onClick={clearContact} className="shrink-0 rounded p-1 hover:bg-muted">
+              <X className="h-4 w-4 text-muted-foreground" />
+            </button>
+          </div>
+        ) : (
+          <div className="relative">
+            <Input
+              placeholder="Search contacts by name or phone…"
+              value={contactSearch}
+              onChange={e => { setContactSearch(e.target.value); setShowContactDrop(true); }}
+              onFocus={() => setShowContactDrop(true)}
+              className="min-h-[44px]"
+            />
+            {showContactDrop && filteredContacts.length > 0 && (
+              <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-lg border bg-popover shadow-lg overflow-hidden">
+                {filteredContacts.map(c => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    className="w-full flex items-start gap-2 px-3 py-2.5 text-left hover:bg-muted transition-colors"
+                    onMouseDown={() => selectContact(c)}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{c.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {[c.phone, c.email].filter(Boolean).join(' · ')}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="space-y-1.5">
         <Label htmlFor="customerName">Customer Name *</Label>
         <Input id="customerName" value={customerName} onChange={e => setCustomerName(e.target.value)} required className="min-h-[44px]" />

@@ -195,11 +195,27 @@ function buildQuotePage(opts: {
       <td class="td-sub td-num td-bold">${li.isSubscription ? fmtMoney(li.monthlyAmount ?? li.lineTotal) + '/mo' : fmtMoney(li.lineTotal)}</td>
     </tr>`).join('')
 
-  const totalsHtml = [
-    onetimeTotal > 0 ? `<tr><td colspan="4" class="td-label">One-Time Subtotal</td><td class="td-sub td-num td-bold">${fmtMoney(onetimeTotal)}</td></tr>` : '',
-    monthlyTotal > 0 ? `<tr><td colspan="4" class="td-label">Monthly</td><td class="td-sub td-num td-bold">${fmtMoney(monthlyTotal)}/mo</td></tr>` : '',
-    `<tr class="tr-total"><td colspan="4" class="td-label td-total-label">Total</td><td class="td-num td-total-val">${fmtMoney(grandTotal)}${monthlyTotal > 0 ? '/mo' : ''}</td></tr>`,
-  ].join('')
+  // Build totals section — mixed quotes (one-time + recurring) get separate rows
+  // so we never show "$X/mo" when the amount actually includes one-time charges.
+  const totalsHtml = (() => {
+    if (onetimeTotal > 0 && monthlyTotal > 0) {
+      // Mixed: show two separate total rows, no single combined total
+      return [
+        `<tr class="tr-total" style="border-top:2px solid #111827;">`,
+        `  <td colspan="4" class="td-label td-total-label">Due Today (One-Time)</td>`,
+        `  <td class="td-num td-total-val">${fmtMoney(onetimeTotal)}</td>`,
+        `</tr>`,
+        `<tr>`,
+        `  <td colspan="4" class="td-label td-total-label" style="font-size:14px;font-weight:700;padding:6px 6px 10px;">Monthly Total</td>`,
+        `  <td class="td-num td-total-val" style="padding:6px 6px 10px;">${fmtMoney(monthlyTotal)}/mo</td>`,
+        `</tr>`,
+      ].join('')
+    }
+    if (monthlyTotal > 0) {
+      return `<tr class="tr-total"><td colspan="4" class="td-label td-total-label">Total</td><td class="td-num td-total-val">${fmtMoney(monthlyTotal)}/mo</td></tr>`
+    }
+    return `<tr class="tr-total"><td colspan="4" class="td-label td-total-label">Total</td><td class="td-num td-total-val">${fmtMoney(onetimeTotal)}</td></tr>`
+  })()
 
   const logoHtml = logoUrl
     ? `<img src="${esc(logoUrl)}" alt="${esc(companyName)}" style="max-height:56px;max-width:140px;object-fit:contain;display:block;margin-bottom:8px;">`

@@ -79,15 +79,28 @@
   * {
     @apply border-border;
   }
+  html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+  }
   body {
     @apply bg-background text-foreground;
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* Slightly larger base line-height for readability */
+    line-height: 1.55;
   }
-  /* Prevent text size adjustment on orientation change */
-  html {
-    -webkit-text-size-adjust: 100%;
+  /* Headings: bolder and larger */
+  h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.02em; }
+  h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
+  h3 { font-size: 1.05rem; font-weight: 600; }
+  /* Section labels and card titles */
+  .section-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 }
 

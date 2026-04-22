@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <rect width="32" height="32" rx="8" fill="#e06307"/>
+  <!-- Leaf/plant icon for exterior care -->
+  <path d="M16 6 C10 6, 6 10, 6 16 C6 20, 8 23, 12 25 L16 26 L16 16 C16 16, 20 14, 26 10 C22 8, 19 6, 16 6Z" fill="white" opacity="0.95"/>
+  <path d="M16 16 L16 26" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

@@ -891,10 +891,242 @@ function NewQuoteVisitSheet({
   )
 }
 
+// ── Year View ─────────────────────────────────────────────────────────────────
+
+function YearView({
+  year,
+  jobEventMap,
+  subEventMap,
+  onMonthClick,
+}: {
+  year: number
+  jobEventMap: Map<string, CalEvent[]>
+  subEventMap: Map<string, CalEvent[]>
+  onMonthClick: (month: number) => void
+}) {
+  const today = new Date()
+  return (
+    <div className="flex-1 overflow-y-auto p-3">
+      <div className="grid grid-cols-3 gap-3">
+        {MONTH_NAMES.map((name, m) => {
+          const daysInMonth = new Date(year, m + 1, 0).getDate()
+          const firstDow = new Date(year, m, 1).getDay()
+          const cells: (number | null)[] = [
+            ...Array(firstDow).fill(null),
+            ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+          ]
+          while (cells.length % 7 !== 0) cells.push(null)
+          // Count events this month
+          let totalEvents = 0
+          for (let d = 1; d <= daysInMonth; d++) {
+            const key = `${year}-${String(m + 1).padStart(2,'0')}-${String(d).padStart(2,'0')}`
+            totalEvents += (jobEventMap.get(key)?.length ?? 0) + (subEventMap.get(key)?.length ?? 0)
+          }
+          const isCurrentMonth = today.getFullYear() === year && today.getMonth() === m
+          return (
+            <button
+              key={m}
+              onClick={() => onMonthClick(m)}
+              className={`rounded-xl border bg-card p-2.5 text-left hover:border-primary/50 hover:bg-muted/30 active:scale-95 transition-all ${isCurrentMonth ? 'border-primary ring-1 ring-primary/30' : ''}`}
+            >
+              <p className={`text-xs font-bold mb-1.5 ${isCurrentMonth ? 'text-primary' : ''}`}>{name}</p>
+              {/* Mini day grid */}
+              <div className="grid grid-cols-7 gap-px">
+                {'SMTWTFS'.split('').map((d, i) => (
+                  <div key={i} className="text-center" style={{ fontSize: 7, color: '#9ca3af', fontWeight: 600 }}>{d}</div>
+                ))}
+                {cells.map((day, i) => {
+                  if (!day) return <div key={`e-${i}`} />
+                  const isToday = today.getFullYear() === year && today.getMonth() === m && today.getDate() === day
+                  const key = `${year}-${String(m + 1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+                  const hasEvent = (jobEventMap.get(key)?.length ?? 0) + (subEventMap.get(key)?.length ?? 0) > 0
+                  return (
+                    <div
+                      key={day}
+                      className={`flex items-center justify-center rounded-full ${isToday ? 'bg-primary text-primary-foreground' : hasEvent ? 'bg-primary/15' : ''}`}
+                      style={{ fontSize: 8, width: 14, height: 14, margin: '0 auto' }}
+                    >
+                      {day}
+                    </div>
+                  )
+                })}
+              </div>
+              {totalEvents > 0 && (
+                <p style={{ fontSize: 10 }} className="mt-1.5 text-muted-foreground font-medium">
+                  {totalEvents} event{totalEvents !== 1 ? 's' : ''}
+                </p>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Day Timeline View ─────────────────────────────────────────────────────────
+
+function DayTimelineView({
+  date,
+  events,
+  contractors,
+  onBack,
+  onDeleteJob,
+}: {
+  date: Date
+  events: CalEvent[]
+  contractors: Contractor[]
+  onBack: () => void
+  onDeleteJob: (jobId: string) => Promise<void>
+}) {
+  const label = date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+  const HOURS = Array.from({ length: 14 }, (_, i) => i + 7) // 7am – 8pm
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  async function handleConfirmDelete(jobId: string) {
+    setDeleting(true)
+    try {
+      await onDeleteJob(jobId)
+      setConfirmDeleteId(null)
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  function fmtHour(h: number) {
+    const ampm = h >= 12 ? 'PM' : 'AM'
+    return `${h > 12 ? h - 12 : h === 0 ? 12 : h}${ampm}`
+  }
+
+  // Map events to time slots (by window or default to 8am)
+  function eventHour(ev: CalEvent): number {
+    if (ev.job?.scheduledTime) {
+      return parseInt(ev.job.scheduledTime.split(':')[0], 10)
+    }
+    switch (ev.window) {
+      case 'morning':   return 8
+      case 'afternoon': return 12
+      case 'evening':   return 17
+      default:          return 8
+    }
+  }
+
+  const eventsAtHour = (h: number) => events.filter(ev => eventHour(ev) === h)
+  const allDayEvents = events.filter(ev => ev.type === 'subscription')
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 px-4 pt-3 pb-2 border-b shrink-0">
+        <button onClick={onBack} className="p-1 rounded-lg hover:bg-muted transition-colors">
+          <ChevronLeft className="h-5 w-5" />
+        </button>
+        <div className="flex-1">
+          <p className="text-sm font-bold">{label}</p>
+          <p className="text-xs text-muted-foreground">{events.length} event{events.length !== 1 ? 's' : ''}</p>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {/* All-day events (subscriptions) */}
+        {allDayEvents.length > 0 && (
+          <div className="px-3 py-2 border-b bg-blue-50/50 dark:bg-blue-950/20">
+            <p className="text-xs font-semibold text-muted-foreground mb-1.5">All Day</p>
+            <div className="space-y-1.5">
+              {allDayEvents.map(ev => (
+                <div key={ev.id} className="flex items-center gap-2 rounded-lg bg-blue-100/60 dark:bg-blue-900/30 px-2.5 py-1.5">
+                  <div className={`w-2 h-2 rounded-full shrink-0 ${ev.color}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold truncate">{ev.title}</p>
+                    <p className="text-xs text-muted-foreground truncate">{ev.subtitle}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Hourly timeline */}
+        <div className="relative">
+          {HOURS.map(h => {
+            const slotEvents = eventsAtHour(h).filter(ev => ev.type !== 'subscription')
+            const isNow = new Date().getHours() === h && new Date().toDateString() === date.toDateString()
+            return (
+              <div key={h} className={`flex min-h-[56px] border-b ${isNow ? 'bg-primary/5' : ''}`}>
+                <div className="w-14 shrink-0 pt-2 pr-2 text-right">
+                  <span className="text-xs text-muted-foreground font-medium">{fmtHour(h)}</span>
+                </div>
+                <div className="flex-1 py-1.5 px-2 space-y-1.5">
+                  {slotEvents.map(ev => {
+                    const contractor = contractors.find(c => c.id === (ev.job?.contractorId ?? ev.contractorId))
+                    const isConfirming = confirmDeleteId === ev.job?.id
+                    return (
+                      <div
+                        key={ev.id}
+                        className={`rounded-lg border px-3 py-2 ${isConfirming ? 'border-destructive/50 bg-destructive/5' : 'bg-card'}`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <div className={`w-2 h-2 rounded-full shrink-0 ${ev.color}`} />
+                            <p className="text-sm font-semibold truncate">{ev.title}</p>
+                          </div>
+                          {ev.job && !isConfirming && (
+                            <button
+                              onClick={() => setConfirmDeleteId(ev.job!.id)}
+                              className="shrink-0 p-1 rounded hover:bg-destructive/10 hover:text-destructive transition-colors text-muted-foreground"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">{ev.subtitle}</p>
+                        {contractor && <p className="text-xs text-muted-foreground mt-0.5">🔧 {contractor.name}</p>}
+                        {ev.job?.customerAddress && (
+                          <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />{ev.job.customerAddress}
+                          </p>
+                        )}
+                        {ev.job?.customerPhone && (
+                          <a href={`tel:${ev.job.customerPhone}`} className="text-xs text-primary mt-0.5 flex items-center gap-1">
+                            <Phone className="h-3 w-3" />{ev.job.customerPhone}
+                          </a>
+                        )}
+                        {isConfirming && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <AlertTriangle className="h-3.5 w-3.5 text-destructive shrink-0" />
+                            <p className="text-xs text-destructive flex-1">Delete this event?</p>
+                            <button
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="text-xs text-muted-foreground px-2 py-1 rounded border hover:bg-muted transition-colors"
+                            >Cancel</button>
+                            <button
+                              onClick={() => handleConfirmDelete(ev.job!.id)}
+                              disabled={deleting}
+                              className="text-xs text-white bg-destructive px-2 py-1 rounded hover:bg-destructive/90 transition-colors disabled:opacity-50"
+                            >{deleting ? '…' : 'Delete'}</button>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type CalView = 'month' | 'year' | 'day'
+
 export default function CalendarPage() {
   const today = new Date()
   const [year, setYear]   = useState(today.getFullYear())
   const [month, setMonth] = useState(today.getMonth())
+  const [calView, setCalView] = useState<CalView>('month')
+  const [dayViewDate, setDayViewDate] = useState<Date | null>(null)
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
   const [pendingDrop, setPendingDrop] = useState<{ job: Job; dateKey: string } | null>(null)
   const [activeJob, setActiveJob] = useState<Job | null>(null)
@@ -1007,85 +1239,167 @@ export default function CalendarPage() {
 
   const loading = jobsLoading || subsLoading
 
+  // When in day view, show timeline instead of month grid
+  if (calView === 'day' && dayViewDate) {
+    const dayKey = `${dayViewDate.getFullYear()}-${String(dayViewDate.getMonth() + 1).padStart(2, '0')}-${String(dayViewDate.getDate()).padStart(2, '0')}`
+    const dayEvents = eventsForKey(dayKey)
+    return (
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <DayTimelineView
+          date={dayViewDate}
+          events={dayEvents}
+          contractors={contractors}
+          onBack={() => { setCalView('month'); setDayViewDate(null) }}
+          onDeleteJob={async (jobId) => { await deleteJobMutation.mutateAsync(jobId) }}
+        />
+        <NewQuoteVisitSheet
+          open={showNewQuoteVisit}
+          onClose={() => setShowNewQuoteVisit(false)}
+          defaultDate={dayKey}
+          onCreated={() => qc.invalidateQueries({ queryKey: ['/jobs'] })}
+        />
+        <ScheduleTimeSheet
+          open={!!pendingDrop}
+          job={pendingDrop?.job ?? null}
+          targetDate={pendingDrop?.dateKey ?? ''}
+          onConfirm={(date, window, time) => {
+            if (!pendingDrop) return
+            scheduleJobMutation.mutate({ id: pendingDrop.job.id, scheduledDate: date, scheduledWindow: window, startTime: time })
+            setPendingDrop(null)
+          }}
+          onClose={() => setPendingDrop(null)}
+        />
+        <DragOverlay>{activeJob && <JobChipGhost job={activeJob} />}</DragOverlay>
+      </DndContext>
+    )
+  }
+
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="flex flex-col h-full">
         {/* Header */}
-        <div className="px-4 pt-4 pb-3 border-b">
-          <div className="flex items-center justify-between">
-            <Button variant="ghost" size="icon" className="h-9 w-9" onClick={prevMonth}>
-              <ChevronLeft className="h-5 w-5" />
-            </Button>
-            <div className="text-center">
-              <h2 className="text-base font-semibold">{MONTH_NAMES[month]} {year}</h2>
-              {!loading && (
+        <div className="px-3 pt-3 pb-2 border-b shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            {calView !== 'year' ? (
+              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={prevMonth}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setYear(y => y - 1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            )}
+            <div className="text-center flex-1">
+              <p className="text-base font-bold">
+                {calView === 'year' ? year : `${MONTH_NAMES[month]} ${year}`}
+              </p>
+              {calView === 'month' && !loading && (
                 <p className="text-xs text-muted-foreground">
-                  {totalJobEvents} one-time · {totalSubEvents} subscription visits
+                  {totalJobEvents} one-time · {totalSubEvents} sub visits
                 </p>
               )}
             </div>
-            <Button variant="ghost" size="icon" className="h-9 w-9" onClick={nextMonth}>
-              <ChevronRight className="h-5 w-5" />
-            </Button>
+            {calView !== 'year' ? (
+              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={nextMonth}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setYear(y => y + 1)}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+          {/* View switcher */}
+          <div className="flex items-center gap-1 mt-2">
+            {(['month', 'year'] as CalView[]).map(v => (
+              <button
+                key={v}
+                onClick={() => setCalView(v)}
+                className={`flex-1 text-xs font-semibold py-1.5 rounded-lg transition-colors ${
+                  calView === v
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {v.charAt(0).toUpperCase() + v.slice(1)}
+              </button>
+            ))}
+            <button
+              onClick={() => setShowNewQuoteVisit(true)}
+              className="ml-auto shrink-0 flex items-center gap-1 text-xs font-semibold py-1.5 px-2.5 rounded-lg border border-purple-300 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30 transition-colors"
+            >
+              <Plus className="h-3 w-3" />Visit
+            </button>
           </div>
         </div>
 
-        {/* Legend + New Quote Visit */}
-        <div className="px-4 py-2 flex items-center gap-4 border-b">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <div className="w-2.5 h-2.5 rounded-full bg-green-500" />One-time
-          </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />Subscription
-          </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <div className="w-2.5 h-2.5 rounded-full bg-purple-500" />Quote Visit
-          </div>
-          <div className="ml-auto">
-            <Button size="sm" variant="outline" className="min-h-[34px] text-xs border-purple-300 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30" onClick={() => setShowNewQuoteVisit(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1" />Quote Visit
-            </Button>
-          </div>
-        </div>
-
-        {/* Day headers */}
-        <div className="grid grid-cols-7 px-2 pt-2">
-          {DAY_ABBR.map(d => (
-            <div key={d} className="text-center text-xs font-medium text-muted-foreground py-1">{d}</div>
-          ))}
-        </div>
-
-        {/* Calendar grid */}
-        {loading ? (
-          <div className="flex-1 flex items-center justify-center px-4">
-            <Skeleton className="h-48 w-full rounded-xl" />
-          </div>
+        {/* Year view */}
+        {calView === 'year' ? (
+          <YearView
+            year={year}
+            jobEventMap={jobEventMap}
+            subEventMap={subEventMap}
+            onMonthClick={(m) => { setMonth(m); setCalView('month') }}
+          />
         ) : (
-          <div className="overflow-y-auto px-2 pb-2">
-            <div className="grid grid-cols-7 gap-px">
-              {cells.map((day, idx) => {
-                if (!day) return <div key={`e-${idx}`} className="min-h-[64px]" />
-                const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === day
-                const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-                const events = eventsForKey(key)
-                return (
-                  <DayCell
-                    key={day}
-                    day={day}
-                    year={year}
-                    month={month}
-                    events={events}
-                    isToday={isToday}
-                    onClick={() => setSelectedDate(new Date(year, month, day))}
-                  />
-                )
-              })}
+          <>
+            {/* Legend */}
+            <div className="px-3 py-1.5 flex items-center gap-3 border-b shrink-0">
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <div className="w-2 h-2 rounded-full bg-green-500" />One-time
+              </div>
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <div className="w-2 h-2 rounded-full bg-blue-500" />Sub
+              </div>
+              <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                <div className="w-2 h-2 rounded-full bg-purple-500" />Quote Visit
+              </div>
             </div>
-          </div>
+
+            {/* Day headers */}
+            <div className="grid grid-cols-7 px-2 pt-1.5 shrink-0">
+              {DAY_ABBR.map(d => (
+                <div key={d} className="text-center text-xs font-semibold text-muted-foreground py-1">{d}</div>
+              ))}
+            </div>
+
+            {/* Calendar grid */}
+            {loading ? (
+              <div className="flex-1 flex items-center justify-center px-4">
+                <Skeleton className="h-48 w-full rounded-xl" />
+              </div>
+            ) : (
+              <div className="flex-1 overflow-y-auto px-2 pb-2">
+                <div className="grid grid-cols-7 gap-px">
+                  {cells.map((day, idx) => {
+                    if (!day) return <div key={`e-${idx}`} className="min-h-[64px]" />
+                    const isToday = today.getFullYear() === year && today.getMonth() === month && today.getDate() === day
+                    const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+                    const events = eventsForKey(key)
+                    return (
+                      <DayCell
+                        key={day}
+                        day={day}
+                        year={year}
+                        month={month}
+                        events={events}
+                        isToday={isToday}
+                        onClick={() => {
+                          const d = new Date(year, month, day)
+                          setDayViewDate(d)
+                          setCalView('day')
+                        }}
+                      />
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </>
         )}
 
-        {/* Unscheduled jobs strip */}
-        {(unscheduled.length > 0 || unscheduledSubs.length > 0) && (
+        {/* Unscheduled jobs strip — only in month view */}
+        {calView === 'month' && (unscheduled.length > 0 || unscheduledSubs.length > 0) && (
           <div className="border-t bg-muted/30">
             <div className="px-3 pt-2 pb-1">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">

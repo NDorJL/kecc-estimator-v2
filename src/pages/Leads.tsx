@@ -29,12 +29,14 @@ import { useToast } from '@/hooks/use-toast'
 
 // ── Stage config ────────────────────────────────────────────────────────────
 
-const STAGES: { id: LeadStage; label: string; color: string }[] = [
+const STAGES: { id: LeadStage; label: string; color: string; headerColor?: string }[] = [
   { id: 'new',        label: 'New',        color: 'bg-slate-100 dark:bg-slate-800' },
   { id: 'contacted',  label: 'Contacted',  color: 'bg-blue-50 dark:bg-blue-950/40' },
   { id: 'quoted',     label: 'Quoted',     color: 'bg-yellow-50 dark:bg-yellow-950/30' },
   { id: 'follow_up',  label: 'Follow-Up',  color: 'bg-orange-50 dark:bg-orange-950/30' },
   { id: 'won',        label: 'Won',        color: 'bg-green-50 dark:bg-green-950/30' },
+  { id: 'unpaid',     label: 'Unpaid',     color: 'bg-amber-50 dark:bg-amber-950/30', headerColor: 'text-amber-700 dark:text-amber-400' },
+  { id: 'paid',       label: 'Paid ✓',     color: 'bg-emerald-50 dark:bg-emerald-950/30', headerColor: 'text-emerald-700 dark:text-emerald-400' },
   { id: 'lost',       label: 'Lost',       color: 'bg-red-50 dark:bg-red-950/30' },
 ]
 
@@ -116,7 +118,7 @@ function KanbanColumn({
   return (
     <div className={`flex flex-col rounded-xl border min-w-[200px] w-[200px] shrink-0 ${stage.color} ${isOver ? 'ring-2 ring-primary' : ''}`}>
       <div className="flex items-center justify-between px-3 py-2 border-b bg-white/50 dark:bg-black/20 rounded-t-xl">
-        <span className="text-xs font-semibold">{stage.label}</span>
+        <span className={`text-xs font-semibold ${stage.headerColor ?? ''}`}>{stage.label}</span>
         <Badge variant="secondary" className="text-xs h-5 px-1.5">{leads.length}</Badge>
       </div>
       <div ref={setNodeRef} className="flex flex-col gap-2 p-2 min-h-[120px]">
@@ -194,7 +196,7 @@ function LeadDetailSheet({
             >
               <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {STAGES.map(s => (
+                {STAGES.filter(s => s.id !== 'paid').map(s => (
                   <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
                 ))}
               </SelectContent>

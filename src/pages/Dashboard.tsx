@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/lib/queryClient'
 import { Quote, Subscription } from '@/types'
@@ -6,9 +7,41 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   TrendingUp, FileText, CalendarCheck, DollarSign,
   Users, Target, BookOpen, BarChart2,
-  MessageSquare, CheckCircle2, PenLine,
+  MessageSquare, CheckCircle2, PenLine, X, Bell, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { useLocation } from 'wouter'
+
+// ── Notification store (localStorage-based dismiss) ──────────────────────────
+
+const DISMISSED_KEY = 'dashboard_dismissed_notifications'
+
+function getDismissed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DISMISSED_KEY)
+    if (!raw) return new Set()
+    return new Set(JSON.parse(raw) as string[])
+  } catch { return new Set() }
+}
+
+function persistDismissed(ids: Set<string>) {
+  // Only keep last 50 to prevent unbounded growth
+  const arr = Array.from(ids).slice(-50)
+  localStorage.setItem(DISMISSED_KEY, JSON.stringify(arr))
+}
+
+// ── Notification types ───────────────────────────────────────────────────────
+
+interface AppNotification {
+  id: string
+  type: 'signed' | 'open_quote' | 'info'
+  title: string
+  subtitle: string
+  icon: React.ElementType
+  colorClass: string
+  path: string
+}
+
+// ── KPI Card ─────────────────────────────────────────────────────────────────
 
 function KpiCard({
   title,
@@ -31,15 +64,15 @@ function KpiCard({
       onClick={onClick}
     >
       <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-3">
-        <CardTitle className="text-xs font-medium text-muted-foreground">{title}</CardTitle>
+        <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{title}</CardTitle>
         <Icon className="h-4 w-4 text-muted-foreground" />
       </CardHeader>
       <CardContent className="px-3 pb-3">
         {loading ? (
-          <Skeleton className="h-7 w-24" />
+          <Skeleton className="h-8 w-24" />
         ) : (
           <>
-            <p className="text-2xl font-bold">{value}</p>
+            <p className="text-3xl font-bold tracking-tight">{value}</p>
             {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
           </>
         )}
@@ -60,6 +93,8 @@ const quickNavItems = [
 
 export default function Dashboard() {
   const [, navigate] = useLocation()
+  const [dismissed, setDismissed] = useState<Set<string>>(getDismissed)
+  const [notifExpanded, setNotifExpanded] = useState(true)
 
   const { data: quotes, isLoading: quotesLoading } = useQuery<Quote[]>({
     queryKey: ['/quotes'],
@@ -95,34 +130,100 @@ export default function Dashboard() {
   const fmt = (n: number) =>
     n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.toFixed(0)}`
 
+  // Build notification list from real data
+  const notifications: AppNotification[] = [
+    ...recentlySigned.map(q => ({
+      id: `signed-${q.id}`,
+      type: 'signed' as const,
+      title: `${q.customerName} signed their quote`,
+      subtitle: `${fmt(q.total)} · ${new Date(q.signedAt!).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}`,
+      icon: CheckCircle2,
+      colorClass: 'border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400',
+      path: '/quotes',
+    })),
+  ]
+
+  const visible = notifications.filter(n => !dismissed.has(n.id))
+
+  function dismiss(id: string) {
+    setDismissed(prev => {
+      const next = new Set(prev)
+      next.add(id)
+      persistDismissed(next)
+      return next
+    })
+  }
+
+  function dismissAll() {
+    setDismissed(prev => {
+      const next = new Set(prev)
+      for (const n of notifications) next.add(n.id)
+      persistDismissed(next)
+      return next
+    })
+  }
+
   return (
     <div className="p-4 space-y-5">
       <div>
-        <h2 className="text-lg font-semibold">Dashboard</h2>
+        <h2 className="text-xl font-bold">Dashboard</h2>
         <p className="text-sm text-muted-foreground">Overview of your business</p>
       </div>
 
-      {/* Recently Signed Notifications */}
-      {!quotesLoading && recentlySigned.length > 0 && (
-        <div className="space-y-2">
-          {recentlySigned.map(q => (
+      {/* Notification Bar */}
+      {!quotesLoading && visible.length > 0 && (
+        <div className="rounded-xl border border-border overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-3 py-2 bg-muted/50 border-b">
             <button
-              key={q.id}
-              onClick={() => navigate('/quotes')}
-              className="w-full flex items-start gap-3 rounded-xl border border-green-500/30 bg-green-500/10 p-3 text-left hover:bg-green-500/20 active:scale-95 transition-all"
+              className="flex items-center gap-1.5 text-sm font-semibold"
+              onClick={() => setNotifExpanded(e => !e)}
             >
-              <CheckCircle2 className="h-5 w-5 text-green-500 mt-0.5 shrink-0" />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-green-700 dark:text-green-400 truncate">
-                  {q.customerName} signed their quote
-                </p>
-                <p className="text-xs text-green-600/80 dark:text-green-500/80">
-                  {fmt(q.total)} · {new Date(q.signedAt!).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                </p>
-              </div>
-              <PenLine className="h-4 w-4 text-green-500/60 mt-0.5 shrink-0" />
+              <Bell className="h-4 w-4 text-primary" />
+              <span>Notifications</span>
+              <span className="ml-1 rounded-full bg-primary text-primary-foreground text-xs font-bold w-5 h-5 flex items-center justify-center">
+                {visible.length}
+              </span>
+              {notifExpanded
+                ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground ml-1" />
+                : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground ml-1" />
+              }
             </button>
-          ))}
+            <button
+              onClick={dismissAll}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Clear all
+            </button>
+          </div>
+
+          {/* Notifications */}
+          {notifExpanded && (
+            <div className="divide-y divide-border">
+              {visible.map(n => (
+                <div key={n.id} className={`flex items-start gap-3 p-3 ${n.colorClass}`}>
+                  <button
+                    onClick={() => navigate(n.path)}
+                    className="flex items-start gap-3 flex-1 min-w-0 text-left"
+                  >
+                    <n.icon className="h-4 w-4 mt-0.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{n.title}</p>
+                      <p className="text-xs opacity-80 mt-0.5">{n.subtitle}</p>
+                    </div>
+                    <PenLine className="h-3.5 w-3.5 opacity-50 mt-0.5 shrink-0" />
+                  </button>
+                  <button
+                    onClick={() => dismiss(n.id)}
+                    className="shrink-0 ml-1 rounded-md p-1 opacity-60 hover:opacity-100 hover:bg-black/10 transition-all"
+                    aria-label="Dismiss"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -164,7 +265,7 @@ export default function Dashboard() {
 
       {/* Quick Nav Grid */}
       <div>
-        <h3 className="text-sm font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Navigate</h3>
+        <h3 className="text-xs font-bold mb-2 text-muted-foreground uppercase tracking-wider">Navigate</h3>
         <div className="grid grid-cols-4 gap-2">
           {quickNavItems.map(({ label, path, icon: Icon }) => (
             <button
@@ -182,7 +283,7 @@ export default function Dashboard() {
       {/* Recent Open Quotes */}
       {!quotesLoading && openQuotes.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Open Quotes</h3>
+          <h3 className="text-xs font-bold mb-2 text-muted-foreground uppercase tracking-wider">Open Quotes</h3>
           <div className="space-y-2">
             {openQuotes.slice(0, 5).map(q => (
               <button
@@ -191,8 +292,8 @@ export default function Dashboard() {
                 className="w-full rounded-xl border bg-card p-3 text-left hover:bg-muted/50 active:scale-95 transition-all"
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-medium text-sm">{q.customerName}</span>
-                  <span className="text-sm font-semibold">${q.total.toFixed(0)}</span>
+                  <span className="font-semibold text-sm">{q.customerName}</span>
+                  <span className="text-sm font-bold">${q.total.toFixed(0)}</span>
                 </div>
                 <div className="flex items-center justify-between mt-0.5">
                   <span className="text-xs text-muted-foreground capitalize">{q.status}</span>
