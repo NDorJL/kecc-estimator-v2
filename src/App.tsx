@@ -13,8 +13,7 @@ import { apiGet } from '@/lib/queryClient'
 import { CompanySettings } from '@/types'
 import {
   applyTheme, clearTheme,
-  ALL_NAV_ITEMS, DEFAULT_NAV,
-  type NavItemConfig,
+  ALL_NAV_ITEMS, mergeNavItems,
 } from '@/lib/theme'
 import {
   LayoutDashboard, Calendar, Calculator as CalcIcon, FileText,
@@ -101,16 +100,7 @@ function BottomTabBar() {
     staleTime: 5 * 60 * 1000,
   })
 
-  // Merge saved config with defaults
-  const savedItems: NavItemConfig[] = settings?.navConfig?.items ?? []
-  const mergedItems: NavItemConfig[] = ALL_NAV_ITEMS.map(def => {
-    const saved = savedItems.find(s => s.id === def.id)
-    if (saved) return saved
-    const defaultItem = DEFAULT_NAV.find(d => d.id === def.id)
-    return { id: def.id, visible: defaultItem?.visible ?? false }
-  })
-
-  const visibleItems = mergedItems
+  const visibleItems = mergeNavItems(settings?.navConfig?.items ?? [])
     .filter(item => item.visible)
     .map(item => ALL_NAV_ITEMS.find(n => n.id === item.id)!)
     .filter(Boolean)

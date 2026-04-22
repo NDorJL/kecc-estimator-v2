@@ -230,6 +230,26 @@ export const ALL_NAV_ITEMS = [
   { id: 'settings',      label: 'Settings',   path: '/settings' },
 ] as const
 
+/** Merge saved nav config with defaults, preserving saved order. */
+export function mergeNavItems(savedItems: NavItemConfig[]): NavItemConfig[] {
+  if (savedItems.length === 0) {
+    // No saved config — use default order and visibility
+    return ALL_NAV_ITEMS.map(def => {
+      const d = DEFAULT_NAV.find(x => x.id === def.id)
+      return { id: def.id, visible: d?.visible ?? false }
+    })
+  }
+  // Saved config exists — preserve ITS order, then append any items not yet in the list
+  const result: NavItemConfig[] = savedItems.map(s => ({ ...s }))
+  for (const def of ALL_NAV_ITEMS) {
+    if (!result.find(r => r.id === def.id)) {
+      const d = DEFAULT_NAV.find(x => x.id === def.id)
+      result.push({ id: def.id, visible: d?.visible ?? false })
+    }
+  }
+  return result
+}
+
 export const DEFAULT_NAV: NavItemConfig[] = [
   { id: 'dashboard',     visible: true  },
   { id: 'contacts',      visible: false },

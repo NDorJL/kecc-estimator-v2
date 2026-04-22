@@ -27,7 +27,7 @@ import {
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
 import { Save, Loader2, Upload, X, ImageIcon, Paperclip, FileText, Trash2, Plus, Link2, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react'
-import { applyTheme, clearTheme, THEME_PRESETS, ALL_NAV_ITEMS, DEFAULT_NAV, type ThemeConfig, type NavItemConfig } from '@/lib/theme'
+import { applyTheme, clearTheme, THEME_PRESETS, ALL_NAV_ITEMS, DEFAULT_NAV, mergeNavItems, type ThemeConfig, type NavItemConfig } from '@/lib/theme'
 
 const settingsFormSchema = z.object({
   companyName: z.string().min(1, 'Company name is required'),
@@ -572,24 +572,12 @@ function NavSection({ settings }: { settings: CompanySettings | null }) {
   const { toast } = useToast()
   const [saving, setSaving] = useState(false)
 
-  const savedItems: NavItemConfig[] = settings?.navConfig?.items ?? []
   const [items, setItems] = useState<NavItemConfig[]>(() =>
-    ALL_NAV_ITEMS.map(def => {
-      const saved = savedItems.find(s => s.id === def.id)
-      if (saved) return { ...saved }
-      const dflt = DEFAULT_NAV.find(d => d.id === def.id)
-      return { id: def.id, visible: dflt?.visible ?? false }
-    })
+    mergeNavItems(settings?.navConfig?.items ?? [])
   )
 
   useEffect(() => {
-    const saved: NavItemConfig[] = settings?.navConfig?.items ?? []
-    setItems(ALL_NAV_ITEMS.map(def => {
-      const s = saved.find(x => x.id === def.id)
-      if (s) return { ...s }
-      const d = DEFAULT_NAV.find(x => x.id === def.id)
-      return { id: def.id, visible: d?.visible ?? false }
-    }))
+    setItems(mergeNavItems(settings?.navConfig?.items ?? []))
   }, [settings?.navConfig])
 
   function toggle(id: string) {
