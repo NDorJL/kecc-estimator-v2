@@ -40,7 +40,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle, Send, CheckCircle2, Loader2, Pencil, X } from "lucide-react";
+import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle, Send, CheckCircle2, Clock, Loader2, Pencil, X } from "lucide-react";
 
 function fmt(n: number): string {
   return "$" + n.toFixed(2);
@@ -637,6 +637,32 @@ function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => 
             Editing quote — changes save when you tap <strong>Save Changes</strong> above.
           </div>
         )}
+
+        {/* ── E-sign status banner ─────────────────────────────────────── */}
+        {!isEditing && quote.signedAt ? (
+          <div className="mb-4 rounded-md bg-green-50 border border-green-300 px-4 py-3 flex items-center gap-2.5">
+            <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-green-800">Signed</p>
+              <p className="text-xs text-green-700">
+                {quote.customerName} signed on{' '}
+                {new Date(quote.signedAt).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}{' '}
+                at {new Date(quote.signedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+              </p>
+            </div>
+          </div>
+        ) : !isEditing && quote.status === 'sent' ? (
+          <div className="mb-4 rounded-md bg-amber-50 border border-amber-300 px-4 py-3 flex items-center gap-2.5">
+            <Clock className="h-4 w-4 text-amber-600 shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-amber-800">Awaiting Signature</p>
+              <p className="text-xs text-amber-700">
+                This quote has been sent but has not been signed yet.
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         <div className="flex items-start justify-between mb-6">
           <div>
             <h2 className="text-xl font-bold">{settings?.companyName ?? "Knox Exterior Care Co."}</h2>
