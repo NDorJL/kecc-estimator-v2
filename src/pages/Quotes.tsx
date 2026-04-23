@@ -367,6 +367,7 @@ function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => 
   const [editBusiness, setEditBusiness] = useState('');
   const [editQuoteType, setEditQuoteType] = useState('');
   const [editNotes, setEditNotes] = useState('');
+  const [editCreatedAt, setEditCreatedAt] = useState('');
   const [editItems, setEditItems] = useState<EditLineItem[]>([]);
 
   const startEdit = () => {
@@ -377,6 +378,7 @@ function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => 
     setEditBusiness(quote.businessName ?? '');
     setEditQuoteType(quote.quoteType);
     setEditNotes(quote.notes ?? '');
+    setEditCreatedAt(quote.createdAt.slice(0, 10)); // YYYY-MM-DD
     setEditItems(
       (Array.isArray(quote.lineItems) ? quote.lineItems : []).map((item, i) => ({
         ...item,
@@ -439,6 +441,10 @@ function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => 
         subtotal: total,
         total,
         notes: editNotes.trim() || null,
+        // backdating: include only if user actually changed the date
+        ...(editCreatedAt && editCreatedAt !== quote.createdAt.slice(0, 10)
+          ? { createdAt: new Date(editCreatedAt + 'T12:00:00').toISOString() }
+          : {}),
       });
       return res.json() as Promise<Quote>;
     },
@@ -949,16 +955,29 @@ function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => 
 
         {/* Notes */}
         {isEditing ? (
-          <div className="mt-6">
-            <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Notes</p>
-            <textarea
-              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm bg-white text-black resize-none"
-              rows={3}
-              placeholder="Add notes…"
-              value={editNotes}
-              onChange={e => setEditNotes(e.target.value)}
-            />
-          </div>
+          <>
+            <div className="mt-6">
+              <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Notes</p>
+              <textarea
+                className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm bg-white text-black resize-none"
+                rows={3}
+                placeholder="Add notes…"
+                value={editNotes}
+                onChange={e => setEditNotes(e.target.value)}
+              />
+            </div>
+            <div className="mt-4">
+              <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Quote Date</p>
+              <p className="text-xs text-gray-400 mb-1">Change to backdate this quote for historical records</p>
+              <input
+                type="date"
+                className="border border-gray-300 rounded px-2 py-1.5 text-sm bg-white text-black"
+                value={editCreatedAt}
+                onChange={e => setEditCreatedAt(e.target.value)}
+                max={new Date().toISOString().slice(0, 10)}
+              />
+            </div>
+          </>
         ) : quote.notes ? (
           <div className="mt-6">
             <p className="text-xs text-gray-500 uppercase font-semibold mb-1">Notes</p>

@@ -92,6 +92,7 @@ export const handler: Handler = async (event) => {
       if (body.notes !== undefined) update.notes = body.notes
       if (body.status !== undefined) update.status = body.status
       if (body.contactId !== undefined)      update.contact_id = body.contactId
+      if (body.createdAt !== undefined)      update.created_at = body.createdAt   // allow backdating
       if (body.expiresAt !== undefined)      update.expires_at = body.expiresAt
       if (body.signedAt !== undefined)       update.signed_at = body.signedAt
       if (body.signatureData !== undefined)  update.signature_data = body.signatureData

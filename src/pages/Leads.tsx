@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import { Lead, Contact, LeadStage } from '@/types'
+import { Lead, Quote, LeadStage } from '@/types'
 import {
   DndContext,
   DragEndEvent,
@@ -13,6 +13,7 @@ import {
   useSensors,
   DragOverlay,
   useDroppable,
+  useDraggable,
 } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -24,7 +25,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Plus, Clock } from 'lucide-react'
+import { Plus, Clock, GripVertical, FileText, ArrowRight } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
 // ── Stage config ────────────────────────────────────────────────────────────
@@ -50,7 +51,7 @@ function fmt(n: number | null) {
   return n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n}`
 }
 
-// ── Lead Card ───────────────────────────────────────────────────────────────
+// ── Lead Card (sortable within kanban) ──────────────────────────────────────
 
 function LeadCard({
   lead,
@@ -90,7 +91,6 @@ function LeadCard({
   )
 }
 
-// Ghost card used in DragOverlay
 function LeadCardGhost({ lead, contactName }: { lead: Lead; contactName: string }) {
   return (
     <div className="rounded-lg border bg-card p-2.5 shadow-lg rotate-1 opacity-90">
@@ -100,7 +100,67 @@ function LeadCardGhost({ lead, contactName }: { lead: Lead; contactName: string 
   )
 }
 
-// ── Column ──────────────────────────────────────────────────────────────────
+// ── Draggable Quote Card (for right panel) ───────────────────────────────────
+
+const QUOTE_STATUS_COLORS: Record<string, string> = {
+  draft:    'bg-muted text-muted-foreground',
+  sent:     'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300',
+  accepted: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
+  declined: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300',
+}
+
+function DraggableQuoteCard({
+  quote,
+  linkedStageLabel,
+}: {
+  quote: Quote
+  linkedStageLabel: string | null
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `q-${quote.id}`,
+  })
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={transform ? { transform: `translate3d(${transform.x}px,${transform.y}px,0)` } : undefined}
+      {...attributes}
+      {...listeners}
+      className={`rounded-lg border bg-card p-2 shadow-sm cursor-grab active:cursor-grabbing touch-none select-none transition-opacity ${isDragging ? 'opacity-40' : 'opacity-100'}`}
+    >
+      <div className="flex items-start gap-1">
+        <GripVertical className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold leading-snug truncate">{quote.customerName}</p>
+          <p className="text-sm font-bold text-primary mt-0.5">${quote.total.toFixed(0)}</p>
+          <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full mt-1 ${QUOTE_STATUS_COLORS[quote.status] ?? 'bg-muted'}`}>
+            {quote.status}
+          </span>
+          {linkedStageLabel && (
+            <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-0.5">
+              <ArrowRight className="h-2.5 w-2.5" />{linkedStageLabel}
+            </p>
+          )}
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            {new Date(quote.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' })}
+          </p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function QuoteCardGhost({ quote }: { quote: Quote }) {
+  return (
+    <div className="rounded-lg border bg-primary text-primary-foreground p-2 shadow-xl rotate-2 w-[150px]">
+      <p className="text-xs font-semibold truncate">{quote.customerName}</p>
+      <p className="text-sm font-bold">${quote.total.toFixed(0)}</p>
+      <p className="text-[10px] opacity-75 mt-0.5">Drop into stage →</p>
+    </div>
+  )
+}
+
+// ── Kanban Column ────────────────────────────────────────────────────────────
 
 function KanbanColumn({
   stage,
@@ -116,12 +176,12 @@ function KanbanColumn({
   const { setNodeRef, isOver } = useDroppable({ id: stage.id })
 
   return (
-    <div className={`flex flex-col rounded-xl border min-w-[200px] w-[200px] shrink-0 ${stage.color} ${isOver ? 'ring-2 ring-primary' : ''}`}>
-      <div className="flex items-center justify-between px-3 py-2 border-b bg-white/50 dark:bg-black/20 rounded-t-xl">
+    <div className={`flex flex-col rounded-xl border min-w-[180px] w-[180px] shrink-0 ${stage.color} ${isOver ? 'ring-2 ring-primary' : ''}`}>
+      <div className="flex items-center justify-between px-2.5 py-2 border-b bg-white/50 dark:bg-black/20 rounded-t-xl">
         <span className={`text-xs font-semibold ${stage.headerColor ?? ''}`}>{stage.label}</span>
         <Badge variant="secondary" className="text-xs h-5 px-1.5">{leads.length}</Badge>
       </div>
-      <div ref={setNodeRef} className="flex flex-col gap-2 p-2 min-h-[120px]">
+      <div ref={setNodeRef} className="flex flex-col gap-2 p-2 min-h-[100px]">
         <SortableContext items={leads.map(l => l.id)} strategy={verticalListSortingStrategy}>
           {leads.map(l => (
             <LeadCard
@@ -137,7 +197,7 @@ function KanbanColumn({
   )
 }
 
-// ── Lead Detail Sheet ───────────────────────────────────────────────────────
+// ── Lead Detail Sheet ────────────────────────────────────────────────────────
 
 function LeadDetailSheet({
   lead,
@@ -246,9 +306,9 @@ function LeadDetailSheet({
   )
 }
 
-// ── New Lead Sheet ──────────────────────────────────────────────────────────
+// ── New Lead Sheet ───────────────────────────────────────────────────────────
 
-function NewLeadSheet({ open, onClose, contacts }: { open: boolean; onClose: () => void; contacts: Contact[] }) {
+function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [form, setForm] = useState({
     contactId: '',
     serviceInterest: '',
@@ -258,6 +318,12 @@ function NewLeadSheet({ open, onClose, contacts }: { open: boolean; onClose: () 
   })
   const queryClient = useQueryClient()
   const { toast } = useToast()
+
+  const { data: contacts = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ['/contacts'],
+    queryFn: () => apiGet('/contacts'),
+    enabled: open,
+  })
 
   const createMutation = useMutation({
     mutationFn: () => apiRequest('POST', '/leads', {
@@ -349,10 +415,11 @@ function NewLeadSheet({ open, onClose, contacts }: { open: boolean; onClose: () 
   )
 }
 
-// ── Main Leads Page ─────────────────────────────────────────────────────────
+// ── Main Leads Page ──────────────────────────────────────────────────────────
 
 export default function Leads() {
   const [activeLead, setActiveLead] = useState<Lead | null>(null)
+  const [activeQuote, setActiveQuote] = useState<Quote | null>(null)
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [showNew, setShowNew] = useState(false)
   const queryClient = useQueryClient()
@@ -363,13 +430,26 @@ export default function Leads() {
     queryFn: () => apiGet('/leads'),
   })
 
-  const { data: contacts, isLoading: contactsLoading } = useQuery<Contact[]>({
+  const { data: contacts, isLoading: contactsLoading } = useQuery<{ id: string; name: string }[]>({
     queryKey: ['/contacts'],
     queryFn: () => apiGet('/contacts'),
   })
 
+  const { data: quotes, isLoading: quotesLoading } = useQuery<Quote[]>({
+    queryKey: ['/quotes'],
+    queryFn: () => apiGet('/quotes'),
+  })
+
   const contactNames: Record<string, string> = {}
   for (const c of contacts ?? []) contactNames[c.id] = c.name
+
+  // Map quoteId → lead stage for linked-indicator on quote cards
+  const quoteLeadMap: Record<string, LeadStage> = {}
+  for (const l of leads ?? []) {
+    if (l.quoteId) quoteLeadMap[l.quoteId] = l.stage
+  }
+
+  // ── Mutations ──────────────────────────────────────────────────────────────
 
   const updateStageMutation = useMutation({
     mutationFn: ({ id, stage }: { id: string; stage: LeadStage }) =>
@@ -389,25 +469,89 @@ export default function Leads() {
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['/leads'] }),
   })
 
+  // Create a lead from a dragged quote
+  const createLeadFromQuoteMutation = useMutation({
+    mutationFn: ({ quote, stage }: { quote: Quote; stage: LeadStage }) =>
+      apiRequest('POST', '/leads', {
+        contactId: null,
+        quoteId: quote.id,
+        stage,
+        estimatedValue: quote.total,
+        serviceInterest: Array.isArray(quote.lineItems) && quote.lineItems.length > 0
+          ? (quote.lineItems[0] as { serviceName?: string }).serviceName ?? null
+          : null,
+        source: 'quote',
+        notes: null,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      toast({ title: 'Lead created from quote' })
+    },
+    onError: (err: Error) => toast({ title: 'Failed', description: err.message, variant: 'destructive' }),
+  })
+
+  // ── DnD sensors ──────────────────────────────────────────────────────────
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   )
 
   function handleDragStart(e: DragStartEvent) {
-    const lead = leads?.find(l => l.id === e.active.id)
-    setActiveLead(lead ?? null)
+    const id = String(e.active.id)
+    if (id.startsWith('q-')) {
+      const quoteId = id.replace('q-', '')
+      setActiveQuote(quotes?.find(q => q.id === quoteId) ?? null)
+      setActiveLead(null)
+    } else {
+      setActiveLead(leads?.find(l => l.id === id) ?? null)
+      setActiveQuote(null)
+    }
   }
 
   function handleDragEnd(e: DragEndEvent) {
-    setActiveLead(null)
     const { active, over } = e
-    if (!over) return
-    const lead = leads?.find(l => l.id === active.id)
+
+    if (!over) {
+      setActiveLead(null)
+      setActiveQuote(null)
+      return
+    }
+
+    const activeId = String(active.id)
+    const overId   = String(over.id)
+
+    // ── Quote dropped into pipeline ──────────────────────────────────────────
+    if (activeId.startsWith('q-')) {
+      setActiveQuote(null)
+      const quoteId = activeId.replace('q-', '')
+      const quote = quotes?.find(q => q.id === quoteId)
+      if (!quote) return
+
+      // over could be a column ID or a lead card ID
+      const targetStage: LeadStage | undefined =
+        (STAGES.find(s => s.id === overId)?.id as LeadStage | undefined) ??
+        leads?.find(l => l.id === overId)?.stage
+
+      if (!targetStage) return
+
+      // If a lead already exists for this quote, move it; otherwise create new
+      const existingLead = leads?.find(l => l.quoteId === quote.id)
+      if (existingLead) {
+        updateStageMutation.mutate({ id: existingLead.id, stage: targetStage })
+      } else {
+        createLeadFromQuoteMutation.mutate({ quote, stage: targetStage })
+      }
+      return
+    }
+
+    // ── Lead card drag ────────────────────────────────────────────────────────
+    setActiveLead(null)
+    const lead = leads?.find(l => l.id === activeId)
     if (!lead) return
 
-    // over could be a column id or a lead id inside a column
-    const targetStage = STAGES.find(s => s.id === over.id)?.id
-      ?? leads?.find(l => l.id === over.id)?.stage
+    const targetStage: LeadStage | undefined =
+      (STAGES.find(s => s.id === overId)?.id as LeadStage | undefined) ??
+      leads?.find(l => l.id === overId)?.stage
 
     if (targetStage && targetStage !== lead.stage) {
       updateStageMutation.mutate({ id: lead.id, stage: targetStage })
@@ -415,12 +559,14 @@ export default function Leads() {
   }
 
   function handleDragOver(e: DragOverEvent) {
-    // Allow dropping into empty columns
+    // Skip optimistic updates for quote drags — only handle lead-to-lead
+    if (String(e.active.id).startsWith('q-')) return
+
     const { over } = e
     if (!over) return
     const lead = leads?.find(l => l.id === e.active.id)
     if (!lead) return
-    const targetStage = STAGES.find(s => s.id === over.id)?.id
+    const targetStage = STAGES.find(s => s.id === String(over.id))?.id as LeadStage | undefined
     if (targetStage && targetStage !== lead.stage) {
       queryClient.setQueryData<Lead[]>(['/leads'], old =>
         old?.map(l => l.id === lead.id ? { ...l, stage: targetStage } : l) ?? []
@@ -430,53 +576,121 @@ export default function Leads() {
 
   const loading = leadsLoading || contactsLoading
 
+  // Sorted quotes for panel: non-draft on top, then by date desc
+  const sortedQuotes = [...(quotes ?? [])].sort((a, b) => {
+    const statusOrder: Record<string, number> = { sent: 0, accepted: 1, draft: 2, declined: 3 }
+    const sa = statusOrder[a.status] ?? 2
+    const sb = statusOrder[b.status] ?? 2
+    if (sa !== sb) return sa - sb
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  })
+
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between p-3 border-b">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2.5 border-b shrink-0">
         <div>
-          <h2 className="text-base font-semibold">Lead Pipeline</h2>
-          <p className="text-xs text-muted-foreground">{leads?.length ?? 0} leads</p>
+          <h2 className="text-base font-bold">Lead Pipeline</h2>
+          <p className="text-xs text-muted-foreground">
+            {leads?.length ?? 0} leads · drag quotes from right panel into stages
+          </p>
         </div>
         <Button size="sm" onClick={() => setShowNew(true)}>
           <Plus className="h-4 w-4 mr-1" />New Lead
         </Button>
       </div>
 
-      {loading ? (
-        <div className="flex gap-3 p-3 overflow-x-auto">
-          {STAGES.map(s => (
-            <div key={s.id} className="min-w-[200px] w-[200px]">
-              <Skeleton className="h-8 w-full rounded-t-xl" />
-              <Skeleton className="h-24 w-full rounded-b-xl mt-px" />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragOver={handleDragOver}>
+      {/* Content: kanban + quotes panel */}
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragOver={handleDragOver}
+      >
+        <div className="flex flex-1 min-h-0 overflow-hidden">
+
+          {/* ── Left: Kanban pipeline ─────────────────────────────────────── */}
           <div className="flex-1 overflow-x-auto overflow-y-hidden">
-            <div className="flex gap-3 p-3 h-full" style={{ minWidth: 'max-content' }}>
-              {STAGES.map(stage => (
-                <KanbanColumn
-                  key={stage.id}
-                  stage={stage}
-                  leads={(leads ?? []).filter(l => l.stage === stage.id)}
-                  contactNames={contactNames}
-                  onCardClick={l => setSelectedLead(l)}
-                />
-              ))}
+            {loading ? (
+              <div className="flex gap-3 p-3 h-full">
+                {STAGES.map(s => (
+                  <div key={s.id} className="min-w-[180px] w-[180px]">
+                    <Skeleton className="h-8 w-full rounded-t-xl" />
+                    <Skeleton className="h-24 w-full rounded-b-xl mt-px" />
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="flex gap-3 p-3 h-full" style={{ minWidth: 'max-content' }}>
+                {STAGES.map(stage => (
+                  <KanbanColumn
+                    key={stage.id}
+                    stage={stage}
+                    leads={(leads ?? []).filter(l => l.stage === stage.id)}
+                    contactNames={contactNames}
+                    onCardClick={l => setSelectedLead(l)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* ── Right: Quotes panel ───────────────────────────────────────── */}
+          <div className="w-[155px] shrink-0 border-l flex flex-col overflow-hidden bg-muted/20">
+            <div className="px-2 py-2 border-b shrink-0 bg-card/80">
+              <div className="flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5 text-primary" />
+                <span className="text-xs font-bold">Quotes</span>
+                {!quotesLoading && (
+                  <Badge variant="secondary" className="text-[10px] h-4 px-1 ml-auto">
+                    {sortedQuotes.length}
+                  </Badge>
+                )}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">Drag into a stage</p>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-2 space-y-2">
+              {quotesLoading ? (
+                <>
+                  <Skeleton className="h-20 w-full rounded-lg" />
+                  <Skeleton className="h-20 w-full rounded-lg" />
+                  <Skeleton className="h-20 w-full rounded-lg" />
+                </>
+              ) : sortedQuotes.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground text-center py-4">No quotes yet</p>
+              ) : (
+                sortedQuotes.map(q => {
+                  const linkedStage = quoteLeadMap[q.id]
+                  const stageLabel = linkedStage
+                    ? STAGES.find(s => s.id === linkedStage)?.label ?? null
+                    : null
+                  return (
+                    <DraggableQuoteCard
+                      key={q.id}
+                      quote={q}
+                      linkedStageLabel={stageLabel}
+                    />
+                  )
+                })
+              )}
             </div>
           </div>
-          <DragOverlay>
-            {activeLead && (
-              <LeadCardGhost
-                lead={activeLead}
-                contactName={contactNames[activeLead.contactId ?? ''] ?? 'Unknown'}
-              />
-            )}
-          </DragOverlay>
-        </DndContext>
-      )}
+        </div>
 
+        {/* Drag overlays */}
+        <DragOverlay>
+          {activeLead && (
+            <LeadCardGhost
+              lead={activeLead}
+              contactName={contactNames[activeLead.contactId ?? ''] ?? 'Unknown'}
+            />
+          )}
+          {activeQuote && <QuoteCardGhost quote={activeQuote} />}
+        </DragOverlay>
+      </DndContext>
+
+      {/* Sheets */}
       <LeadDetailSheet
         lead={selectedLead}
         contactName={selectedLead ? (contactNames[selectedLead.contactId ?? ''] ?? 'Unknown') : ''}
@@ -486,7 +700,6 @@ export default function Leads() {
       <NewLeadSheet
         open={showNew}
         onClose={() => setShowNew(false)}
-        contacts={contacts ?? []}
       />
     </div>
   )
