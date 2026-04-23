@@ -2,6 +2,7 @@ import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { rowToJob } from '../../src/types'
 import { syncJobToGoogle, deleteGoogleEvent } from './_google'
+import { advanceLeadStage } from './_leadSync'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -69,8 +70,16 @@ export const handler: Handler = async (event) => {
       const { data, error } = await supabase.from('jobs').insert(insert).select().single()
       if (error) throw new Error(error.message)
       const job = rowToJob(data)
-      // Fire-and-forget Google Calendar sync — do not await, don't block response
+      // Fire-and-forget Google Calendar sync
       syncJobToGoogle({ ...job, googleEventId: null }).catch(() => {})
+      // Advance linked lead to 'scheduled' when a job is booked from a signed quote
+      if (data.quote_id) {
+        await advanceLeadStage(supabase, {
+          quoteId:   data.quote_id,
+          contactId: data.contact_id ?? null,
+          stage:     'scheduled',
+        })
+      }
       return { statusCode: 201, headers: CORS, body: JSON.stringify(job) }
     }
 

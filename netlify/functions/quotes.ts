@@ -113,14 +113,8 @@ export const handler: Handler = async (event) => {
       if (body.qbInvoiceId !== undefined)    update.qb_invoice_id = body.qbInvoiceId
       const { data, error } = await supabase.from('quotes').update(update).eq('id', id).select().single()
       if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Quote not found' }) }
-      // Advance lead when quote is accepted or manually signed
-      if (body.status === 'accepted' || body.signedAt) {
-        await advanceLeadStage(supabase, {
-          quoteId:   data.id,
-          contactId: data.contact_id ?? null,
-          stage:     'scheduled',
-        })
-      }
+      // NOTE: lead does NOT advance to 'scheduled' here — that only happens
+      // when a job is explicitly created from this quote via POST /jobs.
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToQuote(data)) }
     }
 

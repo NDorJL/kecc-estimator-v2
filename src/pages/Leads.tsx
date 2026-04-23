@@ -27,9 +27,10 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Plus, Clock, GripVertical, FileText, ArrowRight,
-  MapPin, Phone, Mail, User, ChevronRight,
+  MapPin, Phone, Mail, User, ChevronRight, CalendarPlus,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { ScheduleQuoteSheet } from '@/components/ScheduleQuoteSheet'
 
 // ── Stage config ─────────────────────────────────────────────────────────────
 
@@ -374,6 +375,7 @@ function LeadDetailSheet({
   const { toast } = useToast()
   const [notes, setNotes] = useState(lead?.notes ?? '')
   const [lostReason, setLostReason] = useState(lead?.lostReason ?? '')
+  const [showSchedule, setShowSchedule] = useState(false)
 
   const updateMutation = useMutation({
     mutationFn: (updates: Partial<Lead>) =>
@@ -469,6 +471,16 @@ function LeadDetailSheet({
             />
           </div>
 
+          {/* Schedule Job — only visible once the linked quote is e-signed */}
+          {quote?.signedAt && (
+            <Button
+              className="w-full bg-primary"
+              onClick={() => setShowSchedule(true)}
+            >
+              <CalendarPlus className="h-4 w-4 mr-2" />Schedule Job
+            </Button>
+          )}
+
           {/* Actions */}
           <div className="flex gap-2">
             <Button
@@ -497,6 +509,15 @@ function LeadDetailSheet({
             )}
           </div>
         </div>
+
+        {/* Schedule sheet — nested so it shares the lead detail's quote context */}
+        {quote && (
+          <ScheduleQuoteSheet
+            quote={quote}
+            open={showSchedule}
+            onClose={() => setShowSchedule(false)}
+          />
+        )}
       </SheetContent>
     </Sheet>
   )

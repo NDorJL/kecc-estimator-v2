@@ -810,13 +810,8 @@ export const handler: Handler = async (event) => {
         }).eq('id', quoteRow.id)
         if (error) throw new Error(error.message)
 
-        // Advance lead to "Scheduled" when quote is e-signed
-        await advanceLeadStage(supabase, {
-          quoteId:   quoteRow.id,
-          contactId: quoteRow.contact_id ?? null,
-          stage:     'scheduled',
-        })
-
+        // NOTE: lead does NOT advance to 'scheduled' on signing — that only
+        // happens when a job is explicitly booked from the signed quote.
         if (quoteRow.contact_id) {
           await supabase.from('activities').insert({
             contact_id: quoteRow.contact_id,

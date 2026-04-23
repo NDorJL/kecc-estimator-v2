@@ -40,7 +40,8 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle, Send, CheckCircle2, Clock, Loader2, Pencil, X } from "lucide-react";
+import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle, Send, CheckCircle2, Clock, Loader2, Pencil, X, CalendarPlus } from "lucide-react";
+import { ScheduleQuoteSheet } from '@/components/ScheduleQuoteSheet'
 
 function fmt(n: number): string {
   return "$" + n.toFixed(2);
@@ -357,6 +358,7 @@ function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => 
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [showSchedule, setShowSchedule] = useState(false);
 
   // ── Edit mode state ──────────────────────────────────────────────────────
   const [isEditing, setIsEditing] = useState(false);
@@ -680,10 +682,10 @@ function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => 
                   {activateSubMutation.isPending ? "Activating..." : "Activate Sub"}
                 </Button>
               )}
-              {quote.status === "accepted" && (
-                <Button variant="outline" size="sm" className="min-h-[44px]" disabled={convertToJobMutation.isPending} onClick={() => convertToJobMutation.mutate()}>
-                  <Briefcase className="h-4 w-4 mr-1" />
-                  {convertToJobMutation.isPending ? "Creating…" : "Convert to Job"}
+              {/* Schedule Job — only appears after e-sign */}
+              {quote.signedAt && (
+                <Button variant="default" size="sm" className="min-h-[44px] bg-primary" onClick={() => setShowSchedule(true)}>
+                  <CalendarPlus className="h-4 w-4 mr-1" />Schedule Job
                 </Button>
               )}
 
@@ -1014,6 +1016,13 @@ function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => 
           </div>
         )}
       </div>
+
+      {/* Schedule Job sheet — triggered from detail action bar */}
+      <ScheduleQuoteSheet
+        quote={quote}
+        open={showSchedule}
+        onClose={() => setShowSchedule(false)}
+      />
     </div>
   );
 }
@@ -1022,6 +1031,7 @@ function QuotesList({ onViewQuote }: { onViewQuote: (quote: Quote) => void }) {
   const { toast } = useToast();
   const { cartItems, setIsCreatingQuote } = useQuoteContext();
   const [trashOpen, setTrashOpen] = useState(false);
+  const [scheduleQuote, setScheduleQuote] = useState<Quote | null>(null);
 
   const { data: allQuotes = [], isLoading } = useQuery<Quote[]>({
     queryKey: ["/quotes"],
@@ -1086,6 +1096,15 @@ function QuotesList({ onViewQuote }: { onViewQuote: (quote: Quote) => void }) {
             <div className="flex gap-1 shrink-0">
               {!trashed && (
                 <>
+                  {quote.signedAt && (
+                    <Button
+                      variant="ghost" size="icon" className="h-9 w-9 text-primary"
+                      title="Schedule job"
+                      onClick={e => { e.stopPropagation(); setScheduleQuote(quote); }}
+                    >
+                      <CalendarPlus className="h-4 w-4" />
+                    </Button>
+                  )}
                   <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => onViewQuote(quote)}><Eye className="h-4 w-4" /></Button>
                   <Button variant="ghost" size="icon" className="h-9 w-9 text-destructive" onClick={e => { e.stopPropagation(); trashMutation.mutate(quote.id); }}><Trash2 className="h-3.5 w-3.5" /></Button>
                 </>
@@ -1136,6 +1155,14 @@ function QuotesList({ onViewQuote }: { onViewQuote: (quote: Quote) => void }) {
             {trashedQuotes.map(quote => <QuoteCard key={quote.id} quote={quote} trashed />)}
           </CollapsibleContent>
         </Collapsible>
+      )}
+
+      {scheduleQuote && (
+        <ScheduleQuoteSheet
+          quote={scheduleQuote}
+          open={!!scheduleQuote}
+          onClose={() => setScheduleQuote(null)}
+        />
       )}
     </div>
   );
