@@ -3,10 +3,12 @@
  *
  * Call advanceLeadStage() from any Netlify function after a significant
  * event. It will:
- *   - Find the linked lead by quoteId (preferred) or contactId
+ *   - Find the linked lead by quoteId (preferred) or contactId fallback
+ *   - If found by contactId: attach the quoteId to that existing lead
+ *     (deduplication — one lead per contact, quote attaches to it)
  *   - Move it forward if the new stage is ahead of the current one
  *   - Never go backwards, never leave 'lost' automatically
- *   - Auto-create a lead (stage = 'quoted') when a quote is first created
+ *   - Auto-create a lead (stage = 'quoted') only if none exists at all
  */
 
 import { SupabaseClient } from '@supabase/supabase-js'
@@ -33,12 +35,14 @@ interface SyncOptions {
   contactId?: string | null
   /** Target stage to advance to */
   stage: LeadStage
-  /** Extra fields to set on auto-created leads */
+  /** Extra fields to set on auto-created leads (snake_case, straight to Supabase) */
   extraInsert?: Record<string, unknown>
 }
 
 /**
- * Advance a lead's stage, or auto-create one if none exists.
+ * Advance a lead's stage — or auto-create one if none exists.
+ * When a quote is created for a contact that already has a lead,
+ * the quote attaches to that existing lead instead of spawning a new one.
  * Safe to await — any DB errors are caught and logged (non-fatal).
  */
 export async function advanceLeadStage(
@@ -47,8 +51,9 @@ export async function advanceLeadStage(
 ): Promise<void> {
   try {
     let lead: { id: string; stage: string } | null = null
+    let foundByQuoteId = false
 
-    // ── 1. Look up by quoteId first ───────────────────────────────────────
+    // ── 1. Look up by quoteId first (quote already linked) ───────────────
     if (quoteId) {
       const { data } = await supabase
         .from('leads')
@@ -56,10 +61,13 @@ export async function advanceLeadStage(
         .eq('quote_id', quoteId)
         .limit(1)
         .single()
-      lead = data ?? null
+      if (data) { lead = data; foundByQuoteId = true }
     }
 
-    // ── 2. Fall back to most-recent lead for this contact ─────────────────
+    // ── 2. Dedup: find existing lead for this contact ─────────────────────
+    //    This fires when a brand-new quote is created for a contact who
+    //    already has a lead (e.g. from a manual entry or earlier form).
+    //    We attach the quote to that lead instead of creating a duplicate.
     if (!lead && contactId) {
       const { data } = await supabase
         .from('leads')
@@ -69,30 +77,46 @@ export async function advanceLeadStage(
         .limit(1)
         .single()
       lead = data ?? null
+      // foundByQuoteId stays false → we'll write quote_id onto this lead below
     }
 
-    // ── 3. Auto-create if still not found (first-touch from quote) ────────
-    if (!lead && quoteId) {
-      await supabase.from('leads').insert({
-        quote_id:   quoteId,
-        contact_id: contactId ?? null,
-        stage,
-        source:     'quote',
-        ...extraInsert,
-      })
+    // ── 3. Auto-create if no lead exists at all ───────────────────────────
+    if (!lead) {
+      if (quoteId) {
+        await supabase.from('leads').insert({
+          quote_id:   quoteId,
+          contact_id: contactId ?? null,
+          stage,
+          source:     'quote',
+          ...extraInsert,
+        })
+      }
       return
     }
 
-    if (!lead) return // no quoteId and no contactId match — skip
-
-    // ── 4. Only advance, never regress, never leave 'lost' ───────────────
-    if (lead.stage === 'lost') return
+    // ── 4. Build the update payload ───────────────────────────────────────
+    if (lead.stage === 'lost') return   // never auto-move out of lost
 
     const currentIdx = STAGE_ORDER.indexOf(lead.stage as LeadStage)
     const targetIdx  = STAGE_ORDER.indexOf(stage)
 
+    const patch: Record<string, unknown> = {}
+
+    // Attach quote to existing contact lead (dedup case)
+    if (!foundByQuoteId && quoteId) {
+      patch.quote_id = quoteId
+      // Also pull in value + service interest from the new quote
+      if (extraInsert.estimated_value  !== undefined) patch.estimated_value  = extraInsert.estimated_value
+      if (extraInsert.service_interest !== undefined) patch.service_interest = extraInsert.service_interest
+    }
+
+    // Advance stage if target is ahead of current
     if (targetIdx > currentIdx) {
-      await supabase.from('leads').update({ stage }).eq('id', lead.id)
+      patch.stage = stage
+    }
+
+    if (Object.keys(patch).length > 0) {
+      await supabase.from('leads').update(patch).eq('id', lead.id)
     }
   } catch (err) {
     // Non-fatal: log but never crash the parent request
