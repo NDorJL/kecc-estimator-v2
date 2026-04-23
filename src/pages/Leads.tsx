@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import { Lead, Quote, LeadStage } from '@/types'
+import { Lead, Quote, LeadStage, LineItem } from '@/types'
 import {
   DndContext,
   DragEndEvent,
@@ -25,20 +25,23 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Plus, Clock, GripVertical, FileText, ArrowRight } from 'lucide-react'
+import {
+  Plus, Clock, GripVertical, FileText, ArrowRight,
+  MapPin, Phone, Mail, User, ChevronRight,
+} from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
-// ── Stage config ────────────────────────────────────────────────────────────
+// ── Stage config ─────────────────────────────────────────────────────────────
 
 const STAGES: { id: LeadStage; label: string; color: string; headerColor?: string }[] = [
-  { id: 'new',        label: 'New',        color: 'bg-slate-100 dark:bg-slate-800' },
-  { id: 'contacted',  label: 'Contacted',  color: 'bg-blue-50 dark:bg-blue-950/40' },
-  { id: 'quoted',     label: 'Quoted',     color: 'bg-yellow-50 dark:bg-yellow-950/30' },
-  { id: 'follow_up',  label: 'Follow-Up',  color: 'bg-orange-50 dark:bg-orange-950/30' },
-  { id: 'won',        label: 'Won',        color: 'bg-green-50 dark:bg-green-950/30' },
-  { id: 'unpaid',     label: 'Unpaid',     color: 'bg-amber-50 dark:bg-amber-950/30', headerColor: 'text-amber-700 dark:text-amber-400' },
-  { id: 'paid',       label: 'Paid ✓',     color: 'bg-emerald-50 dark:bg-emerald-950/30', headerColor: 'text-emerald-700 dark:text-emerald-400' },
-  { id: 'lost',       label: 'Lost',       color: 'bg-red-50 dark:bg-red-950/30' },
+  { id: 'new',       label: 'New Lead',   color: 'bg-slate-100 dark:bg-slate-800' },
+  { id: 'contacted', label: 'Contacted',  color: 'bg-blue-50 dark:bg-blue-950/40' },
+  { id: 'quoted',    label: 'Quoted',     color: 'bg-yellow-50 dark:bg-yellow-950/30' },
+  { id: 'scheduled', label: 'Scheduled',  color: 'bg-violet-50 dark:bg-violet-950/30', headerColor: 'text-violet-700 dark:text-violet-400' },
+  { id: 'finished',  label: 'Finished',   color: 'bg-teal-50 dark:bg-teal-950/30', headerColor: 'text-teal-700 dark:text-teal-400' },
+  { id: 'unpaid',    label: 'Unpaid',     color: 'bg-amber-50 dark:bg-amber-950/30', headerColor: 'text-amber-700 dark:text-amber-400' },
+  { id: 'paid',      label: 'Paid ✓',    color: 'bg-emerald-50 dark:bg-emerald-950/30', headerColor: 'text-emerald-700 dark:text-emerald-400' },
+  { id: 'lost',      label: 'Lost',       color: 'bg-red-50 dark:bg-red-950/30' },
 ]
 
 function daysAgo(iso: string) {
@@ -46,20 +49,27 @@ function daysAgo(iso: string) {
   return d === 0 ? 'today' : d === 1 ? '1d' : `${d}d`
 }
 
-function fmt(n: number | null) {
-  if (!n) return null
-  return n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n}`
+function fmtMoney(n: number) {
+  return n >= 1000 ? `$${(n / 1000).toFixed(1)}k` : `$${n.toFixed(0)}`
 }
 
-// ── Lead Card (sortable within kanban) ──────────────────────────────────────
+function servicesSummary(items: LineItem[]): string {
+  if (!items || items.length === 0) return ''
+  if (items.length === 1) return items[0].serviceName
+  return `${items[0].serviceName} +${items.length - 1} more`
+}
+
+// ── Lead Card (sortable within kanban) ───────────────────────────────────────
 
 function LeadCard({
   lead,
-  contactName,
+  displayName,
+  subline,
   onClick,
 }: {
   lead: Lead
-  contactName: string
+  displayName: string
+  subline: string
   onClick: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: lead.id })
@@ -73,13 +83,13 @@ function LeadCard({
       onClick={onClick}
       className="rounded-lg border bg-card p-2.5 shadow-sm cursor-pointer hover:border-primary/50 transition-colors touch-none"
     >
-      <p className="text-sm font-medium leading-snug">{contactName}</p>
-      {lead.serviceInterest && (
-        <p className="text-xs text-muted-foreground mt-0.5 truncate">{lead.serviceInterest}</p>
+      <p className="text-sm font-semibold leading-snug">{displayName}</p>
+      {subline && (
+        <p className="text-xs text-muted-foreground mt-0.5 truncate">{subline}</p>
       )}
       <div className="flex items-center justify-between mt-1.5">
-        {fmt(lead.estimatedValue) ? (
-          <span className="text-xs font-semibold text-primary">{fmt(lead.estimatedValue)}</span>
+        {lead.estimatedValue ? (
+          <span className="text-xs font-bold text-primary">{fmtMoney(lead.estimatedValue)}</span>
         ) : (
           <span />
         )}
@@ -91,16 +101,16 @@ function LeadCard({
   )
 }
 
-function LeadCardGhost({ lead, contactName }: { lead: Lead; contactName: string }) {
+function LeadCardGhost({ displayName, subline }: { displayName: string; subline: string }) {
   return (
     <div className="rounded-lg border bg-card p-2.5 shadow-lg rotate-1 opacity-90">
-      <p className="text-sm font-medium">{contactName}</p>
-      {lead.serviceInterest && <p className="text-xs text-muted-foreground mt-0.5">{lead.serviceInterest}</p>}
+      <p className="text-sm font-semibold">{displayName}</p>
+      {subline && <p className="text-xs text-muted-foreground mt-0.5">{subline}</p>}
     </div>
   )
 }
 
-// ── Draggable Quote Card (for right panel) ───────────────────────────────────
+// ── Draggable Quote Card (right panel) ───────────────────────────────────────
 
 const QUOTE_STATUS_COLORS: Record<string, string> = {
   draft:    'bg-muted text-muted-foreground',
@@ -120,6 +130,8 @@ function DraggableQuoteCard({
     id: `q-${quote.id}`,
   })
 
+  const summary = servicesSummary(quote.lineItems)
+
   return (
     <div
       ref={setNodeRef}
@@ -132,7 +144,10 @@ function DraggableQuoteCard({
         <GripVertical className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold leading-snug truncate">{quote.customerName}</p>
-          <p className="text-sm font-bold text-primary mt-0.5">${quote.total.toFixed(0)}</p>
+          {summary && (
+            <p className="text-[10px] text-muted-foreground mt-0.5 truncate leading-snug">{summary}</p>
+          )}
+          <p className="text-sm font-bold text-primary mt-0.5">{fmtMoney(quote.total)}</p>
           <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded-full mt-1 ${QUOTE_STATUS_COLORS[quote.status] ?? 'bg-muted'}`}>
             {quote.status}
           </span>
@@ -141,9 +156,6 @@ function DraggableQuoteCard({
               <ArrowRight className="h-2.5 w-2.5" />{linkedStageLabel}
             </p>
           )}
-          <p className="text-[10px] text-muted-foreground mt-0.5">
-            {new Date(quote.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: '2-digit' })}
-          </p>
         </div>
       </div>
     </div>
@@ -152,25 +164,27 @@ function DraggableQuoteCard({
 
 function QuoteCardGhost({ quote }: { quote: Quote }) {
   return (
-    <div className="rounded-lg border bg-primary text-primary-foreground p-2 shadow-xl rotate-2 w-[150px]">
+    <div className="rounded-lg border bg-primary text-primary-foreground p-2 shadow-xl rotate-2 w-[148px]">
       <p className="text-xs font-semibold truncate">{quote.customerName}</p>
-      <p className="text-sm font-bold">${quote.total.toFixed(0)}</p>
+      <p className="text-sm font-bold">{fmtMoney(quote.total)}</p>
       <p className="text-[10px] opacity-75 mt-0.5">Drop into stage →</p>
     </div>
   )
 }
 
-// ── Kanban Column ────────────────────────────────────────────────────────────
+// ── Kanban Column ─────────────────────────────────────────────────────────────
 
 function KanbanColumn({
   stage,
   leads,
-  contactNames,
+  displayNames,
+  sublines,
   onCardClick,
 }: {
   stage: typeof STAGES[number]
   leads: Lead[]
-  contactNames: Record<string, string>
+  displayNames: Record<string, string>
+  sublines: Record<string, string>
   onCardClick: (lead: Lead) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id })
@@ -187,7 +201,8 @@ function KanbanColumn({
             <LeadCard
               key={l.id}
               lead={l}
-              contactName={contactNames[l.contactId ?? ''] ?? 'Unknown'}
+              displayName={displayNames[l.id] ?? 'Unknown'}
+              subline={sublines[l.id] ?? ''}
               onClick={() => onCardClick(l)}
             />
           ))}
@@ -197,16 +212,159 @@ function KanbanColumn({
   )
 }
 
-// ── Lead Detail Sheet ────────────────────────────────────────────────────────
+// ── Quote Detail inside Lead Sheet ───────────────────────────────────────────
+
+function QuoteDetailPanel({ quote }: { quote: Quote }) {
+  const fmt = (n: number) => `$${n.toFixed(2)}`
+
+  const onetimeItems = quote.lineItems.filter(li => !li.isSubscription)
+  const subItems = quote.lineItems.filter(li => li.isSubscription)
+
+  return (
+    <div className="rounded-xl border bg-muted/30 overflow-hidden">
+      {/* Customer info */}
+      <div className="p-3 border-b space-y-1">
+        <div className="flex items-center gap-2">
+          <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+          <p className="text-sm font-semibold">{quote.customerName}</p>
+          {quote.businessName && (
+            <span className="text-xs text-muted-foreground">· {quote.businessName}</span>
+          )}
+        </div>
+        {quote.customerAddress && (
+          <div className="flex items-start gap-2">
+            <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+            <p className="text-xs text-muted-foreground">{quote.customerAddress}</p>
+          </div>
+        )}
+        {quote.customerPhone && (
+          <div className="flex items-center gap-2">
+            <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <p className="text-xs text-muted-foreground">{quote.customerPhone}</p>
+          </div>
+        )}
+        {quote.customerEmail && (
+          <div className="flex items-center gap-2">
+            <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <p className="text-xs text-muted-foreground">{quote.customerEmail}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Line items */}
+      <div className="p-3 space-y-1">
+        {onetimeItems.length > 0 && (
+          <>
+            {onetimeItems.length > 0 && subItems.length > 0 && (
+              <p className="text-[10px] text-muted-foreground uppercase font-semibold mb-1">One-Time</p>
+            )}
+            {onetimeItems.map((li, i) => (
+              <div key={i} className="flex justify-between items-start gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium leading-snug">{li.serviceName}</p>
+                  {li.description && (
+                    <p className="text-[10px] text-muted-foreground leading-snug">{li.description}</p>
+                  )}
+                  {li.quantity !== 1 && (
+                    <p className="text-[10px] text-muted-foreground">
+                      {li.quantity} {li.unitLabel ?? 'units'} × {fmt(li.unitPrice)}
+                    </p>
+                  )}
+                </div>
+                <span className="text-xs font-semibold tabular-nums shrink-0">{fmt(li.lineTotal)}</span>
+              </div>
+            ))}
+          </>
+        )}
+
+        {subItems.length > 0 && (
+          <>
+            {onetimeItems.length > 0 && (
+              <p className="text-[10px] text-muted-foreground uppercase font-semibold mt-2 mb-1">Monthly</p>
+            )}
+            {subItems.map((li, i) => (
+              <div key={i} className="flex justify-between items-start gap-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium leading-snug">{li.serviceName}</p>
+                  {li.description && (
+                    <p className="text-[10px] text-muted-foreground leading-snug">{li.description}</p>
+                  )}
+                </div>
+                <span className="text-xs font-semibold tabular-nums shrink-0">
+                  {fmt(li.monthlyAmount ?? li.lineTotal)}/mo
+                </span>
+              </div>
+            ))}
+          </>
+        )}
+
+        {/* Totals */}
+        <div className="mt-2 pt-2 border-t space-y-0.5">
+          {quote.discount != null && quote.discount > 0 && (
+            <div className="flex justify-between">
+              <span className="text-xs text-muted-foreground">Discount</span>
+              <span className="text-xs text-green-600 font-medium">−{fmt(quote.discount)}</span>
+            </div>
+          )}
+          {onetimeItems.length > 0 && subItems.length > 0 ? (
+            <>
+              <div className="flex justify-between">
+                <span className="text-xs font-semibold">Due Today</span>
+                <span className="text-sm font-bold tabular-nums">
+                  {fmt(onetimeItems.reduce((s, li) => s + li.lineTotal, 0))}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-xs font-semibold">Monthly</span>
+                <span className="text-sm font-bold tabular-nums text-primary">
+                  {fmt(subItems.reduce((s, li) => s + (li.monthlyAmount ?? li.lineTotal), 0))}/mo
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="flex justify-between">
+              <span className="text-xs font-semibold">Total</span>
+              <span className="text-sm font-bold tabular-nums text-primary">
+                {fmt(quote.total)}{subItems.length > 0 ? '/mo' : ''}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Status + date */}
+      <div className="px-3 pb-3 flex items-center justify-between">
+        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${QUOTE_STATUS_COLORS[quote.status] ?? 'bg-muted text-muted-foreground'}`}>
+          {quote.status}
+        </span>
+        <span className="text-[10px] text-muted-foreground">
+          {new Date(quote.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+        </span>
+      </div>
+
+      {/* Notes */}
+      {quote.notes && (
+        <div className="px-3 pb-3 border-t pt-2">
+          <p className="text-[10px] text-muted-foreground uppercase font-semibold mb-0.5">Quote Notes</p>
+          <p className="text-xs text-muted-foreground whitespace-pre-wrap">{quote.notes}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Lead Detail Sheet ─────────────────────────────────────────────────────────
 
 function LeadDetailSheet({
   lead,
-  contactName,
+  quote,
+  displayName,
   open,
   onClose,
 }: {
   lead: Lead | null
-  contactName: string
+  quote: Quote | null
+  displayName: string
   open: boolean
   onClose: () => void
 }) {
@@ -231,23 +389,46 @@ function LeadDetailSheet({
 
   return (
     <Sheet open={open} onOpenChange={onClose}>
-      <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[85dvh] overflow-y-auto">
+      <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[90dvh] overflow-y-auto">
         <SheetHeader className="mb-4">
-          <SheetTitle>{contactName}</SheetTitle>
+          <SheetTitle className="flex items-center gap-2">
+            {displayName}
+            {quote && (
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${QUOTE_STATUS_COLORS[quote.status] ?? 'bg-muted'}`}>
+                {quote.status}
+              </span>
+            )}
+          </SheetTitle>
         </SheetHeader>
-        <div className="space-y-3">
-          {lead.serviceInterest && (
-            <div>
-              <Label className="text-xs">Service Interest</Label>
-              <p className="text-sm mt-1">{lead.serviceInterest}</p>
+
+        <div className="space-y-4">
+          {/* Full quote detail when linked */}
+          {quote && (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wide">Quote Details</p>
+              <QuoteDetailPanel quote={quote} />
             </div>
           )}
-          {lead.estimatedValue && (
-            <div>
-              <Label className="text-xs">Estimated Value</Label>
-              <p className="text-sm font-semibold mt-1">{fmt(lead.estimatedValue)}</p>
-            </div>
+
+          {/* If no quote, show lead fields */}
+          {!quote && (
+            <>
+              {lead.serviceInterest && (
+                <div>
+                  <Label className="text-xs">Service Interest</Label>
+                  <p className="text-sm mt-1">{lead.serviceInterest}</p>
+                </div>
+              )}
+              {lead.estimatedValue && (
+                <div>
+                  <Label className="text-xs">Estimated Value</Label>
+                  <p className="text-sm font-semibold mt-1">{fmtMoney(lead.estimatedValue)}</p>
+                </div>
+              )}
+            </>
           )}
+
+          {/* Stage */}
           <div>
             <Label className="text-xs">Stage</Label>
             <Select
@@ -256,12 +437,13 @@ function LeadDetailSheet({
             >
               <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
-                {STAGES.filter(s => s.id !== 'paid').map(s => (
+                {STAGES.map(s => (
                   <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
+
           {lead.stage === 'lost' && (
             <div>
               <Label className="text-xs">Lost Reason</Label>
@@ -273,8 +455,10 @@ function LeadDetailSheet({
               />
             </div>
           )}
+
+          {/* Lead notes */}
           <div>
-            <Label className="text-xs">Notes</Label>
+            <Label className="text-xs">Lead Notes</Label>
             <Textarea
               value={notes}
               onChange={e => setNotes(e.target.value)}
@@ -283,6 +467,8 @@ function LeadDetailSheet({
               placeholder="Add notes about this lead…"
             />
           </div>
+
+          {/* Actions */}
           <div className="flex gap-2">
             <Button
               className="flex-1"
@@ -296,7 +482,16 @@ function LeadDetailSheet({
                 variant="outline"
                 onClick={() => { navigate(`/contacts/${lead.contactId}`); onClose() }}
               >
-                View Contact
+                Contact
+              </Button>
+            )}
+            {quote && (
+              <Button
+                variant="outline"
+                className="flex items-center gap-1"
+                onClick={() => { navigate('/quotes'); onClose() }}
+              >
+                <ChevronRight className="h-4 w-4" />Quote
               </Button>
             )}
           </div>
@@ -306,7 +501,7 @@ function LeadDetailSheet({
   )
 }
 
-// ── New Lead Sheet ───────────────────────────────────────────────────────────
+// ── New Lead Sheet ────────────────────────────────────────────────────────────
 
 function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [form, setForm] = useState({
@@ -415,7 +610,7 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
   )
 }
 
-// ── Main Leads Page ──────────────────────────────────────────────────────────
+// ── Main Leads Page ───────────────────────────────────────────────────────────
 
 export default function Leads() {
   const [activeLead, setActiveLead] = useState<Lead | null>(null)
@@ -440,16 +635,37 @@ export default function Leads() {
     queryFn: () => apiGet('/quotes'),
   })
 
+  // Contact name lookup
   const contactNames: Record<string, string> = {}
   for (const c of contacts ?? []) contactNames[c.id] = c.name
 
-  // Map quoteId → lead stage for linked-indicator on quote cards
+  // Quote lookup by ID
+  const quoteById: Record<string, Quote> = {}
+  for (const q of quotes ?? []) quoteById[q.id] = q
+
+  // Map quoteId → lead stage (for indicator on right panel)
   const quoteLeadMap: Record<string, LeadStage> = {}
   for (const l of leads ?? []) {
     if (l.quoteId) quoteLeadMap[l.quoteId] = l.stage
   }
 
-  // ── Mutations ──────────────────────────────────────────────────────────────
+  // Per-lead: display name and subline
+  // Priority: quote.customerName > contactNames[contactId] > 'Unknown'
+  function getDisplayName(lead: Lead): string {
+    if (lead.quoteId && quoteById[lead.quoteId]) return quoteById[lead.quoteId].customerName
+    if (lead.contactId && contactNames[lead.contactId]) return contactNames[lead.contactId]
+    return 'Unknown'
+  }
+
+  function getSubline(lead: Lead): string {
+    if (lead.quoteId && quoteById[lead.quoteId]) {
+      const q = quoteById[lead.quoteId]
+      return servicesSummary(q.lineItems)
+    }
+    return lead.serviceInterest ?? ''
+  }
+
+  // ── Mutations ─────────────────────────────────────────────────────────────
 
   const updateStageMutation = useMutation({
     mutationFn: ({ id, stage }: { id: string; stage: LeadStage }) =>
@@ -469,17 +685,15 @@ export default function Leads() {
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['/leads'] }),
   })
 
-  // Create a lead from a dragged quote
+  // Create a lead from a dragged quote — carries all quote data
   const createLeadFromQuoteMutation = useMutation({
     mutationFn: ({ quote, stage }: { quote: Quote; stage: LeadStage }) =>
       apiRequest('POST', '/leads', {
-        contactId: null,
+        contactId: quote.contactId ?? null,
         quoteId: quote.id,
         stage,
         estimatedValue: quote.total,
-        serviceInterest: Array.isArray(quote.lineItems) && quote.lineItems.length > 0
-          ? (quote.lineItems[0] as { serviceName?: string }).serviceName ?? null
-          : null,
+        serviceInterest: servicesSummary(quote.lineItems) || null,
         source: 'quote',
         notes: null,
       }),
@@ -490,7 +704,7 @@ export default function Leads() {
     onError: (err: Error) => toast({ title: 'Failed', description: err.message, variant: 'destructive' }),
   })
 
-  // ── DnD sensors ──────────────────────────────────────────────────────────
+  // ── DnD sensors ───────────────────────────────────────────────────────────
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -520,21 +734,19 @@ export default function Leads() {
     const activeId = String(active.id)
     const overId   = String(over.id)
 
-    // ── Quote dropped into pipeline ──────────────────────────────────────────
+    // ── Quote dropped into pipeline ─────────────────────────────────────────
     if (activeId.startsWith('q-')) {
       setActiveQuote(null)
       const quoteId = activeId.replace('q-', '')
       const quote = quotes?.find(q => q.id === quoteId)
       if (!quote) return
 
-      // over could be a column ID or a lead card ID
       const targetStage: LeadStage | undefined =
         (STAGES.find(s => s.id === overId)?.id as LeadStage | undefined) ??
         leads?.find(l => l.id === overId)?.stage
 
       if (!targetStage) return
 
-      // If a lead already exists for this quote, move it; otherwise create new
       const existingLead = leads?.find(l => l.quoteId === quote.id)
       if (existingLead) {
         updateStageMutation.mutate({ id: existingLead.id, stage: targetStage })
@@ -559,9 +771,7 @@ export default function Leads() {
   }
 
   function handleDragOver(e: DragOverEvent) {
-    // Skip optimistic updates for quote drags — only handle lead-to-lead
     if (String(e.active.id).startsWith('q-')) return
-
     const { over } = e
     if (!over) return
     const lead = leads?.find(l => l.id === e.active.id)
@@ -576,14 +786,17 @@ export default function Leads() {
 
   const loading = leadsLoading || contactsLoading
 
-  // Sorted quotes for panel: non-draft on top, then by date desc
+  // Quotes sorted: non-draft on top, then by date desc
   const sortedQuotes = [...(quotes ?? [])].sort((a, b) => {
-    const statusOrder: Record<string, number> = { sent: 0, accepted: 1, draft: 2, declined: 3 }
-    const sa = statusOrder[a.status] ?? 2
-    const sb = statusOrder[b.status] ?? 2
+    const order: Record<string, number> = { sent: 0, accepted: 1, draft: 2, declined: 3 }
+    const sa = order[a.status] ?? 2
+    const sb = order[b.status] ?? 2
     if (sa !== sb) return sa - sb
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   })
+
+  // Selected lead's linked quote (if any)
+  const selectedQuote = selectedLead?.quoteId ? (quoteById[selectedLead.quoteId] ?? null) : null
 
   return (
     <div className="flex flex-col h-full">
@@ -592,7 +805,7 @@ export default function Leads() {
         <div>
           <h2 className="text-base font-bold">Lead Pipeline</h2>
           <p className="text-xs text-muted-foreground">
-            {leads?.length ?? 0} leads · drag quotes from right panel into stages
+            {leads?.length ?? 0} leads · drag quotes into stages
           </p>
         </div>
         <Button size="sm" onClick={() => setShowNew(true)}>
@@ -600,7 +813,7 @@ export default function Leads() {
         </Button>
       </div>
 
-      {/* Content: kanban + quotes panel */}
+      {/* Content */}
       <DndContext
         sensors={sensors}
         onDragStart={handleDragStart}
@@ -609,7 +822,7 @@ export default function Leads() {
       >
         <div className="flex flex-1 min-h-0 overflow-hidden">
 
-          {/* ── Left: Kanban pipeline ─────────────────────────────────────── */}
+          {/* ── Left: Kanban ──────────────────────────────────────────────── */}
           <div className="flex-1 overflow-x-auto overflow-y-hidden">
             {loading ? (
               <div className="flex gap-3 p-3 h-full">
@@ -627,7 +840,12 @@ export default function Leads() {
                     key={stage.id}
                     stage={stage}
                     leads={(leads ?? []).filter(l => l.stage === stage.id)}
-                    contactNames={contactNames}
+                    displayNames={Object.fromEntries(
+                      (leads ?? []).map(l => [l.id, getDisplayName(l)])
+                    )}
+                    sublines={Object.fromEntries(
+                      (leads ?? []).map(l => [l.id, getSubline(l)])
+                    )}
                     onCardClick={l => setSelectedLead(l)}
                   />
                 ))}
@@ -682,8 +900,8 @@ export default function Leads() {
         <DragOverlay>
           {activeLead && (
             <LeadCardGhost
-              lead={activeLead}
-              contactName={contactNames[activeLead.contactId ?? ''] ?? 'Unknown'}
+              displayName={getDisplayName(activeLead)}
+              subline={getSubline(activeLead)}
             />
           )}
           {activeQuote && <QuoteCardGhost quote={activeQuote} />}
@@ -693,7 +911,8 @@ export default function Leads() {
       {/* Sheets */}
       <LeadDetailSheet
         lead={selectedLead}
-        contactName={selectedLead ? (contactNames[selectedLead.contactId ?? ''] ?? 'Unknown') : ''}
+        quote={selectedQuote}
+        displayName={selectedLead ? getDisplayName(selectedLead) : ''}
         open={!!selectedLead}
         onClose={() => setSelectedLead(null)}
       />
