@@ -2,6 +2,7 @@ import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { rowToQuote } from '../../src/types'
 import { randomUUID } from 'crypto'
+import { advanceLeadStage } from './_leadSync'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -72,6 +73,18 @@ export const handler: Handler = async (event) => {
       }
       const { data, error } = await supabase.from('quotes').insert(insert).select().single()
       if (error) throw error
+      // Auto-place a lead in "Quoted" whenever a quote is created
+      await advanceLeadStage(supabase, {
+        quoteId:   data.id,
+        contactId: data.contact_id ?? null,
+        stage:     'quoted',
+        extraInsert: {
+          estimated_value:  data.total ?? null,
+          service_interest: Array.isArray(data.line_items) && data.line_items.length > 0
+            ? (data.line_items[0] as any).serviceName ?? null
+            : null,
+        },
+      })
       return { statusCode: 201, headers: CORS, body: JSON.stringify(rowToQuote(data)) }
     }
 
@@ -100,6 +113,14 @@ export const handler: Handler = async (event) => {
       if (body.qbInvoiceId !== undefined)    update.qb_invoice_id = body.qbInvoiceId
       const { data, error } = await supabase.from('quotes').update(update).eq('id', id).select().single()
       if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Quote not found' }) }
+      // Advance lead when quote is accepted or manually signed
+      if (body.status === 'accepted' || body.signedAt) {
+        await advanceLeadStage(supabase, {
+          quoteId:   data.id,
+          contactId: data.contact_id ?? null,
+          stage:     'scheduled',
+        })
+      }
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToQuote(data)) }
     }
 

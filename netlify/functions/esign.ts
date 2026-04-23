@@ -1,5 +1,6 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
+import { advanceLeadStage } from './_leadSync'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -809,6 +810,13 @@ export const handler: Handler = async (event) => {
         }).eq('id', quoteRow.id)
         if (error) throw new Error(error.message)
 
+        // Advance lead to "Scheduled" when quote is e-signed
+        await advanceLeadStage(supabase, {
+          quoteId:   quoteRow.id,
+          contactId: quoteRow.contact_id ?? null,
+          stage:     'scheduled',
+        })
+
         if (quoteRow.contact_id) {
           await supabase.from('activities').insert({
             contact_id: quoteRow.contact_id,
@@ -840,6 +848,13 @@ export const handler: Handler = async (event) => {
             agreement_id: agreementRow.id,
           }).eq('id', agreementRow.subscription_id).catch(() => {/* non-fatal */})
         }
+
+        // Advance lead to "Recurring" when a service agreement is signed
+        await advanceLeadStage(supabase, {
+          quoteId:   null,
+          contactId: agreementRow.contact_id ?? null,
+          stage:     'recurring',
+        })
 
         await supabase.from('activities').insert({
           contact_id: agreementRow.contact_id,

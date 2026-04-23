@@ -1,6 +1,7 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { rowToSubscription } from '../../src/types'
+import { advanceLeadStage } from './_leadSync'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -61,6 +62,13 @@ export const handler: Handler = async (event) => {
       }
       const { data, error } = await supabase.from('subscriptions').insert(insert).select().single()
       if (error) throw error
+      // If subscription is created as ACTIVE (e.g. converted from quote), move lead to Recurring
+      if (data.status === 'ACTIVE' && data.contact_id) {
+        await advanceLeadStage(supabase, {
+          contactId: data.contact_id,
+          stage:     'recurring',
+        })
+      }
       return { statusCode: 201, headers: CORS, body: JSON.stringify(rowToSubscription(data)) }
     }
 
@@ -87,6 +95,13 @@ export const handler: Handler = async (event) => {
       if (body.serviceSchedules !== undefined)    update.service_schedules = body.serviceSchedules
       const { data, error } = await supabase.from('subscriptions').update(update).eq('id', id).select().single()
       if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Subscription not found' }) }
+      // If subscription was just activated (e.g. un-paused or re-activated), move lead to Recurring
+      if (body.status === 'ACTIVE' && data.contact_id) {
+        await advanceLeadStage(supabase, {
+          contactId: data.contact_id,
+          stage:     'recurring',
+        })
+      }
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToSubscription(data)) }
     }
 
