@@ -79,12 +79,12 @@ function AppHeader() {
   })
 
   return (
-    <header className="sticky top-0 z-50 flex items-center justify-between border-b bg-card px-4" style={{ minHeight: 48 }}>
-      <h1 className="text-base font-bold tracking-tight">
+    <header className="sticky top-0 z-50 flex items-center justify-between border-b bg-card/95 backdrop-blur-sm px-4" style={{ minHeight: 52 }}>
+      <h1 className="text-[15px] font-black tracking-tight">
         {settings?.companyName ?? 'Knox Exterior Care Co.'}
       </h1>
-      <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-9 w-9">
-        {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+      <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-9 w-9 rounded-full">
+        {theme === 'dark' ? <Sun className="h-4.5 w-4.5" /> : <Moon className="h-4.5 w-4.5" />}
       </Button>
     </header>
   )
@@ -108,7 +108,7 @@ function BottomTabBar() {
 
   return (
     <nav
-      className="sticky bottom-0 z-50 flex items-center justify-around border-t bg-card"
+      className="sticky bottom-0 z-50 flex items-center justify-around border-t bg-card/95 backdrop-blur-sm"
       style={{ minHeight: 64, paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       {visibleItems.map(tab => {
@@ -118,11 +118,13 @@ function BottomTabBar() {
           <Link
             key={tab.path}
             href={tab.path}
-            className={`flex flex-1 flex-col items-center justify-center gap-0.5 py-2 text-xs font-medium transition-colors min-h-[56px] ${
-              isActive ? 'text-primary' : 'text-muted-foreground'
+            className={`flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[11px] font-semibold transition-all min-h-[56px] ${
+              isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            <Icon className="h-6 w-6" />
+            <div className={`rounded-xl p-1.5 transition-all ${isActive ? 'bg-primary/10' : ''}`}>
+              <Icon className={`h-5 w-5 transition-transform ${isActive ? 'scale-110' : ''}`} />
+            </div>
             <span className="truncate max-w-[52px] text-center leading-tight">{tab.label}</span>
           </Link>
         )

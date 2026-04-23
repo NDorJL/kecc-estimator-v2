@@ -154,6 +154,28 @@ export const THEME_PRESETS: Record<string, ThemePreset> = {
     mutedColor:        '#1e293b',
     mutedForeground:   '#94a3b8',
   },
+  phantom: {
+    label: 'Phantom Dark',
+    primaryColor:      '#ab9ff2',  // Phantom purple
+    primaryForeground: '#131318',
+    backgroundColor:   '#131318',  // Near-black bg
+    cardColor:         '#1c1c27',  // Dark card surface
+    foregroundColor:   '#e8e8f0',  // Soft white text
+    borderColor:       '#2e2e42',  // Subtle dark border
+    mutedColor:        '#232333',  // Muted dark surface
+    mutedForeground:   '#9898b8',  // Muted purple-grey text
+  },
+  neon: {
+    label: 'Neon Green',
+    primaryColor:      '#39d353',  // Bright green
+    primaryForeground: '#0d1117',
+    backgroundColor:   '#0d1117',
+    cardColor:         '#161b22',
+    foregroundColor:   '#e6edf3',
+    borderColor:       '#30363d',
+    mutedColor:        '#1c2128',
+    mutedForeground:   '#7d8590',
+  },
 }
 
 // ── Apply theme to :root CSS variables ───────────────────────────────────────

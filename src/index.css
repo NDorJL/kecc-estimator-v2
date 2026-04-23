@@ -23,7 +23,7 @@
     --border: 20 5.9% 90%;
     --input: 20 5.9% 90%;
     --ring: 24 95% 45%;
-    --radius: 0.5rem;
+    --radius: 0.75rem;
     --chart-1: 12 76% 61%;
     --chart-2: 173 58% 39%;
     --chart-3: 197 37% 24%;
@@ -88,33 +88,103 @@
     font-family: 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    /* Slightly larger base line-height for readability */
     line-height: 1.55;
   }
-  /* Headings: bolder and larger */
-  h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.02em; }
-  h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; }
-  h3 { font-size: 1.05rem; font-weight: 600; }
-  /* Section labels and card titles */
-  .section-label {
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+  /* Better number rendering */
+  .tabular-nums, input[type="number"] {
+    font-variant-numeric: tabular-nums;
   }
 }
 
+/* ── Global card elevation ─────────────────────────────────────────────────── */
 @layer utilities {
-  /* Safe area insets for iPhone notch / home indicator */
+  /* Safe area insets */
   .pb-safe {
     padding-bottom: env(safe-area-inset-bottom);
   }
   .pt-safe {
     padding-top: env(safe-area-inset-top);
   }
+
+  /* Hide scrollbar but allow scroll */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* Phantom Wallet-style gradient text for big numbers */
+  .gradient-text {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary) / 0.7));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Glow effect on primary elements */
+  .primary-glow {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.25), 0 2px 8px hsl(var(--primary) / 0.1);
+  }
+
+  /* Card with elevated shadow — more dramatic than default */
+  .card-elevated {
+    box-shadow: 0 4px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04);
+  }
+  .dark .card-elevated {
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4), 0 1px 4px rgba(0,0,0,0.2);
+  }
+
+  /* Pill button */
+  .btn-pill {
+    @apply rounded-full;
+  }
+
+  /* Active scale animation for buttons/cards */
+  .press {
+    @apply transition-transform active:scale-95;
+  }
 }
 
-/* Bottom nav height variable — used throughout to offset sticky elements */
+/* ── Bottom nav height variable ─────────────────────────────────────────────── */
 :root {
   --bottom-nav-height: 64px;
+}
+
+/* ── Global interactive element polish ─────────────────────────────────────── */
+@layer components {
+  /* All cards get a subtle lift and better shadows */
+  .rounded-xl.border,
+  .rounded-lg.border {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    transition: box-shadow 0.15s ease, transform 0.1s ease;
+  }
+  .dark .rounded-xl.border,
+  .dark .rounded-lg.border {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  }
+
+  /* Smooth focus rings */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Typography hierarchy */
+  h1 { font-size: 1.5rem; font-weight: 800; letter-spacing: -0.025em; line-height: 1.2; }
+  h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.015em; line-height: 1.3; }
+  h3 { font-size: 1.05rem; font-weight: 600; letter-spacing: -0.01em; }
+
+  /* KPI numbers — Phantom-style bold numerics */
+  .kpi-value {
+    font-size: 1.875rem; /* text-3xl */
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Section labels */
+  .section-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
 }

@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { apiGet, apiRequest } from '@/lib/queryClient'
+import type { Quote, Subscription } from '@/types'
 import {
   Lock, AlertTriangle, Upload, Plus, Pencil, Trash2,
   Check, X, RefreshCw, Download, TrendingUp, TrendingDown, Settings2,
@@ -1660,6 +1661,203 @@ function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// SALES TAB
+// ═══════════════════════════════════════════════════════════════════════════
+function SalesTab() {
+  const { data: quotes = [] } = useQuery<Quote[]>({
+    queryKey: ['/quotes'],
+    queryFn: () => apiGet('/quotes'),
+    staleTime: 60_000,
+  })
+  const { data: subs = [] } = useQuery<Subscription[]>({
+    queryKey: ['/subscriptions'],
+    queryFn: () => apiGet('/subscriptions'),
+    staleTime: 60_000,
+  })
+
+  const currentYear = new Date().getFullYear()
+
+  // ── KPI calculations ──────────────────────────────────────────────────────
+  const nonDraft  = quotes.filter(q => q.status !== 'draft' && !q.trashedAt)
+  const sent      = quotes.filter(q => q.status === 'sent' && !q.trashedAt)
+  const accepted  = quotes.filter(q => q.status === 'accepted' && !q.trashedAt)
+  const declined  = quotes.filter(q => q.status === 'declined' && !q.trashedAt)
+  const draft     = quotes.filter(q => q.status === 'draft' && !q.trashedAt)
+
+  const denominator = sent.length + accepted.length + declined.length
+  const winRate = denominator > 0 ? (accepted.length / denominator) * 100 : 0
+  const closedValue = accepted.reduce((s, q) => s + (q.total || 0), 0)
+  const pipelineValue = sent.reduce((s, q) => s + (q.total || 0), 0)
+
+  // ── Monthly Quoted vs Closed ──────────────────────────────────────────────
+  const monthlyData = useMemo(() => MONTHS.map((label, i) => {
+    const mo = i + 1
+    const quoted = nonDraft
+      .filter(q => { const d = new Date(q.createdAt); return d.getFullYear() === currentYear && d.getMonth() + 1 === mo })
+      .reduce((s, q) => s + (q.total || 0), 0)
+    const closed = accepted
+      .filter(q => { const d = new Date(q.createdAt); return d.getFullYear() === currentYear && d.getMonth() + 1 === mo })
+      .reduce((s, q) => s + (q.total || 0), 0)
+    return { month: label, Quoted: Math.round(quoted), Closed: Math.round(closed) }
+  }), [quotes, currentYear]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Revenue split ─────────────────────────────────────────────────────────
+  const activeSubs = subs.filter(s => s.status === 'ACTIVE')
+  const subARR = activeSubs.reduce((s, sub) => s + (sub.inSeasonMonthlyTotal || 0), 0) * 12
+  const onetimeClosed = accepted
+    .filter(q => (q.quoteType || '').includes('onetime'))
+    .reduce((s, q) => s + (q.total || 0), 0)
+
+  const revenuePie = [
+    { name: 'Subscription ARR', value: Math.round(subARR), fill: '#52B788' },
+    { name: 'Closed One-Time', value: Math.round(onetimeClosed), fill: '#1B4332' },
+  ].filter(x => x.value > 0)
+
+  // ── YTD closed one-time ───────────────────────────────────────────────────
+  const nowMonth = new Date().getMonth() + 1
+  const closedYTD = accepted
+    .filter(q => {
+      const d = new Date(q.createdAt)
+      return d.getFullYear() === currentYear && d.getMonth() + 1 <= nowMonth
+    })
+    .reduce((s, q) => s + (q.total || 0), 0)
+
+  const conversionRate = sent.length > 0 ? (accepted.length / (sent.length + accepted.length)) * 100 : 0
+
+  return (
+    <div className="p-4 space-y-5">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 gap-3">
+        <KpiCard
+          label="Quotes Sent"
+          value={String(nonDraft.length)}
+          sub={`${draft.length} draft${draft.length !== 1 ? 's' : ''} pending`}
+          icon={<TrendingUp className="h-4 w-4" />}
+        />
+        <KpiCard
+          label="Win Rate"
+          value={`${winRate.toFixed(1)}%`}
+          sub={`${accepted.length} accepted · ${declined.length} declined`}
+          positive={winRate >= 50}
+        />
+        <KpiCard
+          label="Closed Value"
+          value={fmt$(closedValue)}
+          sub={`${accepted.length} accepted quote${accepted.length !== 1 ? 's' : ''}`}
+          positive={closedValue > 0}
+        />
+        <KpiCard
+          label="Pipeline Value"
+          value={fmt$(pipelineValue)}
+          sub={`${sent.length} open quote${sent.length !== 1 ? 's' : ''}`}
+          icon={<TrendingUp className="h-4 w-4" />}
+        />
+      </div>
+
+      {/* Monthly Quoted vs Closed */}
+      <div className="rounded-xl border bg-card p-4">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+          Monthly Quoted vs Closed — {currentYear}
+        </h3>
+        <ResponsiveContainer width="100%" height={200}>
+          <BarChart data={monthlyData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+            <XAxis dataKey="month" tick={{ fontSize: 10 }} />
+            <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
+            <Tooltip formatter={(v: number) => fmt$d(v)} />
+            <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+            <Bar dataKey="Quoted" fill="#74C69D" radius={[2, 2, 0, 0]} />
+            <Bar dataKey="Closed" fill="#1B4332" radius={[2, 2, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Revenue Split KPI cards */}
+      <div className="grid grid-cols-2 gap-3">
+        <KpiCard
+          label="Sub ARR"
+          value={fmt$(subARR)}
+          sub={`${activeSubs.length} active sub${activeSubs.length !== 1 ? 's' : ''}`}
+          positive={subARR > 0}
+        />
+        <KpiCard
+          label="Closed One-Time"
+          value={fmt$(onetimeClosed)}
+          sub="Accepted one-time quotes"
+          positive={onetimeClosed > 0}
+        />
+      </div>
+
+      {/* Revenue Split Pie */}
+      {revenuePie.length > 0 && (
+        <div className="rounded-xl border bg-card p-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+            Revenue Split — Subscription vs One-Time
+          </h3>
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie data={revenuePie} dataKey="value" nameKey="name" cx="40%" cy="50%" outerRadius={80} innerRadius={40}>
+                {revenuePie.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+              </Pie>
+              <Tooltip formatter={(v: number) => fmt$d(v)} />
+              <Legend layout="vertical" align="right" verticalAlign="middle" iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Quote Status Funnel */}
+      <div className="rounded-xl border bg-card p-4 space-y-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quote Pipeline Funnel</h3>
+        {[
+          { label: 'Draft', count: draft.length, color: 'bg-muted-foreground/40' },
+          { label: 'Sent', count: sent.length, color: 'bg-blue-500' },
+          { label: 'Accepted', count: accepted.length, color: 'bg-green-500' },
+          { label: 'Declined', count: declined.length, color: 'bg-destructive' },
+        ].map(row => (
+          <div key={row.label} className="space-y-0.5">
+            <div className="flex justify-between text-xs">
+              <span className="text-muted-foreground">{row.label}</span>
+              <span className="font-semibold">{row.count}</span>
+            </div>
+            <div className="h-2 bg-muted rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full ${row.color}`}
+                style={{ width: quotes.length > 0 ? `${(row.count / quotes.length) * 100}%` : '0%' }}
+              />
+            </div>
+          </div>
+        ))}
+        {denominator > 0 && (
+          <p className="text-xs text-muted-foreground pt-1">
+            Conversion rate (accepted/sent+accepted): <strong>{conversionRate.toFixed(1)}%</strong>
+          </p>
+        )}
+      </div>
+
+      {/* Growth Trajectory */}
+      <div className="rounded-xl border bg-card p-4 space-y-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Revenue Projection</h3>
+        <div className="grid grid-cols-1 gap-2">
+          <div className="flex justify-between items-center py-2 border-b">
+            <span className="text-sm text-muted-foreground">Projected Annual Sub Revenue</span>
+            <span className="font-bold text-green-700 dark:text-green-400">{fmt$(subARR)}</span>
+          </div>
+          <div className="flex justify-between items-center py-2 border-b">
+            <span className="text-sm text-muted-foreground">Closed One-Time YTD</span>
+            <span className="font-bold">{fmt$(closedYTD)}</span>
+          </div>
+          <div className="flex justify-between items-center py-2">
+            <span className="text-sm font-semibold">Total Revenue Projection</span>
+            <span className="font-bold text-lg">{fmt$(subARR + closedYTD)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // MAIN FINANCE PAGE
 // ═══════════════════════════════════════════════════════════════════════════
 export default function Finance() {
@@ -1752,6 +1950,7 @@ export default function Finance() {
               { value: 'balance', label: 'Balance Sheet' },
               { value: 'transactions', label: 'Transactions' },
               { value: 'import', label: 'CSV Import' },
+              { value: 'sales', label: 'Sales' },
             ].map(t => (
               <TabsTrigger key={t.value} value={t.value}
                 className="shrink-0 text-xs px-3 h-9 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
@@ -1766,6 +1965,7 @@ export default function Finance() {
         <TabsContent value="balance" className="mt-0"><BalanceSheetTab snapshots={snapshots} period={period} onRefresh={refresh} /></TabsContent>
         <TabsContent value="transactions" className="mt-0"><TransactionsTab transactions={transactions} period={period} onRefresh={refresh} /></TabsContent>
         <TabsContent value="import" className="mt-0"><CsvImportTab transactions={transactions} onRefresh={refresh} /></TabsContent>
+        <TabsContent value="sales" className="mt-0"><SalesTab /></TabsContent>
       </Tabs>
     </div>
   )

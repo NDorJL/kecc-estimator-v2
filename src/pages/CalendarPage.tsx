@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import { Job, Subscription, Contractor, Contact } from '@/types'
+import { Job, Subscription, Contractor, Contact, Quote } from '@/types'
 import {
   DndContext, DragEndEvent, DragStartEvent, DragOverlay,
   useDraggable, useDroppable, PointerSensor, useSensor, useSensors,
@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
-import { ChevronLeft, ChevronRight, MapPin, Phone, Wrench, RefreshCw, Calendar, Clock, GripVertical, ClipboardList, Plus, MessageSquare, Search, X, User, Trash2, AlertTriangle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, MapPin, Phone, Wrench, RefreshCw, Calendar, Clock, GripVertical, ClipboardList, Plus, MessageSquare, Search, X, User, Trash2, AlertTriangle, Pencil } from 'lucide-react'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -891,6 +891,505 @@ function NewQuoteVisitSheet({
   )
 }
 
+// ── Edit Job Sheet ────────────────────────────────────────────────────────────
+
+function EditJobSheet({
+  open, onClose, job, onSave,
+}: {
+  open: boolean
+  onClose: () => void
+  job: Job | null
+  onSave: (updates: Partial<{
+    serviceName: string
+    notes: string
+    scheduledDate: string
+    scheduledTime: string
+    scheduledWindow: string
+    status: string
+  }>) => Promise<void>
+}) {
+  const [serviceName, setServiceName] = useState('')
+  const [scheduledDate, setScheduledDate] = useState('')
+  const [scheduledWindow, setScheduledWindow] = useState('anytime')
+  const [scheduledTime, setScheduledTime] = useState('08:00')
+  const [status, setStatus] = useState('scheduled')
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  // Sync form to job when it changes
+  useEffect(() => {
+    if (job) {
+      setServiceName(job.serviceName ?? '')
+      setScheduledDate(job.scheduledDate ?? '')
+      setScheduledWindow(job.scheduledWindow ?? 'anytime')
+      setScheduledTime(job.scheduledTime ?? '08:00')
+      setStatus(job.status ?? 'scheduled')
+      setNotes(job.notes ?? '')
+    }
+  }, [job])
+
+  if (!job) return null
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      const updates: Parameters<typeof onSave>[0] = {
+        serviceName,
+        notes,
+        scheduledDate,
+        scheduledWindow,
+        status,
+      }
+      if (scheduledWindow === 'specific') updates.scheduledTime = scheduledTime
+      await onSave(updates)
+      onClose()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
+      <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[90dvh] overflow-y-auto">
+        <SheetHeader className="mb-4">
+          <SheetTitle className="flex items-center gap-2">
+            <Pencil className="h-4 w-4" />
+            Edit Job
+          </SheetTitle>
+          <p className="text-sm text-muted-foreground">{job.customerName}</p>
+        </SheetHeader>
+        <div className="space-y-4">
+          <div>
+            <Label className="text-xs">Service Name</Label>
+            <Input className="mt-1 min-h-[44px]" value={serviceName} onChange={e => setServiceName(e.target.value)} />
+          </div>
+          <div>
+            <Label className="text-xs">Date</Label>
+            <Input type="date" className="mt-1 min-h-[44px]" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
+          </div>
+          <div>
+            <Label className="text-xs">Time Window</Label>
+            <Select value={scheduledWindow} onValueChange={setScheduledWindow}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="anytime">Anytime</SelectItem>
+                <SelectItem value="morning">Morning (8am – 12pm)</SelectItem>
+                <SelectItem value="afternoon">Afternoon (12pm – 5pm)</SelectItem>
+                <SelectItem value="evening">Evening (5pm – 8pm)</SelectItem>
+                <SelectItem value="specific">Specific time…</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {scheduledWindow === 'specific' && (
+            <div>
+              <Label className="text-xs">Start Time</Label>
+              <Input type="time" className="mt-1 min-h-[44px]" value={scheduledTime} onChange={e => setScheduledTime(e.target.value)} />
+            </div>
+          )}
+          <div>
+            <Label className="text-xs">Status</Label>
+            <Select value={status} onValueChange={setStatus}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="scheduled">Scheduled</SelectItem>
+                <SelectItem value="in_progress">In Progress</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Notes</Label>
+            <Textarea className="mt-1 min-h-[80px] resize-none" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Job notes…" />
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" className="flex-1" onClick={onClose} disabled={saving}>Cancel</Button>
+            <Button className="flex-1" onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </Button>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+// ── Add Service Sheet (from accepted quote) ───────────────────────────────────
+
+function AddServiceSheet({
+  open, onClose, defaultDate, onCreated,
+}: {
+  open: boolean
+  onClose: () => void
+  defaultDate: string
+  onCreated: () => void
+}) {
+  const { toast } = useToast()
+  const [step, setStep] = useState<'quote' | 'services'>('quote')
+  const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null)
+  const [quoteSearch, setQuoteSearch] = useState('')
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
+  const [scheduledDate, setScheduledDate] = useState(defaultDate)
+  const [scheduledWindow, setScheduledWindow] = useState('anytime')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (open) {
+      setScheduledDate(defaultDate)
+      setStep('quote')
+      setSelectedQuote(null)
+      setQuoteSearch('')
+      setSelectedItems(new Set())
+    }
+  }, [open, defaultDate])
+
+  const { data: allQuotes = [] } = useQuery<Quote[]>({
+    queryKey: ['/quotes'],
+    queryFn: () => apiGet('/quotes'),
+    enabled: open,
+  })
+
+  const acceptedQuotes = allQuotes.filter(q => q.status === 'accepted')
+  const filteredQuotes = quoteSearch.trim()
+    ? acceptedQuotes.filter(q =>
+        q.customerName.toLowerCase().includes(quoteSearch.toLowerCase()) ||
+        (q.customerAddress ?? '').toLowerCase().includes(quoteSearch.toLowerCase())
+      )
+    : acceptedQuotes
+
+  function toggleItem(id: string) {
+    setSelectedItems(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  async function handleSchedule() {
+    if (!selectedQuote || selectedItems.size === 0) return
+    setSaving(true)
+    try {
+      const items = selectedQuote.lineItems.filter(li => selectedItems.has(li.serviceId))
+      await Promise.all(items.map(item =>
+        apiRequest('POST', '/jobs', {
+          serviceName: item.serviceName,
+          jobType: 'one_time',
+          quoteId: selectedQuote.id,
+          customerName: selectedQuote.customerName,
+          customerAddress: selectedQuote.customerAddress,
+          customerPhone: selectedQuote.customerPhone,
+          customerEmail: selectedQuote.customerEmail,
+          scheduledDate,
+          scheduledWindow,
+          status: 'scheduled',
+        })
+      ))
+      toast({ title: 'Services scheduled', description: `${items.length} service${items.length !== 1 ? 's' : ''} added to calendar.` })
+      onCreated()
+      onClose()
+    } catch (err) {
+      toast({ title: 'Error', description: String(err), variant: 'destructive' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
+      <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[92dvh] overflow-y-auto">
+        <SheetHeader className="mb-4">
+          <SheetTitle className="flex items-center gap-2">
+            <ClipboardList className="h-4 w-4 text-green-600" />
+            Add Service from Quote
+          </SheetTitle>
+        </SheetHeader>
+
+        {step === 'quote' ? (
+          <div className="space-y-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+              <Input
+                className="pl-9 min-h-[44px]"
+                placeholder="Search accepted quotes…"
+                value={quoteSearch}
+                onChange={e => setQuoteSearch(e.target.value)}
+              />
+            </div>
+            {filteredQuotes.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No accepted quotes found.</p>
+            ) : (
+              <div className="space-y-2">
+                {filteredQuotes.map(q => (
+                  <button
+                    key={q.id}
+                    onClick={() => { setSelectedQuote(q); setStep('services') }}
+                    className="w-full text-left rounded-xl border bg-card p-3 hover:border-primary/50 hover:bg-muted/30 transition-colors"
+                  >
+                    <p className="font-semibold text-sm">{q.customerName}</p>
+                    <p className="text-xs text-muted-foreground">{q.customerAddress ?? 'No address'}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span className="text-xs font-medium text-green-700 dark:text-green-400">${q.total.toFixed(0)} total</span>
+                      <span className="text-xs text-muted-foreground">{q.lineItems.length} item{q.lineItems.length !== 1 ? 's' : ''}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <button onClick={() => setStep('quote')} className="p-1 rounded hover:bg-muted">
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <div>
+                <p className="font-semibold text-sm">{selectedQuote?.customerName}</p>
+                <p className="text-xs text-muted-foreground">Select services to schedule</p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {selectedQuote?.lineItems.map(item => (
+                <button
+                  key={item.serviceId}
+                  onClick={() => toggleItem(item.serviceId)}
+                  className={`w-full text-left rounded-xl border p-3 transition-colors flex items-center gap-3 ${
+                    selectedItems.has(item.serviceId) ? 'border-primary bg-primary/5' : 'bg-card hover:bg-muted/30'
+                  }`}
+                >
+                  <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${
+                    selectedItems.has(item.serviceId) ? 'border-primary bg-primary' : 'border-muted-foreground'
+                  }`}>
+                    {selectedItems.has(item.serviceId) && <div className="w-2 h-2 bg-primary-foreground rounded-sm" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{item.serviceName}</p>
+                    <p className="text-xs text-muted-foreground">${item.lineTotal.toFixed(0)}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            <div>
+              <Label className="text-xs">Date</Label>
+              <Input type="date" className="mt-1 min-h-[44px]" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
+            </div>
+            <div>
+              <Label className="text-xs">Time Window</Label>
+              <Select value={scheduledWindow} onValueChange={setScheduledWindow}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="anytime">Anytime</SelectItem>
+                  <SelectItem value="morning">Morning (8am – 12pm)</SelectItem>
+                  <SelectItem value="afternoon">Afternoon (12pm – 5pm)</SelectItem>
+                  <SelectItem value="evening">Evening (5pm – 8pm)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Button
+              className="w-full min-h-[44px]"
+              onClick={handleSchedule}
+              disabled={saving || selectedItems.size === 0 || !scheduledDate}
+            >
+              {saving ? 'Scheduling…' : `Schedule ${selectedItems.size} Selected Service${selectedItems.size !== 1 ? 's' : ''}`}
+            </Button>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+// ── Add Sub Visit Sheet ───────────────────────────────────────────────────────
+
+function AddSubVisitSheet({
+  open, onClose, defaultDate, onCreated,
+}: {
+  open: boolean
+  onClose: () => void
+  defaultDate: string
+  onCreated: () => void
+}) {
+  const { toast } = useToast()
+  const [subSearch, setSubSearch] = useState('')
+  const [selectedSub, setSelectedSub] = useState<Subscription | null>(null)
+  const [selectedServiceIds, setSelectedServiceIds] = useState<Set<string>>(new Set())
+  const [scheduledDate, setScheduledDate] = useState(defaultDate)
+  const [scheduledWindow, setScheduledWindow] = useState('anytime')
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (open) {
+      setScheduledDate(defaultDate)
+      setSelectedSub(null)
+      setSubSearch('')
+      setSelectedServiceIds(new Set())
+      setNotes('')
+    }
+  }, [open, defaultDate])
+
+  const { data: allSubs = [] } = useQuery<Subscription[]>({
+    queryKey: ['/subscriptions'],
+    queryFn: () => apiGet('/subscriptions'),
+    enabled: open,
+  })
+
+  const activeSubs = allSubs.filter(s => s.status === 'ACTIVE')
+  const filteredSubs = subSearch.trim()
+    ? activeSubs.filter(s =>
+        s.customerName.toLowerCase().includes(subSearch.toLowerCase()) ||
+        (s.customerAddress ?? '').toLowerCase().includes(subSearch.toLowerCase())
+      )
+    : activeSubs
+
+  function toggleService(id: string) {
+    setSelectedServiceIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  async function handleAdd() {
+    if (!selectedSub || selectedServiceIds.size === 0) return
+    setSaving(true)
+    try {
+      const services = selectedSub.services.filter(s => selectedServiceIds.has(s.id))
+      await Promise.all(services.map(svc =>
+        apiRequest('POST', '/jobs', {
+          serviceName: svc.serviceName,
+          jobType: 'one_time',
+          subscriptionId: selectedSub.id,
+          customerName: selectedSub.customerName,
+          customerAddress: selectedSub.customerAddress,
+          customerPhone: selectedSub.customerPhone,
+          scheduledDate,
+          scheduledWindow,
+          notes: notes || null,
+          status: 'scheduled',
+        })
+      ))
+      toast({ title: 'Visit added', description: `${services.length} service${services.length !== 1 ? 's' : ''} added to calendar.` })
+      onCreated()
+      onClose()
+    } catch (err) {
+      toast({ title: 'Error', description: String(err), variant: 'destructive' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
+      <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[92dvh] overflow-y-auto">
+        <SheetHeader className="mb-4">
+          <SheetTitle className="flex items-center gap-2">
+            <RefreshCw className="h-4 w-4 text-blue-600" />
+            Add Sub Visit
+          </SheetTitle>
+        </SheetHeader>
+        <div className="space-y-3">
+          {!selectedSub ? (
+            <>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Input
+                  className="pl-9 min-h-[44px]"
+                  placeholder="Search active subscriptions…"
+                  value={subSearch}
+                  onChange={e => setSubSearch(e.target.value)}
+                />
+              </div>
+              {filteredSubs.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">No active subscriptions found.</p>
+              ) : (
+                <div className="space-y-2">
+                  {filteredSubs.map(s => (
+                    <button
+                      key={s.id}
+                      onClick={() => setSelectedSub(s)}
+                      className="w-full text-left rounded-xl border bg-card p-3 hover:border-primary/50 hover:bg-muted/30 transition-colors"
+                    >
+                      <p className="font-semibold text-sm">{s.customerName}</p>
+                      <p className="text-xs text-muted-foreground">{s.customerAddress ?? 'No address'}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{s.services.length} service{s.services.length !== 1 ? 's' : ''}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setSelectedSub(null)} className="p-1 rounded hover:bg-muted">
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <div>
+                  <p className="font-semibold text-sm">{selectedSub.customerName}</p>
+                  <p className="text-xs text-muted-foreground">Select services to add</p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                {selectedSub.services.map(svc => (
+                  <button
+                    key={svc.id}
+                    onClick={() => toggleService(svc.id)}
+                    className={`w-full text-left rounded-xl border p-3 transition-colors flex items-center gap-3 ${
+                      selectedServiceIds.has(svc.id) ? 'border-primary bg-primary/5' : 'bg-card hover:bg-muted/30'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${
+                      selectedServiceIds.has(svc.id) ? 'border-primary bg-primary' : 'border-muted-foreground'
+                    }`}>
+                      {selectedServiceIds.has(svc.id) && <div className="w-2 h-2 bg-primary-foreground rounded-sm" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{svc.serviceName}</p>
+                      <p className="text-xs text-muted-foreground">{svc.frequency}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <div>
+                <Label className="text-xs">Date</Label>
+                <Input type="date" className="mt-1 min-h-[44px]" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">Time Window</Label>
+                <Select value={scheduledWindow} onValueChange={setScheduledWindow}>
+                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="anytime">Anytime</SelectItem>
+                    <SelectItem value="morning">Morning (8am – 12pm)</SelectItem>
+                    <SelectItem value="afternoon">Afternoon (12pm – 5pm)</SelectItem>
+                    <SelectItem value="evening">Evening (5pm – 8pm)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">Notes</Label>
+                <Textarea className="mt-1 min-h-[70px] resize-none" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Optional notes…" />
+              </div>
+
+              <Button
+                className="w-full min-h-[44px]"
+                onClick={handleAdd}
+                disabled={saving || selectedServiceIds.size === 0 || !scheduledDate}
+              >
+                {saving ? 'Adding…' : `Add ${selectedServiceIds.size} Service${selectedServiceIds.size !== 1 ? 's' : ''} to Calendar`}
+              </Button>
+            </>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 // ── Year View ─────────────────────────────────────────────────────────────────
 
 function YearView({
@@ -972,12 +1471,14 @@ function DayTimelineView({
   contractors,
   onBack,
   onDeleteJob,
+  onEditJob,
 }: {
   date: Date
   events: CalEvent[]
   contractors: Contractor[]
   onBack: () => void
   onDeleteJob: (jobId: string) => Promise<void>
+  onEditJob: (job: Job) => void
 }) {
   const label = date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
   const HOURS = Array.from({ length: 14 }, (_, i) => i + 7) // 7am – 8pm
@@ -1063,7 +1564,8 @@ function DayTimelineView({
                     return (
                       <div
                         key={ev.id}
-                        className={`rounded-lg border px-3 py-2 ${isConfirming ? 'border-destructive/50 bg-destructive/5' : 'bg-card'}`}
+                        className={`rounded-lg border px-3 py-2 ${isConfirming ? 'border-destructive/50 bg-destructive/5' : 'bg-card'} ${ev.job && !isConfirming ? 'cursor-pointer hover:border-primary/40' : ''}`}
+                        onClick={ev.job && !isConfirming ? () => onEditJob(ev.job!) : undefined}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-1.5 min-w-0">
@@ -1071,12 +1573,22 @@ function DayTimelineView({
                             <p className="text-sm font-semibold truncate">{ev.title}</p>
                           </div>
                           {ev.job && !isConfirming && (
-                            <button
-                              onClick={() => setConfirmDeleteId(ev.job!.id)}
-                              className="shrink-0 p-1 rounded hover:bg-destructive/10 hover:text-destructive transition-colors text-muted-foreground"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                onClick={e => { e.stopPropagation(); onEditJob(ev.job!) }}
+                                className="p-1 rounded hover:bg-muted transition-colors text-muted-foreground"
+                                title="Edit"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                onClick={e => { e.stopPropagation(); setConfirmDeleteId(ev.job!.id) }}
+                                className="p-1 rounded hover:bg-destructive/10 hover:text-destructive transition-colors text-muted-foreground"
+                                title="Delete"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           )}
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">{ev.subtitle}</p>
@@ -1131,6 +1643,9 @@ export default function CalendarPage() {
   const [pendingDrop, setPendingDrop] = useState<{ job: Job; dateKey: string } | null>(null)
   const [activeJob, setActiveJob] = useState<Job | null>(null)
   const [showNewQuoteVisit, setShowNewQuoteVisit] = useState(false)
+  const [showAddService, setShowAddService] = useState(false)
+  const [showAddSubVisit, setShowAddSubVisit] = useState(false)
+  const [editingJob, setEditingJob] = useState<Job | null>(null)
   const { toast } = useToast()
   const qc = useQueryClient()
 
@@ -1173,6 +1688,16 @@ export default function CalendarPage() {
       toast({ title: 'Job scheduled!' })
     },
     onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  const updateJobMutation = useMutation({
+    mutationFn: ({ id, updates }: { id: string; updates: Record<string, unknown> }) =>
+      apiRequest('PATCH', `/jobs/${id}`, updates),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/jobs'] })
+      toast({ title: 'Job updated' })
+    },
+    onError: (err: Error) => toast({ title: 'Update failed', description: err.message, variant: 'destructive' }),
   })
 
   const sensors = useSensors(
@@ -1251,10 +1776,33 @@ export default function CalendarPage() {
           contractors={contractors}
           onBack={() => { setCalView('month'); setDayViewDate(null) }}
           onDeleteJob={async (jobId) => { await deleteJobMutation.mutateAsync(jobId) }}
+          onEditJob={setEditingJob}
+        />
+        <EditJobSheet
+          open={!!editingJob}
+          onClose={() => setEditingJob(null)}
+          job={editingJob}
+          onSave={async (updates) => {
+            if (!editingJob) return
+            await updateJobMutation.mutateAsync({ id: editingJob.id, updates: updates as Record<string, unknown> })
+            setEditingJob(null)
+          }}
         />
         <NewQuoteVisitSheet
           open={showNewQuoteVisit}
           onClose={() => setShowNewQuoteVisit(false)}
+          defaultDate={dayKey}
+          onCreated={() => qc.invalidateQueries({ queryKey: ['/jobs'] })}
+        />
+        <AddServiceSheet
+          open={showAddService}
+          onClose={() => setShowAddService(false)}
+          defaultDate={dayKey}
+          onCreated={() => qc.invalidateQueries({ queryKey: ['/jobs'] })}
+        />
+        <AddSubVisitSheet
+          open={showAddSubVisit}
+          onClose={() => setShowAddSubVisit(false)}
           defaultDate={dayKey}
           onCreated={() => qc.invalidateQueries({ queryKey: ['/jobs'] })}
         />
@@ -1324,12 +1872,26 @@ export default function CalendarPage() {
                 {v.charAt(0).toUpperCase() + v.slice(1)}
               </button>
             ))}
-            <button
-              onClick={() => setShowNewQuoteVisit(true)}
-              className="ml-auto shrink-0 flex items-center gap-1 text-xs font-semibold py-1.5 px-2.5 rounded-lg border border-purple-300 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30 transition-colors"
-            >
-              <Plus className="h-3 w-3" />Visit
-            </button>
+            <div className="ml-auto flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => setShowAddService(true)}
+                className="flex items-center gap-1 text-xs font-semibold py-1.5 px-2.5 rounded-lg border border-green-300 text-green-700 dark:text-green-300 hover:bg-green-50 dark:hover:bg-green-950/30 transition-colors"
+              >
+                <Plus className="h-3 w-3" />Service
+              </button>
+              <button
+                onClick={() => setShowAddSubVisit(true)}
+                className="flex items-center gap-1 text-xs font-semibold py-1.5 px-2.5 rounded-lg border border-blue-300 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors"
+              >
+                <Plus className="h-3 w-3" />Sub
+              </button>
+              <button
+                onClick={() => setShowNewQuoteVisit(true)}
+                className="flex items-center gap-1 text-xs font-semibold py-1.5 px-2.5 rounded-lg border border-purple-300 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30 transition-colors"
+              >
+                <Plus className="h-3 w-3" />Visit
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1452,10 +2014,38 @@ export default function CalendarPage() {
         }}
       />
 
+      {/* Edit Job */}
+      <EditJobSheet
+        open={!!editingJob}
+        onClose={() => setEditingJob(null)}
+        job={editingJob}
+        onSave={async (updates) => {
+          if (!editingJob) return
+          await updateJobMutation.mutateAsync({ id: editingJob.id, updates: updates as Record<string, unknown> })
+          setEditingJob(null)
+        }}
+      />
+
       {/* New Quote Visit */}
       <NewQuoteVisitSheet
         open={showNewQuoteVisit}
         onClose={() => setShowNewQuoteVisit(false)}
+        defaultDate={`${year}-${String(month + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`}
+        onCreated={() => qc.invalidateQueries({ queryKey: ['/jobs'] })}
+      />
+
+      {/* Add Service from accepted quote */}
+      <AddServiceSheet
+        open={showAddService}
+        onClose={() => setShowAddService(false)}
+        defaultDate={`${year}-${String(month + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`}
+        onCreated={() => qc.invalidateQueries({ queryKey: ['/jobs'] })}
+      />
+
+      {/* Add Sub Visit */}
+      <AddSubVisitSheet
+        open={showAddSubVisit}
+        onClose={() => setShowAddSubVisit(false)}
         defaultDate={`${year}-${String(month + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`}
         onCreated={() => qc.invalidateQueries({ queryKey: ['/jobs'] })}
       />

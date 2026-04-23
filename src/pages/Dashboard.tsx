@@ -69,11 +69,11 @@ function KpiCard({
       </CardHeader>
       <CardContent className="px-3 pb-3">
         {loading ? (
-          <Skeleton className="h-8 w-24" />
+          <Skeleton className="h-9 w-24" />
         ) : (
           <>
-            <p className="text-3xl font-bold tracking-tight">{value}</p>
-            {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
+            <p className="text-[2rem] font-black tracking-tight leading-none mt-0.5 tabular-nums">{value}</p>
+            {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
           </>
         )}
       </CardContent>
