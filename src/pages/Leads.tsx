@@ -27,7 +27,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Plus, Clock, GripVertical, FileText, ArrowRight,
-  MapPin, Phone, Mail, User, ChevronRight, CalendarPlus,
+  MapPin, Phone, Mail, User, ChevronRight, CalendarPlus, Trash2, Archive,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { ScheduleQuoteSheet } from '@/components/ScheduleQuoteSheet'
@@ -376,6 +376,7 @@ function LeadDetailSheet({
   const [notes, setNotes] = useState(lead?.notes ?? '')
   const [lostReason, setLostReason] = useState(lead?.lostReason ?? '')
   const [showSchedule, setShowSchedule] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   const updateMutation = useMutation({
     mutationFn: (updates: Partial<Lead>) =>
@@ -386,6 +387,31 @@ function LeadDetailSheet({
       onClose()
     },
     onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  // Archive (trash) the linked quote — removes it from Quotes page, detaches from lead visually
+  const archiveQuoteMutation = useMutation({
+    mutationFn: () => apiRequest('POST', `/quotes/${quote?.id}/trash`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/quotes'] })
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      toast({ title: 'Quote archived', description: 'Moved to trash. Restore it from the Quotes page.' })
+      onClose()
+    },
+    onError: (err: Error) => toast({ title: 'Failed to archive', description: err.message, variant: 'destructive' }),
+  })
+
+  // Permanently delete the linked quote
+  const deleteQuoteMutation = useMutation({
+    mutationFn: () => apiRequest('DELETE', `/quotes/${quote?.id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/quotes'] })
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      toast({ title: 'Quote deleted permanently' })
+      setConfirmDelete(false)
+      onClose()
+    },
+    onError: (err: Error) => toast({ title: 'Failed to delete', description: err.message, variant: 'destructive' }),
   })
 
   if (!lead) return null
@@ -473,12 +499,48 @@ function LeadDetailSheet({
 
           {/* Schedule Job — only visible once the linked quote is e-signed */}
           {quote?.signedAt && (
-            <Button
-              className="w-full bg-primary"
-              onClick={() => setShowSchedule(true)}
-            >
+            <Button className="w-full bg-primary" onClick={() => setShowSchedule(true)}>
               <CalendarPlus className="h-4 w-4 mr-2" />Schedule Job
             </Button>
+          )}
+
+          {/* Quote actions — archive / delete */}
+          {quote && (
+            <div className="rounded-xl border border-dashed border-destructive/40 p-3 space-y-2">
+              <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Quote Actions</p>
+              {!confirmDelete ? (
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline" size="sm" className="flex-1 text-amber-600 border-amber-300 hover:bg-amber-50"
+                    disabled={archiveQuoteMutation.isPending}
+                    onClick={() => archiveQuoteMutation.mutate()}
+                  >
+                    <Archive className="h-3.5 w-3.5 mr-1.5" />
+                    {archiveQuoteMutation.isPending ? 'Archiving…' : 'Archive Quote'}
+                  </Button>
+                  <Button
+                    variant="outline" size="sm" className="flex-1 text-destructive border-destructive/30 hover:bg-destructive/5"
+                    onClick={() => setConfirmDelete(true)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />Delete Quote
+                  </Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-destructive font-medium">Permanently delete this quote? This cannot be undone.</p>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" className="flex-1" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+                    <Button
+                      variant="destructive" size="sm" className="flex-1"
+                      disabled={deleteQuoteMutation.isPending}
+                      onClick={() => deleteQuoteMutation.mutate()}
+                    >
+                      {deleteQuoteMutation.isPending ? 'Deleting…' : 'Yes, Delete'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Actions */}

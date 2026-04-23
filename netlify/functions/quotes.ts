@@ -113,6 +113,23 @@ export const handler: Handler = async (event) => {
       if (body.qbInvoiceId !== undefined)    update.qb_invoice_id = body.qbInvoiceId
       const { data, error } = await supabase.from('quotes').update(update).eq('id', id).select().single()
       if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Quote not found' }) }
+
+      // ── Propagate customer identity changes back to the linked contact ────
+      // So editing a name on a quote keeps the contact record in sync.
+      if (data.contact_id) {
+        const contactSync: Record<string, unknown> = {}
+        if (body.customerName !== undefined)  contactSync.name          = body.customerName
+        if (body.customerEmail !== undefined) contactSync.email         = body.customerEmail
+        if (body.customerPhone !== undefined) contactSync.phone         = body.customerPhone
+        if (body.businessName  !== undefined) contactSync.business_name = body.businessName
+        if (Object.keys(contactSync).length > 0) {
+          await supabase.from('contacts')
+            .update(contactSync)
+            .eq('id', data.contact_id)
+            .catch(() => {/* non-fatal */})
+        }
+      }
+
       // NOTE: lead does NOT advance to 'scheduled' here — that only happens
       // when a job is explicitly created from this quote via POST /jobs.
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToQuote(data)) }

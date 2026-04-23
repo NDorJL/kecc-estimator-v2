@@ -219,6 +219,7 @@ function QuoteCreateForm({ onDone }: { onDone: () => void }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/quotes"] });
+      queryClient.invalidateQueries({ queryKey: ["/leads"] });
       clearCart();
       toast({ title: "Quote created", description: "Quote saved successfully." });
       onDone();
@@ -452,6 +453,8 @@ function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => 
     },
     onSuccess: (updated) => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] });
+      queryClient.invalidateQueries({ queryKey: ['/leads'] });
+      queryClient.invalidateQueries({ queryKey: ['/contacts'] });
       onUpdate(updated);
       setIsEditing(false);
       toast({ title: 'Quote updated' });
@@ -1047,7 +1050,7 @@ function QuotesList({ onViewQuote }: { onViewQuote: (quote: Quote) => void }) {
 
   const trashMutation = useMutation({
     mutationFn: async (id: string) => { await apiRequest("POST", `/quotes/${id}/trash`); },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/quotes"] }); toast({ title: "Moved to trash" }); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/quotes"] }); queryClient.invalidateQueries({ queryKey: ["/leads"] }); toast({ title: "Moved to trash" }); },
   });
 
   const restoreMutation = useMutation({
@@ -1057,7 +1060,7 @@ function QuotesList({ onViewQuote }: { onViewQuote: (quote: Quote) => void }) {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => { await apiRequest("DELETE", `/quotes/${id}`); },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/quotes?trashed=true"] }); toast({ title: "Quote permanently deleted" }); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/quotes?trashed=true"] }); queryClient.invalidateQueries({ queryKey: ["/quotes"] }); queryClient.invalidateQueries({ queryKey: ["/leads"] }); toast({ title: "Quote permanently deleted" }); },
   });
 
   const emptyTrashMutation = useMutation({

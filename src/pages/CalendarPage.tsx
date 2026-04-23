@@ -1664,10 +1664,16 @@ export default function CalendarPage() {
     queryFn: () => apiGet('/contractors'),
   })
 
+  // Helper: invalidate all views that reflect job state
+  const invalidateJobRelated = () => {
+    qc.invalidateQueries({ queryKey: ['/jobs'] })
+    qc.invalidateQueries({ queryKey: ['/leads'] })   // lead stage may reflect job status
+  }
+
   const deleteJobMutation = useMutation({
     mutationFn: (id: string) => apiRequest('DELETE', `/jobs/${id}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['/jobs'] })
+      invalidateJobRelated()
       toast({ title: 'Event deleted' })
     },
     onError: (err: Error) => toast({ title: 'Delete failed', description: err.message, variant: 'destructive' }),
@@ -1684,7 +1690,7 @@ export default function CalendarPage() {
       return apiRequest('PATCH', `/jobs/${id}`, body)
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['/jobs'] })
+      invalidateJobRelated()
       toast({ title: 'Job scheduled!' })
     },
     onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
@@ -1694,7 +1700,7 @@ export default function CalendarPage() {
     mutationFn: ({ id, updates }: { id: string; updates: Record<string, unknown> }) =>
       apiRequest('PATCH', `/jobs/${id}`, updates),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['/jobs'] })
+      invalidateJobRelated()
       toast({ title: 'Job updated' })
     },
     onError: (err: Error) => toast({ title: 'Update failed', description: err.message, variant: 'destructive' }),
@@ -1792,19 +1798,19 @@ export default function CalendarPage() {
           open={showNewQuoteVisit}
           onClose={() => setShowNewQuoteVisit(false)}
           defaultDate={dayKey}
-          onCreated={() => qc.invalidateQueries({ queryKey: ['/jobs'] })}
+          onCreated={() => { qc.invalidateQueries({ queryKey: ['/jobs'] }); qc.invalidateQueries({ queryKey: ['/leads'] }) }}
         />
         <AddServiceSheet
           open={showAddService}
           onClose={() => setShowAddService(false)}
           defaultDate={dayKey}
-          onCreated={() => qc.invalidateQueries({ queryKey: ['/jobs'] })}
+          onCreated={() => { qc.invalidateQueries({ queryKey: ['/jobs'] }); qc.invalidateQueries({ queryKey: ['/leads'] }) }}
         />
         <AddSubVisitSheet
           open={showAddSubVisit}
           onClose={() => setShowAddSubVisit(false)}
           defaultDate={dayKey}
-          onCreated={() => qc.invalidateQueries({ queryKey: ['/jobs'] })}
+          onCreated={() => { qc.invalidateQueries({ queryKey: ['/jobs'] }); qc.invalidateQueries({ queryKey: ['/leads'] }) }}
         />
         <ScheduleTimeSheet
           open={!!pendingDrop}

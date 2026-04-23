@@ -63,6 +63,11 @@ function InfoTab({ contact }: { contact: Contact }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/contacts'] })
       queryClient.invalidateQueries({ queryKey: ['/contacts', contact.id] })
+      // Backend already propagated name/email/phone to linked quotes, subs, jobs —
+      // invalidate those caches so every view refreshes immediately.
+      queryClient.invalidateQueries({ queryKey: ['/quotes'] })
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      queryClient.invalidateQueries({ queryKey: ['/jobs'] })
       toast({ title: 'Contact saved' })
       setEditing(false)
     },
