@@ -39,6 +39,7 @@ const STAGES: { id: LeadStage; label: string; color: string; headerColor?: strin
   { id: 'quoted',    label: 'Quoted',     color: 'bg-yellow-50 dark:bg-yellow-950/30' },
   { id: 'scheduled', label: 'Scheduled',  color: 'bg-violet-50 dark:bg-violet-950/30', headerColor: 'text-violet-700 dark:text-violet-400' },
   { id: 'finished',  label: 'Finished',   color: 'bg-teal-50 dark:bg-teal-950/30', headerColor: 'text-teal-700 dark:text-teal-400' },
+  { id: 'recurring', label: 'Recurring ↻', color: 'bg-indigo-50 dark:bg-indigo-950/30', headerColor: 'text-indigo-700 dark:text-indigo-400' },
   { id: 'unpaid',    label: 'Unpaid',     color: 'bg-amber-50 dark:bg-amber-950/30', headerColor: 'text-amber-700 dark:text-amber-400' },
   { id: 'paid',      label: 'Paid ✓',    color: 'bg-emerald-50 dark:bg-emerald-950/30', headerColor: 'text-emerald-700 dark:text-emerald-400' },
   { id: 'lost',      label: 'Lost',       color: 'bg-red-50 dark:bg-red-950/30' },
@@ -786,14 +787,16 @@ export default function Leads() {
 
   const loading = leadsLoading || contactsLoading
 
-  // Quotes sorted: non-draft on top, then by date desc
-  const sortedQuotes = [...(quotes ?? [])].sort((a, b) => {
-    const order: Record<string, number> = { sent: 0, accepted: 1, draft: 2, declined: 3 }
-    const sa = order[a.status] ?? 2
-    const sb = order[b.status] ?? 2
-    if (sa !== sb) return sa - sb
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  })
+  // Quotes for right panel: exclude any already in the pipeline, sort by priority
+  const sortedQuotes = [...(quotes ?? [])]
+    .filter(q => !quoteLeadMap[q.id])   // hide quotes already dragged into a stage
+    .sort((a, b) => {
+      const order: Record<string, number> = { sent: 0, accepted: 1, draft: 2, declined: 3 }
+      const sa = order[a.status] ?? 2
+      const sb = order[b.status] ?? 2
+      if (sa !== sb) return sa - sb
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    })
 
   // Selected lead's linked quote (if any)
   const selectedQuote = selectedLead?.quoteId ? (quoteById[selectedLead.quoteId] ?? null) : null
