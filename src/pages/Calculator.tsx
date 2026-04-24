@@ -11,12 +11,13 @@ import {
   type ServiceDefinition,
   type FrequencyDiscount,
 } from '@/lib/pricing'
-import type { LineItem, CompanySettings } from '@/types'
+import type { LineItem, CompanySettings, Contact } from '@/types'
 import { useServices } from '@/lib/services-context'
 import { useQuoteContext } from '@/lib/quote-context'
 import { useLocation } from 'wouter'
-import { useQuery } from '@tanstack/react-query'
-import { apiGet } from '@/lib/queryClient'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { apiGet, apiRequest, queryClient } from '@/lib/queryClient'
+import { useToast } from '@/hooks/use-toast'
 import {
   Accordion,
   AccordionContent,
@@ -879,6 +880,7 @@ function CartDrawer({
   onRemove,
   onClear,
   onCreateQuote,
+  isCreating,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -886,6 +888,7 @@ function CartDrawer({
   onRemove: (idx: number) => void
   onClear: () => void
   onCreateQuote: () => void
+  isCreating?: boolean
 }) {
   const onetimeItems = items.filter(i => !i.isSubscription)
   const subItems = items.filter(i => i.isSubscription)
@@ -959,13 +962,14 @@ function CartDrawer({
               )}
               <Button
                 className="w-full min-h-[48px] mt-2"
+                disabled={isCreating}
                 onClick={() => {
                   onOpenChange(false)
                   onCreateQuote()
                 }}
               >
                 <Send className="h-4 w-4 mr-2" />
-                Create Quote
+                {isCreating ? 'Creating…' : 'Create Quote'}
               </Button>
             </div>
           )}
@@ -1020,9 +1024,10 @@ type ServiceMode = 'onetime' | 'subscription'
 type PlanType = 'tcep' | 'autopilot'
 
 export default function Calculator() {
-  const { cartItems, addToCart, removeFromCart, clearCart, setIsCreatingQuote, setPrefillContactId } = useQuoteContext()
+  const { cartItems, addToCart, removeFromCart, clearCart, setIsCreatingQuote, prefillContactId, setPrefillContactId } = useQuoteContext()
   const [, navigate] = useLocation()
   const { isLoading, getServicesByType } = useServices()
+  const { toast } = useToast()
 
   const { data: settings } = useQuery<CompanySettings>({
     queryKey: ['/settings'],
@@ -1035,9 +1040,8 @@ export default function Calculator() {
   const [cartOpen, setCartOpen] = useState(false)
 
   // Read ?contactId= from the hash URL (e.g. /#/calculator?contactId=uuid)
-  // and store it in context so QuoteCreateForm can auto-select the contact.
   useEffect(() => {
-    const hash = window.location.hash // e.g. '#/calculator?contactId=...'
+    const hash = window.location.hash
     const qStart = hash.indexOf('?')
     if (qStart >= 0) {
       const params = new URLSearchParams(hash.slice(qStart + 1))
@@ -1047,11 +1051,68 @@ export default function Calculator() {
         return
       }
     }
-    // No contactId in URL — clear any stale value so form opens blank
+    // No contactId in URL — clear any stale prefill
     setPrefillContactId(null)
   }, [setPrefillContactId])
 
+  // Fetch the prefill contact so we can create the quote directly without a form
+  const { data: prefillContact } = useQuery<Contact>({
+    queryKey: ['/contacts', prefillContactId],
+    queryFn: () => apiGet<Contact>(`/contacts/${prefillContactId}`),
+    enabled: !!prefillContactId,
+    staleTime: 60_000,
+  })
+
+  // Direct quote creation — used when coming from a lead card (no form needed)
+  const directCreateMutation = useMutation({
+    mutationFn: async (contact: Contact) => {
+      const onetimeItems = cartItems.filter(i => !i.isSubscription)
+      const subItems = cartItems.filter(i => i.isSubscription)
+      const onetimeTotal = onetimeItems.reduce((s, i) => s + i.lineTotal, 0)
+      const monthlySubtotal = subItems.reduce((s, i) => s + (i.monthlyAmount ?? i.lineTotal), 0)
+      const total = onetimeTotal + monthlySubtotal
+      const hasSubscription = subItems.length > 0
+      const quoteType = hasSubscription
+        ? (customerType === 'commercial' ? 'commercial_recurring' : 'residential_recurring')
+        : (customerType === 'commercial' ? 'commercial_onetime' : 'residential_onetime')
+
+      const res = await apiRequest('POST', '/quotes', {
+        customerName:    contact.name,
+        customerPhone:   contact.phone   ?? null,
+        customerEmail:   contact.email   ?? null,
+        customerAddress: null,
+        businessName:    contact.businessName ?? null,
+        contactId:       contact.id,
+        quoteType,
+        lineItems:       cartItems,
+        subtotal:        total,
+        total,
+        notes:           null,
+      })
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/quotes'] })
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      clearCart()
+      setPrefillContactId(null)
+      toast({ title: 'Quote created', description: 'Quote saved and linked to the lead.' })
+      navigate('/leads')
+    },
+    onError: (err: Error) => {
+      toast({ title: 'Error creating quote', description: err.message, variant: 'destructive' })
+    },
+  })
+
   const handleCreateQuote = () => {
+    // If we have a prefill contact (came from a lead card), skip the form
+    // and create the quote directly, then return to the lead pipeline.
+    if (prefillContact) {
+      setCartOpen(false)
+      directCreateMutation.mutate(prefillContact)
+      return
+    }
+    // Normal flow — open QuoteCreateForm in the Quotes page
     setIsCreatingQuote(true)
     navigate('/quotes')
   }
@@ -1188,6 +1249,7 @@ export default function Calculator() {
         onRemove={removeFromCart}
         onClear={clearCart}
         onCreateQuote={handleCreateQuote}
+        isCreating={directCreateMutation.isPending}
       />
     </div>
   )
