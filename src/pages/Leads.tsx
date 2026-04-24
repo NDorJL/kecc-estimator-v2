@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
@@ -743,6 +743,10 @@ export default function Leads() {
   const [activeQuote, setActiveQuote] = useState<Quote | null>(null)
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [showNew, setShowNew] = useState(false)
+  // Track the stage at drag-start so handleDragEnd doesn't read a stale closure
+  // (handleDragOver updates the cache optimistically which causes a re-render
+  //  before handleDragEnd fires, making lead.stage look like the new stage already)
+  const dragStartStageRef = useRef<LeadStage | null>(null)
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -842,9 +846,13 @@ export default function Leads() {
       const quoteId = id.replace('q-', '')
       setActiveQuote(quotes?.find(q => q.id === quoteId) ?? null)
       setActiveLead(null)
+      dragStartStageRef.current = null
     } else {
-      setActiveLead(leads?.find(l => l.id === id) ?? null)
+      const lead = leads?.find(l => l.id === id) ?? null
+      setActiveLead(lead)
       setActiveQuote(null)
+      // Capture stage BEFORE any optimistic updates from handleDragOver
+      dragStartStageRef.current = lead?.stage ?? null
     }
   }
 
@@ -884,15 +892,21 @@ export default function Leads() {
 
     // ── Lead card drag ────────────────────────────────────────────────────────
     setActiveLead(null)
-    const lead = leads?.find(l => l.id === activeId)
-    if (!lead) return
+
+    // Read and clear the ref before any async work
+    const originalStage = dragStartStageRef.current
+    dragStartStageRef.current = null
 
     const targetStage: LeadStage | undefined =
       (STAGES.find(s => s.id === overId)?.id as LeadStage | undefined) ??
       leads?.find(l => l.id === overId)?.stage
 
-    if (targetStage && targetStage !== lead.stage) {
-      updateStageMutation.mutate({ id: lead.id, stage: targetStage })
+    // Compare against originalStage (captured at drag-start), NOT lead.stage from
+    // the current closure — by the time handleDragEnd fires, handleDragOver may
+    // have already updated the cache, making lead.stage === targetStage and
+    // causing the mutation to be skipped (cards snap back on next refetch).
+    if (targetStage && targetStage !== originalStage) {
+      updateStageMutation.mutate({ id: activeId, stage: targetStage })
     }
   }
 
