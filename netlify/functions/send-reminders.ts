@@ -167,7 +167,92 @@ const handler = schedule('0 14 * * *', async () => {
       }
     }
 
-    console.log('[send-reminders] Done')
+    console.log('[send-reminders] Done — job reminders complete')
+
+    // ── Follow-up sweep ──────────────────────────────────────────────────────
+    // Leads that have been in 'contacted' for > 2 days and haven't been
+    // followed up yet. Send a check-in SMS, then advance to 'follow_up'.
+    console.log('[send-reminders] Starting follow-up sweep')
+
+    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
+
+    const { data: staleLeads, error: leadsErr } = await supabase
+      .from('leads')
+      .select(`
+        id,
+        contact_id,
+        service_interest,
+        contacts (
+          name,
+          phone
+        ),
+        quotes (
+          customer_name,
+          customer_phone
+        )
+      `)
+      .eq('stage', 'contacted')
+      .lt('contacted_at', twoDaysAgo)
+      .is('follow_up_sent_at', null)
+
+    if (leadsErr) {
+      console.error('[send-reminders] Follow-up query error:', leadsErr.message)
+    } else if (!staleLeads || staleLeads.length === 0) {
+      console.log('[send-reminders] No leads need follow-up today')
+    } else {
+      console.log(`[send-reminders] Following up on ${staleLeads.length} lead(s)`)
+
+      for (const lead of staleLeads) {
+        const contact = Array.isArray(lead.contacts) ? lead.contacts[0] : lead.contacts as any
+        const quote   = Array.isArray(lead.quotes)   ? lead.quotes[0]   : lead.quotes as any
+
+        // Resolve name and phone — prefer contact record, fall back to quote
+        const name  = contact?.name  ?? quote?.customer_name  ?? null
+        const phone = contact?.phone ?? quote?.customer_phone ?? null
+        const firstName = name ? name.split(' ')[0] : 'there'
+
+        const now = new Date().toISOString()
+
+        // Always advance stage + stamp follow_up_sent_at
+        await supabase
+          .from('leads')
+          .update({ stage: 'follow_up', follow_up_sent_at: now })
+          .eq('id', lead.id)
+          .catch(e => console.error(`[send-reminders] Stage update failed for lead ${lead.id}:`, e.message))
+
+        // Send SMS only if we have a phone number and SMS is configured
+        if (phone && apiKey && fromNumber) {
+          const message =
+            `Hi ${firstName}! This is ${companyName}. I just wanted to check in — we're here for ` +
+            `any questions you might have. Don't hesitate to reach out anytime!\n\n` +
+            `— ${companyName}\n` +
+            `Reply STOP to opt out.`
+
+          try {
+            await sendOpenPhoneSms(apiKey, fromNumber, phone, message)
+            console.log(`[send-reminders] ✓ Follow-up sent to ${name} (lead ${lead.id})`)
+          } catch (err) {
+            console.error(`[send-reminders] ✗ SMS failed for lead ${lead.id}:`, err instanceof Error ? err.message : err)
+          }
+        } else {
+          console.log(`[send-reminders] Lead ${lead.id} moved to follow_up (no phone/SMS config — no message sent)`)
+        }
+
+        // Log to contact's activity timeline
+        if (lead.contact_id) {
+          await supabase.from('activities').insert({
+            contact_id: lead.contact_id,
+            type:       phone && apiKey ? 'sms_out' : 'note',
+            summary:    phone && apiKey
+              ? `Automated follow-up SMS sent to ${name}`
+              : `Lead auto-advanced to Follow-Up (no phone on file)`,
+            metadata:   { leadId: lead.id, automated: true },
+          }).catch(() => {})
+        }
+      }
+    }
+
+    console.log('[send-reminders] Follow-up sweep done')
   } catch (err) {
     console.error('[send-reminders] Unexpected error:', err instanceof Error ? err.message : err)
   }

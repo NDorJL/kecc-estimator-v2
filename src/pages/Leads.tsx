@@ -37,6 +37,7 @@ import { ScheduleQuoteSheet } from '@/components/ScheduleQuoteSheet'
 const STAGES: { id: LeadStage; label: string; color: string; headerColor?: string }[] = [
   { id: 'new',       label: 'New Lead',   color: 'bg-slate-100 dark:bg-slate-800' },
   { id: 'contacted', label: 'Contacted',  color: 'bg-blue-50 dark:bg-blue-950/40' },
+  { id: 'follow_up', label: 'Follow-Up',  color: 'bg-orange-50 dark:bg-orange-950/30', headerColor: 'text-orange-700 dark:text-orange-400' },
   { id: 'quoted',    label: 'Quoted',     color: 'bg-yellow-50 dark:bg-yellow-950/30' },
   { id: 'scheduled', label: 'Scheduled',  color: 'bg-violet-50 dark:bg-violet-950/30', headerColor: 'text-violet-700 dark:text-violet-400' },
   { id: 'finished',  label: 'Finished',   color: 'bg-teal-50 dark:bg-teal-950/30', headerColor: 'text-teal-700 dark:text-teal-400' },
@@ -376,7 +377,8 @@ function LeadDetailSheet({
   const [notes, setNotes] = useState(lead?.notes ?? '')
   const [lostReason, setLostReason] = useState(lead?.lostReason ?? '')
   const [showSchedule, setShowSchedule] = useState(false)
-  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [confirmDeleteQuote, setConfirmDeleteQuote] = useState(false)
+  const [confirmDeleteLead, setConfirmDeleteLead] = useState(false)
 
   const updateMutation = useMutation({
     mutationFn: (updates: Partial<Lead>) =>
@@ -387,6 +389,18 @@ function LeadDetailSheet({
       onClose()
     },
     onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  // Delete this lead permanently
+  const deleteLeadMutation = useMutation({
+    mutationFn: () => apiRequest('DELETE', `/leads/${lead?.id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      toast({ title: 'Lead deleted' })
+      setConfirmDeleteLead(false)
+      onClose()
+    },
+    onError: (err: Error) => toast({ title: 'Failed to delete lead', description: err.message, variant: 'destructive' }),
   })
 
   // Archive (trash) the linked quote — removes it from Quotes page, detaches from lead visually
@@ -408,7 +422,7 @@ function LeadDetailSheet({
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
       toast({ title: 'Quote deleted permanently' })
-      setConfirmDelete(false)
+      setConfirmDeleteQuote(false)
       onClose()
     },
     onError: (err: Error) => toast({ title: 'Failed to delete', description: err.message, variant: 'destructive' }),
@@ -504,11 +518,11 @@ function LeadDetailSheet({
             </Button>
           )}
 
-          {/* Quote actions — archive / delete */}
+          {/* Quote actions — archive / delete (only when quote is linked) */}
           {quote && (
             <div className="rounded-xl border border-dashed border-destructive/40 p-3 space-y-2">
               <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Quote Actions</p>
-              {!confirmDelete ? (
+              {!confirmDeleteQuote ? (
                 <div className="flex gap-2">
                   <Button
                     variant="outline" size="sm" className="flex-1 text-amber-600 border-amber-300 hover:bg-amber-50"
@@ -520,7 +534,7 @@ function LeadDetailSheet({
                   </Button>
                   <Button
                     variant="outline" size="sm" className="flex-1 text-destructive border-destructive/30 hover:bg-destructive/5"
-                    onClick={() => setConfirmDelete(true)}
+                    onClick={() => setConfirmDeleteQuote(true)}
                   >
                     <Trash2 className="h-3.5 w-3.5 mr-1.5" />Delete Quote
                   </Button>
@@ -529,7 +543,7 @@ function LeadDetailSheet({
                 <div className="space-y-2">
                   <p className="text-xs text-destructive font-medium">Permanently delete this quote? This cannot be undone.</p>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" className="flex-1" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+                    <Button variant="outline" size="sm" className="flex-1" onClick={() => setConfirmDeleteQuote(false)}>Cancel</Button>
                     <Button
                       variant="destructive" size="sm" className="flex-1"
                       disabled={deleteQuoteMutation.isPending}
@@ -542,6 +556,34 @@ function LeadDetailSheet({
               )}
             </div>
           )}
+
+          {/* Lead actions — always available, quote or not */}
+          <div className="rounded-xl border border-dashed border-destructive/40 p-3 space-y-2">
+            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Lead Actions</p>
+            {!confirmDeleteLead ? (
+              <Button
+                variant="outline" size="sm" className="w-full text-destructive border-destructive/30 hover:bg-destructive/5"
+                onClick={() => setConfirmDeleteLead(true)}
+                disabled={deleteLeadMutation.isPending}
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />Delete This Lead
+              </Button>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-destructive font-medium">Remove this lead from the pipeline? The linked quote (if any) stays intact.</p>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => setConfirmDeleteLead(false)}>Cancel</Button>
+                  <Button
+                    variant="destructive" size="sm" className="flex-1"
+                    disabled={deleteLeadMutation.isPending}
+                    onClick={() => deleteLeadMutation.mutate()}
+                  >
+                    {deleteLeadMutation.isPending ? 'Deleting…' : 'Yes, Delete'}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Actions */}
           <div className="flex gap-2">

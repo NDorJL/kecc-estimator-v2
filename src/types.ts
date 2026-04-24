@@ -241,7 +241,7 @@ export interface Property {
   createdAt: string;
 }
 
-export type LeadStage = 'new' | 'contacted' | 'quoted' | 'scheduled' | 'finished' | 'recurring' | 'unpaid' | 'paid' | 'lost';
+export type LeadStage = 'new' | 'contacted' | 'follow_up' | 'quoted' | 'scheduled' | 'finished' | 'recurring' | 'unpaid' | 'paid' | 'lost';
 
 export interface Lead {
   id: string;
@@ -254,6 +254,8 @@ export interface Lead {
   lostReason: string | null;
   notes: string | null;
   createdAt: string;
+  contactedAt: string | null;
+  followUpSentAt: string | null;
 }
 
 export type ActivityType =
@@ -414,6 +416,8 @@ export function rowToLead(r: any): Lead {
     lostReason: r.lost_reason,
     notes: r.notes,
     createdAt: r.created_at,
+    contactedAt: r.contacted_at ?? null,
+    followUpSentAt: r.follow_up_sent_at ?? null,
   };
 }
 

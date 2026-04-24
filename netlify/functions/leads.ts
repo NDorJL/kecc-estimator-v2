@@ -62,6 +62,7 @@ export const handler: Handler = async (event) => {
           quote_id: body.quoteId ?? null,
           lost_reason: body.lostReason ?? null,
           notes: body.notes ?? null,
+          contacted_at: body.stage === 'contacted' ? new Date().toISOString() : null,
         })
         .select()
         .single()
@@ -80,6 +81,8 @@ export const handler: Handler = async (event) => {
       if (body.serviceInterest !== undefined) updates.service_interest = body.serviceInterest
       if (body.quoteId !== undefined)         updates.quote_id = body.quoteId
       if (body.contactId !== undefined)       updates.contact_id = body.contactId
+      // Stamp contacted_at whenever a lead is manually moved to 'contacted'
+      if (body.stage === 'contacted')         updates.contacted_at = new Date().toISOString()
 
       const { data, error } = await supabase
         .from('leads')

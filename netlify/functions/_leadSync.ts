@@ -17,6 +17,7 @@ import { SupabaseClient } from '@supabase/supabase-js'
 const STAGE_ORDER = [
   'new',
   'contacted',
+  'follow_up',
   'quoted',
   'scheduled',
   'finished',
@@ -113,6 +114,10 @@ export async function advanceLeadStage(
     // Advance stage if target is ahead of current
     if (targetIdx > currentIdx) {
       patch.stage = stage
+      // Stamp contacted_at the first time a lead enters the 'contacted' stage
+      if (stage === 'contacted') {
+        patch.contacted_at = new Date().toISOString()
+      }
     }
 
     if (Object.keys(patch).length > 0) {
