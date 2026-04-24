@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useParams } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
+import { quoCallUrl, quoTextUrl } from '@/lib/utils'
 import { Contact, Property, Quote, Subscription, Activity, ServiceAgreement, rowToContact } from '@/types'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -159,7 +160,7 @@ function InfoTab({ contact }: { contact: Contact }) {
             {contact.phone && (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Phone className="h-3.5 w-3.5" />
-                <a href={`tel:${contact.phone}`} className="hover:text-foreground">{contact.phone}</a>
+                <a href={quoCallUrl(contact.phone)} className="hover:text-foreground">{contact.phone}</a>
               </div>
             )}
             {contact.email && (
@@ -655,14 +656,14 @@ export default function ContactDetail() {
       {/* Quick action buttons */}
       <div className="flex gap-2 px-3 py-2 border-b">
         {contact.phone && (
-          <a href={`tel:${contact.phone}`} className="flex-1">
+          <a href={quoCallUrl(contact.phone)} className="flex-1">
             <Button variant="outline" size="sm" className="w-full">
               <Phone className="h-3.5 w-3.5 mr-1" />Call
             </Button>
           </a>
         )}
         {contact.phone && (
-          <a href={`sms:${contact.phone}`} className="flex-1">
+          <a href={quoTextUrl(contact.phone)} className="flex-1">
             <Button variant="outline" size="sm" className="w-full">
               <MessageSquare className="h-3.5 w-3.5 mr-1" />Text
             </Button>

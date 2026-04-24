@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiRequest } from '@/lib/queryClient'
+import { quoCallUrl } from '@/lib/utils'
 import { Job, Subscription, Contractor, ServiceSchedule } from '@/types'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -150,7 +151,7 @@ function JobDetailSheet({
             {job.customerPhone && (
               <div className="flex items-center gap-2 text-sm">
                 <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <a href={`tel:${job.customerPhone}`} className="text-primary">{job.customerPhone}</a>
+                <a href={quoCallUrl(job.customerPhone)} className="text-primary">{job.customerPhone}</a>
               </div>
             )}
             {job.customerEmail && (
@@ -207,7 +208,7 @@ function JobDetailSheet({
             </Select>
             {contractor && (
               <div className="mt-1.5 flex gap-3 text-xs text-muted-foreground">
-                {contractor.phone && <a href={`tel:${contractor.phone}`} className="flex items-center gap-1"><Phone className="h-3 w-3" />{contractor.phone}</a>}
+                {contractor.phone && <a href={quoCallUrl(contractor.phone)} className="flex items-center gap-1"><Phone className="h-3 w-3" />{contractor.phone}</a>}
                 {contractor.ratePerJob && <span className="flex items-center gap-1"><Wrench className="h-3 w-3" />${contractor.ratePerJob}/job</span>}
               </div>
             )}

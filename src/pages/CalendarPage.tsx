@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiRequest } from '@/lib/queryClient'
+import { quoCallUrl } from '@/lib/utils'
 import { Job, Subscription, Contractor, Contact, Quote } from '@/types'
 import {
   DndContext, DragEndEvent, DragStartEvent, DragOverlay,
@@ -438,7 +439,7 @@ function DayDetailSheet({
                         </p>
                       )}
                       {(ev.job?.customerPhone || ev.sub?.customerPhone) && (
-                        <a href={`tel:${ev.job?.customerPhone ?? ev.sub?.customerPhone}`} className="text-xs text-primary mt-0.5 flex items-center gap-1">
+                        <a href={quoCallUrl(ev.job?.customerPhone ?? ev.sub?.customerPhone ?? '')} className="text-xs text-primary mt-0.5 flex items-center gap-1">
                           <Phone className="h-3 w-3 shrink-0" />
                           {ev.job?.customerPhone ?? ev.sub?.customerPhone}
                         </a>
@@ -1599,7 +1600,7 @@ function DayTimelineView({
                           </p>
                         )}
                         {ev.job?.customerPhone && (
-                          <a href={`tel:${ev.job.customerPhone}`} className="text-xs text-primary mt-0.5 flex items-center gap-1">
+                          <a href={quoCallUrl(ev.job.customerPhone ?? '')} className="text-xs text-primary mt-0.5 flex items-center gap-1">
                             <Phone className="h-3 w-3" />{ev.job.customerPhone}
                           </a>
                         )}

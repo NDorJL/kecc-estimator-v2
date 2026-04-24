@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
+import { quoCallUrl, quoTextUrl } from '@/lib/utils'
 import { Lead, Quote, LeadStage, LineItem, Contact } from '@/types'
 import {
   DndContext,
@@ -573,7 +574,7 @@ function LeadDetailSheet({
           {phone && (
             <div className="flex gap-2">
               <a
-                href={`tel:${phone}`}
+                href={quoCallUrl(phone)}
                 className="flex-1"
                 onClick={e => e.stopPropagation()}
               >
@@ -583,7 +584,7 @@ function LeadDetailSheet({
                 </Button>
               </a>
               <a
-                href={`sms:${phone}`}
+                href={quoTextUrl(phone)}
                 className="flex-1"
                 onClick={e => e.stopPropagation()}
               >

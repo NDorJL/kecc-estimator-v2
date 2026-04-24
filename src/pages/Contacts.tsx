@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
+import { quoCallUrl } from '@/lib/utils'
 import { Contact, Contractor, ContractorDoc } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -211,7 +212,7 @@ function ContractorCard({ contractor, onEdit, onDelete }: { contractor: Contract
           )}
           <div className="flex items-center gap-3 mt-1 flex-wrap">
             {contractor.phone && (
-              <a href={`tel:${contractor.phone}`} className="text-xs text-muted-foreground flex items-center gap-1 hover:text-foreground">
+              <a href={quoCallUrl(contractor.phone)} className="text-xs text-muted-foreground flex items-center gap-1 hover:text-foreground">
                 <Phone className="h-3 w-3" />{contractor.phone}
               </a>
             )}
