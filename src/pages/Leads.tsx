@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import { quoCallUrl, quoTextUrl } from '@/lib/utils'
+import { useQuoteContext } from '@/lib/quote-context'
 import { Lead, Quote, LeadStage, LineItem, Contact } from '@/types'
 import {
   DndContext,
@@ -28,7 +29,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Plus, Clock, GripVertical, FileText, ArrowRight,
-  MapPin, Phone, Mail, User, ChevronRight, CalendarPlus,
+  MapPin, Phone, Mail, User, CalendarPlus,
   Trash2, Archive, PhoneCall, MessageSquare, FileSignature,
   Send, Receipt, CheckCircle2,
 } from 'lucide-react'
@@ -438,16 +439,19 @@ function LeadDetailSheet({
   lead,
   quote,
   displayName,
+  contactForPrefill,
   open,
   onClose,
 }: {
   lead: Lead | null
   quote: Quote | null
   displayName: string
+  contactForPrefill: Contact | null
   open: boolean
   onClose: () => void
 }) {
   const [, navigate] = useLocation()
+  const { setPrefillContact } = useQuoteContext()
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const [notes, setNotes] = useState(lead?.notes ?? '')
@@ -612,7 +616,18 @@ function LeadDetailSheet({
           {/* ── Full quote detail when linked ─────────────────────────────── */}
           {quote && (
             <div className="space-y-2">
-              <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wide">Quote Details</p>
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wide">Quote Details</p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs gap-1 text-primary"
+                  onClick={() => { navigate(`/quotes?quote=${quote.id}`); onClose() }}
+                >
+                  <FileSignature className="h-3.5 w-3.5" />
+                  Edit Quote
+                </Button>
+              </div>
               <QuoteDetailPanel quote={quote} />
             </div>
           )}
@@ -669,12 +684,14 @@ function LeadDetailSheet({
           </div>
 
           {/* ── Create Quote (when no quote linked yet) ────────────────────── */}
-          {!quote && lead.contactId && (
+          {!quote && (
             <Button
               variant="outline"
               className="w-full gap-2 border-primary/40 text-primary hover:bg-primary/5"
               onClick={() => {
-                navigate(`/calculator?contactId=${lead.contactId}`)
+                // Pass the full contact object synchronously — no async fetch needed
+                setPrefillContact(contactForPrefill)
+                navigate('/calculator')
                 onClose()
               }}
             >
@@ -864,15 +881,6 @@ function LeadDetailSheet({
                 onClick={() => { navigate(`/contacts/${lead.contactId}`); onClose() }}
               >
                 Contact
-              </Button>
-            )}
-            {quote && (
-              <Button
-                variant="outline"
-                className="flex items-center gap-1"
-                onClick={() => { navigate('/quotes'); onClose() }}
-              >
-                <ChevronRight className="h-4 w-4" />Quote
               </Button>
             )}
           </div>
@@ -1344,6 +1352,9 @@ export default function Leads() {
         lead={selectedLead}
         quote={selectedQuote}
         displayName={selectedLead ? getDisplayName(selectedLead) : ''}
+        contactForPrefill={
+          selectedLead?.contactId ? (contactById[selectedLead.contactId] ?? null) : null
+        }
         open={!!selectedLead}
         onClose={() => setSelectedLead(null)}
       />

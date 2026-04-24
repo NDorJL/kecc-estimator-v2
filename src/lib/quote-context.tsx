@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
-import type { LineItem } from '@/types'
+import type { LineItem, Contact } from '@/types'
 
 interface QuoteContextType {
   cartItems: LineItem[]
@@ -8,8 +8,10 @@ interface QuoteContextType {
   clearCart: () => void
   isCreatingQuote: boolean
   setIsCreatingQuote: (v: boolean) => void
-  prefillContactId: string | null
-  setPrefillContactId: (id: string | null) => void
+  // Full contact to pre-fill when creating a quote from a lead card.
+  // Set synchronously before navigating — no async fetch needed.
+  prefillContact: Contact | null
+  setPrefillContact: (contact: Contact | null) => void
 }
 
 const QuoteContext = createContext<QuoteContextType | null>(null)
@@ -17,7 +19,7 @@ const QuoteContext = createContext<QuoteContextType | null>(null)
 export function QuoteProvider({ children }: { children: ReactNode }) {
   const [cartItems, setCartItems] = useState<LineItem[]>([])
   const [isCreatingQuote, setIsCreatingQuote] = useState(false)
-  const [prefillContactId, setPrefillContactId] = useState<string | null>(null)
+  const [prefillContact, setPrefillContact] = useState<Contact | null>(null)
 
   const addToCart = useCallback((items: LineItem[]) => {
     setCartItems((prev) => [...prev, ...items])
@@ -33,7 +35,7 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
 
   return (
     <QuoteContext.Provider
-      value={{ cartItems, addToCart, removeFromCart, clearCart, isCreatingQuote, setIsCreatingQuote, prefillContactId, setPrefillContactId }}
+      value={{ cartItems, addToCart, removeFromCart, clearCart, isCreatingQuote, setIsCreatingQuote, prefillContact, setPrefillContact }}
     >
       {children}
     </QuoteContext.Provider>

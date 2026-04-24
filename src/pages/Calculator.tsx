@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import { useState, useMemo, useCallback, useRef } from 'react'
 import {
   calculateSubscriptionPrice,
   calculatePerSqftPrice,
@@ -12,6 +12,7 @@ import {
   type FrequencyDiscount,
 } from '@/lib/pricing'
 import type { LineItem, CompanySettings, Contact } from '@/types'
+// Contact is used as the type parameter for directCreateMutation
 import { useServices } from '@/lib/services-context'
 import { useQuoteContext } from '@/lib/quote-context'
 import { useLocation } from 'wouter'
@@ -1024,7 +1025,7 @@ type ServiceMode = 'onetime' | 'subscription'
 type PlanType = 'tcep' | 'autopilot'
 
 export default function Calculator() {
-  const { cartItems, addToCart, removeFromCart, clearCart, setIsCreatingQuote, prefillContactId, setPrefillContactId } = useQuoteContext()
+  const { cartItems, addToCart, removeFromCart, clearCart, setIsCreatingQuote, prefillContact, setPrefillContact } = useQuoteContext()
   const [, navigate] = useLocation()
   const { isLoading, getServicesByType } = useServices()
   const { toast } = useToast()
@@ -1039,31 +1040,8 @@ export default function Calculator() {
   const [planType, setPlanType] = useState<PlanType>('tcep')
   const [cartOpen, setCartOpen] = useState(false)
 
-  // Read ?contactId= from the hash URL (e.g. /#/calculator?contactId=uuid)
-  useEffect(() => {
-    const hash = window.location.hash
-    const qStart = hash.indexOf('?')
-    if (qStart >= 0) {
-      const params = new URLSearchParams(hash.slice(qStart + 1))
-      const contactId = params.get('contactId')
-      if (contactId) {
-        setPrefillContactId(contactId)
-        return
-      }
-    }
-    // No contactId in URL — clear any stale prefill
-    setPrefillContactId(null)
-  }, [setPrefillContactId])
-
-  // Fetch the prefill contact so we can create the quote directly without a form
-  const { data: prefillContact } = useQuery<Contact>({
-    queryKey: ['/contacts', prefillContactId],
-    queryFn: () => apiGet<Contact>(`/contacts/${prefillContactId}`),
-    enabled: !!prefillContactId,
-    staleTime: 60_000,
-  })
-
-  // Direct quote creation — used when coming from a lead card (no form needed)
+  // Direct quote creation — used when coming from a lead card (prefillContact is set
+  // synchronously by Leads.tsx before navigating here, so no async fetch needed).
   const directCreateMutation = useMutation({
     mutationFn: async (contact: Contact) => {
       const onetimeItems = cartItems.filter(i => !i.isSubscription)
@@ -1095,7 +1073,7 @@ export default function Calculator() {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
       clearCart()
-      setPrefillContactId(null)
+      setPrefillContact(null)
       toast({ title: 'Quote created', description: 'Quote saved and linked to the lead.' })
       navigate('/leads')
     },
@@ -1105,7 +1083,7 @@ export default function Calculator() {
   })
 
   const handleCreateQuote = () => {
-    // If we have a prefill contact (came from a lead card), skip the form
+    // If we have a prefill contact (came from a lead card), skip the form entirely
     // and create the quote directly, then return to the lead pipeline.
     if (prefillContact) {
       setCartOpen(false)
