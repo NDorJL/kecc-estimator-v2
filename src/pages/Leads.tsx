@@ -1,8 +1,8 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import { Lead, Quote, LeadStage, LineItem } from '@/types'
+import { Lead, Quote, LeadStage, LineItem, Contact } from '@/types'
 import {
   DndContext,
   DragEndEvent,
@@ -72,12 +72,18 @@ function LeadCard({
   lead,
   displayName,
   subline,
+  phone,
+  email,
+  address,
   onClick,
   showAgreementBadge,
 }: {
   lead: Lead
   displayName: string
   subline: string
+  phone?: string | null
+  email?: string | null
+  address?: string | null
   onClick: () => void
   showAgreementBadge?: boolean
 }) {
@@ -101,6 +107,21 @@ function LeadCard({
       {subline && (
         <p className="text-xs text-muted-foreground mt-0.5 truncate">{subline}</p>
       )}
+      {address && (
+        <p className="text-[10px] text-muted-foreground mt-0.5 truncate flex items-center gap-0.5">
+          <MapPin className="h-2.5 w-2.5 shrink-0" />{address}
+        </p>
+      )}
+      {phone && (
+        <p className="text-[10px] text-muted-foreground truncate flex items-center gap-0.5">
+          <Phone className="h-2.5 w-2.5 shrink-0" />{phone}
+        </p>
+      )}
+      {email && (
+        <p className="text-[10px] text-muted-foreground truncate flex items-center gap-0.5">
+          <Mail className="h-2.5 w-2.5 shrink-0" />{email}
+        </p>
+      )}
       <div className="flex items-center justify-between mt-1.5">
         {lead.estimatedValue ? (
           <span className="text-xs font-bold text-primary">{fmtMoney(lead.estimatedValue)}</span>
@@ -115,11 +136,12 @@ function LeadCard({
   )
 }
 
-function LeadCardGhost({ displayName, subline }: { displayName: string; subline: string }) {
+function LeadCardGhost({ displayName, subline, phone }: { displayName: string; subline: string; phone?: string | null }) {
   return (
     <div className="rounded-lg border bg-card p-2.5 shadow-lg rotate-1 opacity-90">
       <p className="text-sm font-semibold">{displayName}</p>
       {subline && <p className="text-xs text-muted-foreground mt-0.5">{subline}</p>}
+      {phone && <p className="text-[10px] text-muted-foreground">{phone}</p>}
     </div>
   )
 }
@@ -193,17 +215,21 @@ function KanbanColumn({
   leads,
   displayNames,
   sublines,
+  phones,
+  emails,
+  addresses,
   agreementBadgeIds,
   onCardClick,
-  searchFilter,
 }: {
   stage: typeof STAGES[number]
   leads: Lead[]
   displayNames: Record<string, string>
   sublines: Record<string, string>
+  phones: Record<string, string | null>
+  emails: Record<string, string | null>
+  addresses: Record<string, string | null>
   agreementBadgeIds: Set<string>
   onCardClick: (lead: Lead) => void
-  searchFilter?: string
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id })
   const [search, setSearch] = useState('')
@@ -243,6 +269,9 @@ function KanbanColumn({
               lead={l}
               displayName={displayNames[l.id] ?? 'Unknown'}
               subline={sublines[l.id] ?? ''}
+              phone={phones[l.id]}
+              email={emails[l.id]}
+              address={addresses[l.id]}
               showAgreementBadge={agreementBadgeIds.has(l.id)}
               onClick={() => onCardClick(l)}
             />
@@ -422,7 +451,17 @@ function LeadDetailSheet({
   const { toast } = useToast()
   const [notes, setNotes] = useState(lead?.notes ?? '')
   const [lostReason, setLostReason] = useState(lead?.lostReason ?? '')
+  const [serviceInterest, setServiceInterest] = useState(lead?.serviceInterest ?? '')
+  const [estimatedValue, setEstimatedValue] = useState(lead?.estimatedValue?.toString() ?? '')
   const [showSchedule, setShowSchedule] = useState(false)
+
+  // Sync form state when a different lead is selected
+  useEffect(() => {
+    setNotes(lead?.notes ?? '')
+    setLostReason(lead?.lostReason ?? '')
+    setServiceInterest(lead?.serviceInterest ?? '')
+    setEstimatedValue(lead?.estimatedValue?.toString() ?? '')
+  }, [lead?.id])
   const [confirmDeleteQuote, setConfirmDeleteQuote] = useState(false)
   const [confirmDeleteLead, setConfirmDeleteLead] = useState(false)
   const [confirmInvoice, setConfirmInvoice] = useState(false)
@@ -577,23 +616,28 @@ function LeadDetailSheet({
             </div>
           )}
 
-          {/* ── If no quote, show lead fields ─────────────────────────────── */}
-          {!quote && (
-            <>
-              {lead.serviceInterest && (
-                <div>
-                  <Label className="text-xs">Service Interest</Label>
-                  <p className="text-sm mt-1">{lead.serviceInterest}</p>
-                </div>
-              )}
-              {lead.estimatedValue && (
-                <div>
-                  <Label className="text-xs">Estimated Value</Label>
-                  <p className="text-sm font-semibold mt-1">{fmtMoney(lead.estimatedValue)}</p>
-                </div>
-              )}
-            </>
-          )}
+          {/* ── Lead fields (always editable) ─────────────────────────────── */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Service Interest</Label>
+              <Input
+                value={serviceInterest}
+                onChange={e => setServiceInterest(e.target.value)}
+                placeholder="e.g. Lawn Care…"
+                className="mt-1 h-9 text-sm"
+              />
+            </div>
+            <div>
+              <Label className="text-xs">Estimated Value ($)</Label>
+              <Input
+                type="number"
+                value={estimatedValue}
+                onChange={e => setEstimatedValue(e.target.value)}
+                placeholder="0"
+                className="mt-1 h-9 text-sm"
+              />
+            </div>
+          </div>
 
           {/* ── Stage ─────────────────────────────────────────────────────── */}
           <div>
@@ -804,9 +848,14 @@ function LeadDetailSheet({
             <Button
               className="flex-1"
               disabled={updateMutation.isPending}
-              onClick={() => updateMutation.mutate({ notes: notes || null, lostReason: lostReason || null })}
+              onClick={() => updateMutation.mutate({
+                notes: notes || null,
+                lostReason: lostReason || null,
+                serviceInterest: serviceInterest.trim() || null,
+                estimatedValue: estimatedValue ? parseFloat(estimatedValue) : null,
+              })}
             >
-              Save Notes
+              {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
             </Button>
             {lead.contactId && (
               <Button
@@ -967,7 +1016,7 @@ export default function Leads() {
     queryFn: () => apiGet('/leads'),
   })
 
-  const { data: contacts, isLoading: contactsLoading } = useQuery<{ id: string; name: string }[]>({
+  const { data: contacts, isLoading: contactsLoading } = useQuery<Contact[]>({
     queryKey: ['/contacts'],
     queryFn: () => apiGet('/contacts'),
   })
@@ -977,9 +1026,13 @@ export default function Leads() {
     queryFn: () => apiGet('/quotes'),
   })
 
-  // Contact name lookup
+  // Contact lookups
   const contactNames: Record<string, string> = {}
-  for (const c of contacts ?? []) contactNames[c.id] = c.name
+  const contactById: Record<string, Contact> = {}
+  for (const c of contacts ?? []) {
+    contactNames[c.id] = c.name
+    contactById[c.id] = c
+  }
 
   // Quote lookup by ID
   const quoteById: Record<string, Quote> = {}
@@ -1004,6 +1057,22 @@ export default function Leads() {
       return servicesSummary(q.lineItems)
     }
     return lead.serviceInterest ?? ''
+  }
+
+  function getContactInfo(lead: Lead): { phone: string | null; email: string | null; address: string | null } {
+    if (lead.quoteId && quoteById[lead.quoteId]) {
+      const q = quoteById[lead.quoteId]
+      return {
+        phone:   q.customerPhone   ?? null,
+        email:   q.customerEmail   ?? null,
+        address: q.customerAddress ?? null,
+      }
+    }
+    if (lead.contactId && contactById[lead.contactId]) {
+      const c = contactById[lead.contactId]
+      return { phone: c.phone ?? null, email: c.email ?? null, address: null }
+    }
+    return { phone: null, email: null, address: null }
   }
 
   // Agreement badge: show on recurring leads that have agreementSignedAt set
@@ -1150,9 +1219,13 @@ export default function Leads() {
   // Selected lead's linked quote (if any)
   const selectedQuote = selectedLead?.quoteId ? (quoteById[selectedLead.quoteId] ?? null) : null
 
-  // Build display name/subline maps once
+  // Build display name/subline/contact info maps once
   const displayNames = Object.fromEntries((leads ?? []).map(l => [l.id, getDisplayName(l)]))
   const sublines     = Object.fromEntries((leads ?? []).map(l => [l.id, getSubline(l)]))
+  const contactInfos = Object.fromEntries((leads ?? []).map(l => [l.id, getContactInfo(l)]))
+  const phones       = Object.fromEntries((leads ?? []).map(l => [l.id, contactInfos[l.id]?.phone ?? null]))
+  const emails       = Object.fromEntries((leads ?? []).map(l => [l.id, contactInfos[l.id]?.email ?? null]))
+  const addresses    = Object.fromEntries((leads ?? []).map(l => [l.id, contactInfos[l.id]?.address ?? null]))
 
   return (
     <div className="flex flex-col h-full">
@@ -1198,6 +1271,9 @@ export default function Leads() {
                     leads={(leads ?? []).filter(l => l.stage === stage.id)}
                     displayNames={displayNames}
                     sublines={sublines}
+                    phones={phones}
+                    emails={emails}
+                    addresses={addresses}
                     agreementBadgeIds={agreementBadgeIds}
                     onCardClick={l => setSelectedLead(l)}
                   />
@@ -1255,6 +1331,7 @@ export default function Leads() {
             <LeadCardGhost
               displayName={getDisplayName(activeLead)}
               subline={getSubline(activeLead)}
+              phone={getContactInfo(activeLead).phone}
             />
           )}
           {activeQuote && <QuoteCardGhost quote={activeQuote} />}
