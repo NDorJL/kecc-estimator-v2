@@ -47,6 +47,7 @@ export interface Quote {
   signatureData: string | null;
   signedIp: string | null;
   qbInvoiceId: string | null;
+  sentAt: string | null;
 }
 
 // ── Subscription Types ─────────────────────────────────────────────────
@@ -241,7 +242,13 @@ export interface Property {
   createdAt: string;
 }
 
-export type LeadStage = 'new' | 'contacted' | 'follow_up' | 'quoted' | 'scheduled' | 'finished' | 'recurring' | 'unpaid' | 'paid' | 'lost';
+export type LeadStage =
+  | 'new' | 'contacted' | 'follow_up' | 'quoted' | 'scheduled'
+  | 'recurring' | 'finished_unpaid' | 'finished_paid'
+  // keep 'lost' in the type for DB compatibility with older rows; not shown in kanban
+  | 'lost'
+  // legacy aliases kept for any in-flight DB rows during migration window
+  | 'finished' | 'unpaid' | 'paid';
 
 export interface Lead {
   id: string;
@@ -256,6 +263,7 @@ export interface Lead {
   createdAt: string;
   contactedAt: string | null;
   followUpSentAt: string | null;
+  agreementSignedAt: string | null;
 }
 
 export type ActivityType =
@@ -299,6 +307,7 @@ export function rowToQuote(r: any): Quote {
     signatureData: r.signature_data ?? null,
     signedIp: r.signed_ip ?? null,
     qbInvoiceId: r.qb_invoice_id ?? null,
+    sentAt: r.sent_at ?? null,
   };
 }
 
@@ -418,6 +427,7 @@ export function rowToLead(r: any): Lead {
     createdAt: r.created_at,
     contactedAt: r.contacted_at ?? null,
     followUpSentAt: r.follow_up_sent_at ?? null,
+    agreementSignedAt: r.agreement_signed_at ?? null,
   };
 }
 

@@ -4,6 +4,19 @@ import { rowToQuote } from '../../src/types'
 import { randomUUID } from 'crypto'
 import { advanceLeadStage } from './_leadSync'
 
+async function sendOpenPhoneSms(apiKey: string, from: string, to: string, content: string): Promise<void> {
+  const baseUrl = (process.env.QUO_BASE_URL ?? 'https://api.openphone.com/v1').replace(/\/$/, '')
+  const res = await fetch(`${baseUrl}/messages`, {
+    method: 'POST',
+    headers: { 'Authorization': apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from, to: [to], content }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText)
+    throw new Error(`OpenPhone ${res.status}: ${text}`)
+  }
+}
+
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
@@ -111,6 +124,7 @@ export const handler: Handler = async (event) => {
       if (body.signatureData !== undefined)  update.signature_data = body.signatureData
       if (body.signedIp !== undefined)       update.signed_ip = body.signedIp
       if (body.qbInvoiceId !== undefined)    update.qb_invoice_id = body.qbInvoiceId
+      if (body.sentAt !== undefined)         update.sent_at = body.sentAt
       const { data, error } = await supabase.from('quotes').update(update).eq('id', id).select().single()
       if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Quote not found' }) }
 
@@ -133,6 +147,64 @@ export const handler: Handler = async (event) => {
       // NOTE: lead does NOT advance to 'scheduled' here — that only happens
       // when a job is explicitly created from this quote via POST /jobs.
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToQuote(data)) }
+    }
+
+    // SEND quote via SMS — stamps sent_at and fires OpenPhone message
+    if (method === 'POST' && id && action === 'send') {
+      const { data: quote, error: qErr } = await supabase
+        .from('quotes').select('*').eq('id', id).single()
+      if (qErr || !quote) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Quote not found' }) }
+
+      if (!quote.customer_phone) {
+        return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'No phone number on this quote' }) }
+      }
+      if (!quote.accept_token) {
+        return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'Quote has no accept token — regenerate the quote' }) }
+      }
+
+      // Fetch SMS credentials from settings
+      const { data: settings } = await supabase
+        .from('company_settings').select('quo_api_key, quo_from_number, company_name').limit(1).single()
+      const apiKey     = settings?.quo_api_key     ?? process.env.QUO_API_KEY ?? ''
+      const fromNumber = settings?.quo_from_number ?? process.env.QUO_FROM_NUMBER ?? ''
+      const companyName = settings?.company_name ?? 'Knox Exterior Care Co.'
+
+      if (!apiKey || !fromNumber) {
+        return { statusCode: 500, headers: CORS, body: JSON.stringify({ message: 'SMS not configured in Settings' }) }
+      }
+
+      const siteUrl = (process.env.URL ?? '').replace(/\/$/, '')
+      const esignUrl = `${siteUrl}/.netlify/functions/esign?token=${encodeURIComponent(quote.accept_token)}`
+      const firstName = (quote.customer_name ?? 'there').split(' ')[0]
+
+      const message =
+        `Hi ${firstName}, Knox Exterior Care Co. here! Your quote is ready — follow this link to view. ` +
+        `If you'd like to move forward, simply sign the e-sign at the bottom of the quote, and we'll ` +
+        `reach out about getting you on the schedule. Please reach out to this number with any questions ` +
+        `or concerns - thank you for the opportunity to serve! Automated msg. Reply STOP to opt out.\n\n` +
+        esignUrl
+
+      await sendOpenPhoneSms(apiKey, fromNumber, quote.customer_phone, message)
+
+      // Stamp sent_at and flip status to 'sent'
+      const now = new Date().toISOString()
+      const { data: updated, error: upErr } = await supabase
+        .from('quotes')
+        .update({ sent_at: now, status: 'sent' })
+        .eq('id', id).select().single()
+      if (upErr || !updated) throw upErr
+
+      // Log activity on the contact (non-fatal)
+      if (updated.contact_id) {
+        await supabase.from('activities').insert({
+          contact_id: updated.contact_id,
+          type: 'sms_out',
+          summary: `Quote sent via SMS to ${quote.customer_phone}`,
+          metadata: { quoteId: id, esignUrl },
+        }).catch(() => {})
+      }
+
+      return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToQuote(updated)) }
     }
 
     // TRASH quote

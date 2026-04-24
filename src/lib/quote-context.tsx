@@ -8,6 +8,8 @@ interface QuoteContextType {
   clearCart: () => void
   isCreatingQuote: boolean
   setIsCreatingQuote: (v: boolean) => void
+  prefillContactId: string | null
+  setPrefillContactId: (id: string | null) => void
 }
 
 const QuoteContext = createContext<QuoteContextType | null>(null)
@@ -15,6 +17,7 @@ const QuoteContext = createContext<QuoteContextType | null>(null)
 export function QuoteProvider({ children }: { children: ReactNode }) {
   const [cartItems, setCartItems] = useState<LineItem[]>([])
   const [isCreatingQuote, setIsCreatingQuote] = useState(false)
+  const [prefillContactId, setPrefillContactId] = useState<string | null>(null)
 
   const addToCart = useCallback((items: LineItem[]) => {
     setCartItems((prev) => [...prev, ...items])
@@ -30,7 +33,7 @@ export function QuoteProvider({ children }: { children: ReactNode }) {
 
   return (
     <QuoteContext.Provider
-      value={{ cartItems, addToCart, removeFromCart, clearCart, isCreatingQuote, setIsCreatingQuote }}
+      value={{ cartItems, addToCart, removeFromCart, clearCart, isCreatingQuote, setIsCreatingQuote, prefillContactId, setPrefillContactId }}
     >
       {children}
     </QuoteContext.Provider>

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import {
   calculateSubscriptionPrice,
   calculatePerSqftPrice,
@@ -1020,7 +1020,7 @@ type ServiceMode = 'onetime' | 'subscription'
 type PlanType = 'tcep' | 'autopilot'
 
 export default function Calculator() {
-  const { cartItems, addToCart, removeFromCart, clearCart, setIsCreatingQuote } = useQuoteContext()
+  const { cartItems, addToCart, removeFromCart, clearCart, setIsCreatingQuote, setPrefillContactId } = useQuoteContext()
   const [, navigate] = useLocation()
   const { isLoading, getServicesByType } = useServices()
 
@@ -1033,6 +1033,23 @@ export default function Calculator() {
   const [serviceMode, setServiceMode] = useState<ServiceMode>('onetime')
   const [planType, setPlanType] = useState<PlanType>('tcep')
   const [cartOpen, setCartOpen] = useState(false)
+
+  // Read ?contactId= from the hash URL (e.g. /#/calculator?contactId=uuid)
+  // and store it in context so QuoteCreateForm can auto-select the contact.
+  useEffect(() => {
+    const hash = window.location.hash // e.g. '#/calculator?contactId=...'
+    const qStart = hash.indexOf('?')
+    if (qStart >= 0) {
+      const params = new URLSearchParams(hash.slice(qStart + 1))
+      const contactId = params.get('contactId')
+      if (contactId) {
+        setPrefillContactId(contactId)
+        return
+      }
+    }
+    // No contactId in URL — clear any stale value so form opens blank
+    setPrefillContactId(null)
+  }, [setPrefillContactId])
 
   const handleCreateQuote = () => {
     setIsCreatingQuote(true)

@@ -14,16 +14,18 @@
 import { SupabaseClient } from '@supabase/supabase-js'
 
 // Must match the LeadStage type in src/types.ts — order matters
+// 'recurring' comes before 'finished_unpaid' so recurring leads advance correctly;
+// one-time leads skip 'recurring' and go straight to 'finished_unpaid'.
 const STAGE_ORDER = [
   'new',
   'contacted',
   'follow_up',
   'quoted',
   'scheduled',
-  'finished',
   'recurring',
-  'unpaid',
-  'paid',
+  'finished_unpaid',
+  'finished_paid',
+  // legacy / hidden — keep at end so auto-advances never reach them
   'lost',
 ] as const
 

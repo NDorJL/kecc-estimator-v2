@@ -169,90 +169,161 @@ const handler = schedule('0 14 * * *', async () => {
 
     console.log('[send-reminders] Done — job reminders complete')
 
-    // ── Follow-up sweep ──────────────────────────────────────────────────────
-    // Leads that have been in 'contacted' for > 2 days and haven't been
-    // followed up yet. Send a check-in SMS, then advance to 'follow_up'.
-    console.log('[send-reminders] Starting follow-up sweep')
+    // ── Quote follow-up sweep ────────────────────────────────────────────────
+    // Leads in 'quoted' where the quote was sent 3+ days ago and is still unsigned.
+    // Send a follow-up SMS and advance to 'follow_up'.
+    console.log('[send-reminders] Starting quote follow-up sweep')
 
-    const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString()
+    const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
 
-    const { data: staleLeads, error: leadsErr } = await supabase
+    // Join leads with their linked quote to check sent_at and signed_at
+    const { data: staleQuoteLeads, error: staleLeadsErr } = await supabase
       .from('leads')
       .select(`
         id,
         contact_id,
-        service_interest,
-        contacts (
-          name,
-          phone
-        ),
-        quotes (
+        quote_id,
+        quotes!inner (
           customer_name,
-          customer_phone
+          customer_phone,
+          sent_at,
+          signed_at
         )
       `)
-      .eq('stage', 'contacted')
-      .lt('contacted_at', twoDaysAgo)
+      .eq('stage', 'quoted')
       .is('follow_up_sent_at', null)
+      .not('quote_id', 'is', null)
 
-    if (leadsErr) {
-      console.error('[send-reminders] Follow-up query error:', leadsErr.message)
-    } else if (!staleLeads || staleLeads.length === 0) {
-      console.log('[send-reminders] No leads need follow-up today')
+    if (staleLeadsErr) {
+      console.error('[send-reminders] Quote follow-up query error:', staleLeadsErr.message)
     } else {
-      console.log(`[send-reminders] Following up on ${staleLeads.length} lead(s)`)
+      // Filter in JS: sent_at exists, is > 3 days ago, and quote is not yet signed
+      const toFollowUp = (staleQuoteLeads ?? []).filter(lead => {
+        const q = Array.isArray(lead.quotes) ? lead.quotes[0] : lead.quotes as any
+        return q?.sent_at && q.sent_at < threeDaysAgo && !q?.signed_at
+      })
 
-      for (const lead of staleLeads) {
-        const contact = Array.isArray(lead.contacts) ? lead.contacts[0] : lead.contacts as any
-        const quote   = Array.isArray(lead.quotes)   ? lead.quotes[0]   : lead.quotes as any
+      if (toFollowUp.length === 0) {
+        console.log('[send-reminders] No quote follow-ups needed today')
+      } else {
+        console.log(`[send-reminders] Sending ${toFollowUp.length} quote follow-up(s)`)
 
-        // Resolve name and phone — prefer contact record, fall back to quote
-        const name  = contact?.name  ?? quote?.customer_name  ?? null
-        const phone = contact?.phone ?? quote?.customer_phone ?? null
-        const firstName = name ? name.split(' ')[0] : 'there'
+        for (const lead of toFollowUp) {
+          const q = Array.isArray(lead.quotes) ? lead.quotes[0] : lead.quotes as any
+          const name  = q?.customer_name  ?? null
+          const phone = q?.customer_phone ?? null
+          const firstName = name ? name.split(' ')[0] : 'there'
+          const now = new Date().toISOString()
 
-        const now = new Date().toISOString()
+          // Always advance stage + stamp follow_up_sent_at
+          await supabase
+            .from('leads')
+            .update({ stage: 'follow_up', follow_up_sent_at: now })
+            .eq('id', lead.id)
+            .catch(e => console.error(`[send-reminders] Stage update failed for lead ${lead.id}:`, (e as Error).message))
 
-        // Always advance stage + stamp follow_up_sent_at
-        await supabase
-          .from('leads')
-          .update({ stage: 'follow_up', follow_up_sent_at: now })
-          .eq('id', lead.id)
-          .catch(e => console.error(`[send-reminders] Stage update failed for lead ${lead.id}:`, e.message))
+          if (phone && apiKey && fromNumber) {
+            const message =
+              `Hi ${firstName}, KECC here — just wanted to check in on the quote we sent the other day. ` +
+              `Please let us know if there is anything we can do to earn your business. ` +
+              `You can call or text this number to get in contact with a KECC rep! ` +
+              `Automated msg. Reply STOP to opt out.`
 
-        // Send SMS only if we have a phone number and SMS is configured
-        if (phone && apiKey && fromNumber) {
-          const message =
-            `Hi ${firstName}! This is ${companyName}. I just wanted to check in — we're here for ` +
-            `any questions you might have. Don't hesitate to reach out anytime!\n\n` +
-            `— ${companyName}\n` +
-            `Reply STOP to opt out.`
-
-          try {
-            await sendOpenPhoneSms(apiKey, fromNumber, phone, message)
-            console.log(`[send-reminders] ✓ Follow-up sent to ${name} (lead ${lead.id})`)
-          } catch (err) {
-            console.error(`[send-reminders] ✗ SMS failed for lead ${lead.id}:`, err instanceof Error ? err.message : err)
+            try {
+              await sendOpenPhoneSms(apiKey, fromNumber, phone, message)
+              console.log(`[send-reminders] ✓ Quote follow-up sent to ${name} (lead ${lead.id})`)
+            } catch (err) {
+              console.error(`[send-reminders] ✗ SMS failed for lead ${lead.id}:`, err instanceof Error ? err.message : err)
+            }
+          } else {
+            console.log(`[send-reminders] Lead ${lead.id} moved to follow_up (no phone/SMS — no message sent)`)
           }
-        } else {
-          console.log(`[send-reminders] Lead ${lead.id} moved to follow_up (no phone/SMS config — no message sent)`)
-        }
 
-        // Log to contact's activity timeline
-        if (lead.contact_id) {
-          await supabase.from('activities').insert({
-            contact_id: lead.contact_id,
-            type:       phone && apiKey ? 'sms_out' : 'note',
-            summary:    phone && apiKey
-              ? `Automated follow-up SMS sent to ${name}`
-              : `Lead auto-advanced to Follow-Up (no phone on file)`,
-            metadata:   { leadId: lead.id, automated: true },
-          }).catch(() => {})
+          if (lead.contact_id) {
+            await supabase.from('activities').insert({
+              contact_id: lead.contact_id,
+              type:       phone && apiKey ? 'sms_out' : 'note',
+              summary:    phone && apiKey
+                ? `Automated quote follow-up SMS sent to ${name}`
+                : `Lead auto-advanced to Follow-Up (no phone on file)`,
+              metadata:   { leadId: lead.id, automated: true },
+            }).catch(() => {})
+          }
         }
       }
     }
 
-    console.log('[send-reminders] Follow-up sweep done')
+    console.log('[send-reminders] Quote follow-up sweep done')
+
+    // ── Scheduled → Finished/Unpaid auto-advance ─────────────────────────────
+    // One-time jobs whose scheduled date has passed move to 'finished_unpaid'.
+    console.log('[send-reminders] Starting finished/unpaid sweep')
+
+    const today = new Date().toISOString().slice(0, 10)
+
+    const { data: pastScheduled, error: pastErr } = await supabase
+      .from('leads')
+      .select(`
+        id,
+        contact_id,
+        quote_id,
+        jobs!inner (
+          id,
+          scheduled_date,
+          status,
+          job_type
+        )
+      `)
+      .eq('stage', 'scheduled')
+      .not('quote_id', 'is', null)
+
+    if (pastErr) {
+      console.error('[send-reminders] Finished/unpaid query error:', pastErr.message)
+    } else {
+      // Keep only leads whose linked job date has passed and job isn't cancelled
+      const toFinish = (pastScheduled ?? []).filter(lead => {
+        const job = Array.isArray(lead.jobs) ? lead.jobs[0] : lead.jobs as any
+        return job?.scheduled_date
+          && job.scheduled_date < today
+          && job.status !== 'cancelled'
+          && job.job_type !== 'quote_visit'
+      })
+
+      if (toFinish.length === 0) {
+        console.log('[send-reminders] No jobs to move to finished/unpaid today')
+      } else {
+        console.log(`[send-reminders] Moving ${toFinish.length} lead(s) to finished/unpaid`)
+        for (const lead of toFinish) {
+          const job = Array.isArray(lead.jobs) ? lead.jobs[0] : lead.jobs as any
+
+          await supabase
+            .from('leads')
+            .update({ stage: 'finished_unpaid' })
+            .eq('id', lead.id)
+            .catch(e => console.error(`[send-reminders] Stage update failed for lead ${lead.id}:`, (e as Error).message))
+
+          // Mark the job as completed
+          await supabase
+            .from('jobs')
+            .update({ status: 'completed' })
+            .eq('id', job.id)
+            .eq('status', 'scheduled')   // only if still 'scheduled', don't override manual changes
+            .catch(() => {})
+
+          if (lead.contact_id) {
+            await supabase.from('activities').insert({
+              contact_id: lead.contact_id,
+              type:       'job_completed',
+              summary:    `Job date passed — lead auto-moved to Finished/Unpaid`,
+              metadata:   { leadId: lead.id, jobId: job.id, automated: true },
+            }).catch(() => {})
+          }
+          console.log(`[send-reminders] ✓ Lead ${lead.id} → finished/unpaid (job ${job.id})`)
+        }
+      }
+    }
+
+    console.log('[send-reminders] Finished/unpaid sweep done')
   } catch (err) {
     console.error('[send-reminders] Unexpected error:', err instanceof Error ? err.message : err)
   }

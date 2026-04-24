@@ -1,6 +1,20 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
+import { randomUUID } from 'crypto'
 import { advanceLeadStage } from './_leadSync'
+
+async function sendSms(apiKey: string, from: string, to: string, content: string): Promise<void> {
+  const baseUrl = (process.env.QUO_BASE_URL ?? 'https://api.openphone.com/v1').replace(/\/$/, '')
+  const res = await fetch(`${baseUrl}/messages`, {
+    method: 'POST',
+    headers: { 'Authorization': apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ from, to: [to], content }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText)
+    throw new Error(`OpenPhone ${res.status}: ${text}`)
+  }
+}
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -222,17 +236,13 @@ function buildQuotePage(opts: {
     ? `<img src="${esc(logoUrl)}" alt="${esc(companyName)}" style="max-height:56px;max-width:140px;object-fit:contain;display:block;margin-bottom:8px;">`
     : ''
 
-  // Subscription quotes: show the quote but no signature — agreement is sent separately
+  // All quotes now get the signature pad (recurring quotes also sign the quote,
+  // then a separate service agreement is auto-generated and sent afterwards).
   const funcUrl = `/.netlify/functions/esign?token=${encodeURIComponent(token)}`
-  const signatureSection = isSubscriptionQuote
-    ? `<div style="border-radius:12px;background:#f0f9ff;border:1px solid #bae6fd;padding:20px 16px;display:flex;gap:12px;align-items:flex-start;">
-        <span style="font-size:24px;line-height:1;">📋</span>
-        <div>
-          <p style="margin:0 0 4px;font-size:14px;font-weight:700;color:#0369a1;">Service Agreement Sent Separately</p>
-          <p style="margin:0;font-size:13px;color:#0284c7;">This is a recurring service plan. Your KECC representative will send you a separate service agreement link to review the full terms and add your signature.</p>
-        </div>
-      </div>`
-    : alreadySigned
+  const successMessage = isSubscriptionQuote
+    ? `Your signature has been received. A service agreement for your recurring plan will be sent to you shortly for a final signature.`
+    : `Your signature has been received. We'll be in touch soon to get you on the schedule.`
+  const signatureSection = alreadySigned
     ? `<div style="border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0;padding:20px 16px;display:flex;gap:12px;align-items:flex-start;">
         <span style="font-size:24px;line-height:1;">✅</span>
         <div>
@@ -259,7 +269,7 @@ function buildQuotePage(opts: {
       <div id="successCard" style="display:none;border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0;padding:32px 16px;text-align:center;">
         <div style="font-size:44px;margin-bottom:12px;">✅</div>
         <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#166534;">Thank you, ${esc(customerName)}!</p>
-        <p style="margin:0;font-size:13px;color:#15803d;">Your signature has been received. We'll be in touch soon.</p>
+        <p style="margin:0;font-size:13px;color:#15803d;">${esc(successMessage)}</p>
       </div>
       ${sigScript(token, '✓  I Accept This Estimate', funcUrl)}`
 
@@ -810,8 +820,7 @@ export const handler: Handler = async (event) => {
         }).eq('id', quoteRow.id)
         if (error) throw new Error(error.message)
 
-        // NOTE: lead does NOT advance to 'scheduled' on signing — that only
-        // happens when a job is explicitly booked from the signed quote.
+        // Log quote signing activity
         if (quoteRow.contact_id) {
           await supabase.from('activities').insert({
             contact_id: quoteRow.contact_id,
@@ -820,6 +829,55 @@ export const handler: Handler = async (event) => {
             metadata:   { quoteId: quoteRow.id },
           }).catch(() => {/* non-fatal */})
         }
+
+        // ── Recurring quote: auto-generate & SMS a service agreement ─────────
+        const lineItems = Array.isArray(quoteRow.line_items) ? quoteRow.line_items : []
+        const hasSubItems = lineItems.some((li: { isSubscription?: boolean }) => li.isSubscription)
+
+        if (hasSubItems && quoteRow.contact_id) {
+          try {
+            const agreeToken = randomUUID()
+            const { data: newAgreement } = await supabase.from('service_agreements').insert({
+              contact_id:       quoteRow.contact_id,
+              customer_name:    quoteRow.customer_name ?? '',
+              customer_address: quoteRow.customer_address ?? null,
+              quote_type:       quoteRow.quote_type ?? null,
+              status:           'pending_signature',
+              accept_token:     agreeToken,
+            }).select().single()
+
+            if (newAgreement) {
+              // Fetch SMS credentials
+              const { data: settings } = await supabase
+                .from('company_settings').select('quo_api_key, quo_from_number, company_name').limit(1).single()
+              const apiKey     = settings?.quo_api_key     ?? process.env.QUO_API_KEY ?? ''
+              const fromNumber = settings?.quo_from_number ?? process.env.QUO_FROM_NUMBER ?? ''
+              const companyName = settings?.company_name ?? 'Knox Exterior Care Co.'
+
+              if (apiKey && fromNumber && quoteRow.customer_phone) {
+                const siteUrl = (process.env.URL ?? '').replace(/\/$/, '')
+                const agreeUrl = `${siteUrl}/.netlify/functions/esign?token=${encodeURIComponent(agreeToken)}`
+                const firstName = (quoteRow.customer_name ?? 'there').split(' ')[0]
+                const agreeMsg =
+                  `Hi ${firstName}, ${companyName} here! Thank you for signing your quote. ` +
+                  `Please review and sign your service agreement here: ${agreeUrl} ` +
+                  `Reply STOP to opt out.`
+                await sendSms(apiKey, fromNumber, quoteRow.customer_phone, agreeMsg)
+              }
+
+              await supabase.from('activities').insert({
+                contact_id: quoteRow.contact_id,
+                type:       'esign_sent',
+                summary:    `Service agreement auto-generated and sent for signing`,
+                metadata:   { agreementId: newAgreement.id, quoteId: quoteRow.id },
+              }).catch(() => {})
+            }
+          } catch (agreeErr) {
+            // Non-fatal — quote signing already succeeded
+            console.error('[esign] Failed to auto-generate service agreement:', agreeErr)
+          }
+        }
+
         return { statusCode: 200, headers: JSON_HEADERS, body: JSON.stringify({ success: true }) }
       }
 
@@ -844,7 +902,19 @@ export const handler: Handler = async (event) => {
           }).eq('id', agreementRow.subscription_id).catch(() => {/* non-fatal */})
         }
 
-        // Advance lead to "Recurring" when a service agreement is signed
+        // Stamp agreement_signed_at on the most recent non-lost lead for this contact.
+        // This gates the "Schedule Job" button in the lead detail sheet.
+        if (agreementRow.contact_id) {
+          await supabase.from('leads')
+            .update({ agreement_signed_at: signedAt })
+            .eq('contact_id', agreementRow.contact_id)
+            .not('stage', 'eq', 'lost')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .catch(() => {/* non-fatal */})
+        }
+
+        // Advance lead to "Recurring" when service agreement is signed
         await advanceLeadStage(supabase, {
           quoteId:   null,
           contactId: agreementRow.contact_id ?? null,
@@ -854,7 +924,7 @@ export const handler: Handler = async (event) => {
         await supabase.from('activities').insert({
           contact_id: agreementRow.contact_id,
           type:       'esign_completed',
-          summary:    `Service agreement signed by ${agreementRow.customer_name}`,
+          summary:    `Service agreement signed by ${agreementRow.customer_name} — ready to schedule`,
           metadata:   { agreementId: agreementRow.id, subscriptionId: agreementRow.subscription_id },
         }).catch(() => {/* non-fatal */})
 

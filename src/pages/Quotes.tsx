@@ -147,7 +147,7 @@ function PdfExportDialog({
 }
 
 function QuoteCreateForm({ onDone }: { onDone: () => void }) {
-  const { cartItems, clearCart } = useQuoteContext();
+  const { cartItems, clearCart, prefillContactId, setPrefillContactId } = useQuoteContext();
   const { toast } = useToast();
   const [customerName, setCustomerName] = useState("");
   const [customerAddress, setCustomerAddress] = useState("");
@@ -175,6 +175,17 @@ function QuoteCreateForm({ onDone }: { onDone: () => void }) {
         (c.phone ?? '').includes(contactSearch)
       ).slice(0, 8)
     : [];
+
+  // Auto-select contact when coming from "Create Quote" on a lead card
+  useEffect(() => {
+    if (!prefillContactId || allContacts.length === 0) return;
+    const contact = allContacts.find(c => c.id === prefillContactId);
+    if (contact) {
+      selectContact(contact);
+      setPrefillContactId(null); // consume it so subsequent form opens are blank
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillContactId, allContacts]);
 
   function selectContact(contact: Contact) {
     setSelectedContact(contact);
@@ -241,6 +252,7 @@ function QuoteCreateForm({ onDone }: { onDone: () => void }) {
       subtotal: total,
       total,
       notes: notes.trim() || null,
+      contactId: selectedContact?.id ?? null,
     });
   };
 

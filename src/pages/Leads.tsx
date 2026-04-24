@@ -27,7 +27,9 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Plus, Clock, GripVertical, FileText, ArrowRight,
-  MapPin, Phone, Mail, User, ChevronRight, CalendarPlus, Trash2, Archive,
+  MapPin, Phone, Mail, User, ChevronRight, CalendarPlus,
+  Trash2, Archive, PhoneCall, MessageSquare, FileSignature,
+  Send, Receipt, CheckCircle2,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { ScheduleQuoteSheet } from '@/components/ScheduleQuoteSheet'
@@ -35,16 +37,14 @@ import { ScheduleQuoteSheet } from '@/components/ScheduleQuoteSheet'
 // ── Stage config ─────────────────────────────────────────────────────────────
 
 const STAGES: { id: LeadStage; label: string; color: string; headerColor?: string }[] = [
-  { id: 'new',       label: 'New Lead',   color: 'bg-slate-100 dark:bg-slate-800' },
-  { id: 'contacted', label: 'Contacted',  color: 'bg-blue-50 dark:bg-blue-950/40' },
-  { id: 'follow_up', label: 'Follow-Up',  color: 'bg-orange-50 dark:bg-orange-950/30', headerColor: 'text-orange-700 dark:text-orange-400' },
-  { id: 'quoted',    label: 'Quoted',     color: 'bg-yellow-50 dark:bg-yellow-950/30' },
-  { id: 'scheduled', label: 'Scheduled',  color: 'bg-violet-50 dark:bg-violet-950/30', headerColor: 'text-violet-700 dark:text-violet-400' },
-  { id: 'finished',  label: 'Finished',   color: 'bg-teal-50 dark:bg-teal-950/30', headerColor: 'text-teal-700 dark:text-teal-400' },
-  { id: 'recurring', label: 'Recurring ↻', color: 'bg-indigo-50 dark:bg-indigo-950/30', headerColor: 'text-indigo-700 dark:text-indigo-400' },
-  { id: 'unpaid',    label: 'Unpaid',     color: 'bg-amber-50 dark:bg-amber-950/30', headerColor: 'text-amber-700 dark:text-amber-400' },
-  { id: 'paid',      label: 'Paid ✓',    color: 'bg-emerald-50 dark:bg-emerald-950/30', headerColor: 'text-emerald-700 dark:text-emerald-400' },
-  { id: 'lost',      label: 'Lost',       color: 'bg-red-50 dark:bg-red-950/30' },
+  { id: 'new',            label: 'New Lead',        color: 'bg-slate-100 dark:bg-slate-800' },
+  { id: 'contacted',      label: 'Contacted',       color: 'bg-blue-50 dark:bg-blue-950/40' },
+  { id: 'follow_up',      label: 'Follow-Up',       color: 'bg-orange-50 dark:bg-orange-950/30',  headerColor: 'text-orange-700 dark:text-orange-400' },
+  { id: 'quoted',         label: 'Quoted',          color: 'bg-yellow-50 dark:bg-yellow-950/30' },
+  { id: 'scheduled',      label: 'Scheduled',       color: 'bg-violet-50 dark:bg-violet-950/30',  headerColor: 'text-violet-700 dark:text-violet-400' },
+  { id: 'recurring',      label: 'Recurring ↻',     color: 'bg-indigo-50 dark:bg-indigo-950/30',  headerColor: 'text-indigo-700 dark:text-indigo-400' },
+  { id: 'finished_unpaid', label: 'Finished / Unpaid', color: 'bg-amber-50 dark:bg-amber-950/30', headerColor: 'text-amber-700 dark:text-amber-400' },
+  { id: 'finished_paid',  label: 'Finished / Paid', color: 'bg-emerald-50 dark:bg-emerald-950/30', headerColor: 'text-emerald-700 dark:text-emerald-400' },
 ]
 
 function daysAgo(iso: string) {
@@ -62,6 +62,10 @@ function servicesSummary(items: LineItem[]): string {
   return `${items[0].serviceName} +${items.length - 1} more`
 }
 
+function isRecurringQuote(quote: Quote | null): boolean {
+  return !!quote && quote.lineItems.some(li => li.isSubscription)
+}
+
 // ── Lead Card (sortable within kanban) ───────────────────────────────────────
 
 function LeadCard({
@@ -69,11 +73,13 @@ function LeadCard({
   displayName,
   subline,
   onClick,
+  showAgreementBadge,
 }: {
   lead: Lead
   displayName: string
   subline: string
   onClick: () => void
+  showAgreementBadge?: boolean
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: lead.id })
 
@@ -86,7 +92,12 @@ function LeadCard({
       onClick={onClick}
       className="rounded-lg border bg-card p-2.5 shadow-sm cursor-pointer hover:border-primary/50 transition-colors touch-none"
     >
-      <p className="text-sm font-semibold leading-snug">{displayName}</p>
+      <div className="flex items-start justify-between gap-1">
+        <p className="text-sm font-semibold leading-snug">{displayName}</p>
+        {showAgreementBadge && (
+          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0 mt-0.5" title="Agreement signed" />
+        )}
+      </div>
       {subline && (
         <p className="text-xs text-muted-foreground mt-0.5 truncate">{subline}</p>
       )}
@@ -182,15 +193,31 @@ function KanbanColumn({
   leads,
   displayNames,
   sublines,
+  agreementBadgeIds,
   onCardClick,
+  searchFilter,
 }: {
   stage: typeof STAGES[number]
   leads: Lead[]
   displayNames: Record<string, string>
   sublines: Record<string, string>
+  agreementBadgeIds: Set<string>
   onCardClick: (lead: Lead) => void
+  searchFilter?: string
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id })
+  const [search, setSearch] = useState('')
+  const isRecurring = stage.id === 'recurring'
+  const activeSearch = isRecurring ? search : ''
+
+  const filteredLeads = activeSearch
+    ? leads.filter(l => {
+        const name  = (displayNames[l.id] ?? '').toLowerCase()
+        const sub   = (sublines[l.id] ?? '').toLowerCase()
+        const term  = activeSearch.toLowerCase()
+        return name.includes(term) || sub.includes(term)
+      })
+    : leads
 
   return (
     <div className={`flex flex-col rounded-xl border min-w-[180px] w-[180px] shrink-0 ${stage.color} ${isOver ? 'ring-2 ring-primary' : ''}`}>
@@ -198,14 +225,25 @@ function KanbanColumn({
         <span className={`text-xs font-semibold ${stage.headerColor ?? ''}`}>{stage.label}</span>
         <Badge variant="secondary" className="text-xs h-5 px-1.5">{leads.length}</Badge>
       </div>
+      {isRecurring && (
+        <div className="px-2 pt-2">
+          <Input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search…"
+            className="h-7 text-xs"
+          />
+        </div>
+      )}
       <div ref={setNodeRef} className="flex flex-col gap-2 p-2 min-h-[100px]">
-        <SortableContext items={leads.map(l => l.id)} strategy={verticalListSortingStrategy}>
-          {leads.map(l => (
+        <SortableContext items={filteredLeads.map(l => l.id)} strategy={verticalListSortingStrategy}>
+          {filteredLeads.map(l => (
             <LeadCard
               key={l.id}
               lead={l}
               displayName={displayNames[l.id] ?? 'Unknown'}
               subline={sublines[l.id] ?? ''}
+              showAgreementBadge={agreementBadgeIds.has(l.id)}
               onClick={() => onCardClick(l)}
             />
           ))}
@@ -270,11 +308,11 @@ function QuoteDetailPanel({ quote }: { quote: Quote }) {
                   )}
                   {li.quantity !== 1 && (
                     <p className="text-[10px] text-muted-foreground">
-                      {li.quantity} {li.unitLabel ?? 'units'} × {fmt(li.unitPrice)}
+                      {li.quantity} {li.unitLabel ?? 'units'} × ${li.unitPrice.toFixed(2)}
                     </p>
                   )}
                 </div>
-                <span className="text-xs font-semibold tabular-nums shrink-0">{fmt(li.lineTotal)}</span>
+                <span className="text-xs font-semibold tabular-nums shrink-0">${li.lineTotal.toFixed(2)}</span>
               </div>
             ))}
           </>
@@ -294,7 +332,7 @@ function QuoteDetailPanel({ quote }: { quote: Quote }) {
                   )}
                 </div>
                 <span className="text-xs font-semibold tabular-nums shrink-0">
-                  {fmt(li.monthlyAmount ?? li.lineTotal)}/mo
+                  ${(li.monthlyAmount ?? li.lineTotal).toFixed(2)}/mo
                 </span>
               </div>
             ))}
@@ -306,7 +344,7 @@ function QuoteDetailPanel({ quote }: { quote: Quote }) {
           {quote.discount != null && quote.discount > 0 && (
             <div className="flex justify-between">
               <span className="text-xs text-muted-foreground">Discount</span>
-              <span className="text-xs text-green-600 font-medium">−{fmt(quote.discount)}</span>
+              <span className="text-xs text-green-600 font-medium">−${quote.discount.toFixed(2)}</span>
             </div>
           )}
           {onetimeItems.length > 0 && subItems.length > 0 ? (
@@ -314,13 +352,13 @@ function QuoteDetailPanel({ quote }: { quote: Quote }) {
               <div className="flex justify-between">
                 <span className="text-xs font-semibold">Due Today</span>
                 <span className="text-sm font-bold tabular-nums">
-                  {fmt(onetimeItems.reduce((s, li) => s + li.lineTotal, 0))}
+                  ${onetimeItems.reduce((s, li) => s + li.lineTotal, 0).toFixed(2)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-xs font-semibold">Monthly</span>
                 <span className="text-sm font-bold tabular-nums text-primary">
-                  {fmt(subItems.reduce((s, li) => s + (li.monthlyAmount ?? li.lineTotal), 0))}/mo
+                  ${subItems.reduce((s, li) => s + (li.monthlyAmount ?? li.lineTotal), 0).toFixed(2)}/mo
                 </span>
               </div>
             </>
@@ -328,7 +366,7 @@ function QuoteDetailPanel({ quote }: { quote: Quote }) {
             <div className="flex justify-between">
               <span className="text-xs font-semibold">Total</span>
               <span className="text-sm font-bold tabular-nums text-primary">
-                {fmt(quote.total)}{subItems.length > 0 ? '/mo' : ''}
+                ${quote.total.toFixed(2)}{subItems.length > 0 ? '/mo' : ''}
               </span>
             </div>
           )}
@@ -340,9 +378,17 @@ function QuoteDetailPanel({ quote }: { quote: Quote }) {
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${QUOTE_STATUS_COLORS[quote.status] ?? 'bg-muted text-muted-foreground'}`}>
           {quote.status}
         </span>
-        <span className="text-[10px] text-muted-foreground">
-          {new Date(quote.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-        </span>
+        {quote.signedAt && (
+          <span className="text-[10px] text-green-600 font-medium flex items-center gap-0.5">
+            <CheckCircle2 className="h-3 w-3" />
+            Signed {new Date(quote.signedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+          </span>
+        )}
+        {!quote.signedAt && (
+          <span className="text-[10px] text-muted-foreground">
+            {new Date(quote.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+          </span>
+        )}
       </div>
 
       {/* Notes */}
@@ -379,6 +425,15 @@ function LeadDetailSheet({
   const [showSchedule, setShowSchedule] = useState(false)
   const [confirmDeleteQuote, setConfirmDeleteQuote] = useState(false)
   const [confirmDeleteLead, setConfirmDeleteLead] = useState(false)
+  const [confirmInvoice, setConfirmInvoice] = useState(false)
+
+  const isRecurring = isRecurringQuote(quote)
+  // For one-time: quote signed = can schedule
+  // For recurring: BOTH quote signed AND service agreement signed = can schedule
+  const canSchedule = !!quote?.signedAt && (!isRecurring || !!lead?.agreementSignedAt)
+
+  // Phone number: prefer quote, fall back to lead contact info (if any in serviceInterest)
+  const phone = quote?.customerPhone ?? null
 
   const updateMutation = useMutation({
     mutationFn: (updates: Partial<Lead>) =>
@@ -391,7 +446,6 @@ function LeadDetailSheet({
     onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
   })
 
-  // Delete this lead permanently
   const deleteLeadMutation = useMutation({
     mutationFn: () => apiRequest('DELETE', `/leads/${lead?.id}`),
     onSuccess: () => {
@@ -403,7 +457,6 @@ function LeadDetailSheet({
     onError: (err: Error) => toast({ title: 'Failed to delete lead', description: err.message, variant: 'destructive' }),
   })
 
-  // Archive (trash) the linked quote — removes it from Quotes page, detaches from lead visually
   const archiveQuoteMutation = useMutation({
     mutationFn: () => apiRequest('POST', `/quotes/${quote?.id}/trash`),
     onSuccess: () => {
@@ -415,7 +468,6 @@ function LeadDetailSheet({
     onError: (err: Error) => toast({ title: 'Failed to archive', description: err.message, variant: 'destructive' }),
   })
 
-  // Permanently delete the linked quote
   const deleteQuoteMutation = useMutation({
     mutationFn: () => apiRequest('DELETE', `/quotes/${quote?.id}`),
     onSuccess: () => {
@@ -428,12 +480,44 @@ function LeadDetailSheet({
     onError: (err: Error) => toast({ title: 'Failed to delete', description: err.message, variant: 'destructive' }),
   })
 
+  // Send quote via SMS
+  const sendQuoteMutation = useMutation({
+    mutationFn: () => apiRequest('POST', `/quotes/${quote?.id}/send`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/quotes'] })
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      toast({ title: 'Quote sent!', description: `SMS delivered to ${phone}` })
+    },
+    onError: (err: Error) => toast({ title: 'Failed to send quote', description: err.message, variant: 'destructive' }),
+  })
+
+  // Generate QB invoice
+  const generateInvoiceMutation = useMutation({
+    mutationFn: () => apiRequest('POST', `/qb?action=invoice`, { quoteId: quote?.id }),
+    onSuccess: (data: { qbInvoiceId: string }) => {
+      queryClient.invalidateQueries({ queryKey: ['/quotes'] })
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      setConfirmInvoice(false)
+      toast({
+        title: 'Invoice created in QuickBooks!',
+        description: `Invoice #${data.qbInvoiceId} is ready for review in QB.`,
+      })
+    },
+    onError: (err: Error) => {
+      setConfirmInvoice(false)
+      toast({ title: 'QB invoice failed', description: err.message, variant: 'destructive' })
+    },
+  })
+
   if (!lead) return null
+
+  const inFinishedUnpaid = lead.stage === 'finished_unpaid'
+  const hasInvoice = !!quote?.qbInvoiceId
 
   return (
     <Sheet open={open} onOpenChange={onClose}>
       <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[90dvh] overflow-y-auto">
-        <SheetHeader className="mb-4">
+        <SheetHeader className="mb-3">
           <SheetTitle className="flex items-center gap-2">
             {displayName}
             {quote && (
@@ -445,7 +529,47 @@ function LeadDetailSheet({
         </SheetHeader>
 
         <div className="space-y-4">
-          {/* Full quote detail when linked */}
+
+          {/* ── Call / Text buttons ────────────────────────────────────────── */}
+          {phone && (
+            <div className="flex gap-2">
+              <a
+                href={`tel:${phone}`}
+                className="flex-1"
+                onClick={e => e.stopPropagation()}
+              >
+                <Button variant="outline" className="w-full gap-2 text-blue-600 border-blue-200 hover:bg-blue-50">
+                  <PhoneCall className="h-4 w-4" />
+                  Call
+                </Button>
+              </a>
+              <a
+                href={`sms:${phone}`}
+                className="flex-1"
+                onClick={e => e.stopPropagation()}
+              >
+                <Button variant="outline" className="w-full gap-2 text-green-600 border-green-200 hover:bg-green-50">
+                  <MessageSquare className="h-4 w-4" />
+                  Text
+                </Button>
+              </a>
+            </div>
+          )}
+
+          {/* ── Agreement signed badge ─────────────────────────────────────── */}
+          {lead.agreementSignedAt && (
+            <div className="flex items-center gap-2 rounded-lg bg-green-50 border border-green-200 px-3 py-2">
+              <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-green-800">Service Agreement Signed</p>
+                <p className="text-[10px] text-green-600">
+                  {new Date(lead.agreementSignedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Full quote detail when linked ─────────────────────────────── */}
           {quote && (
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wide">Quote Details</p>
@@ -453,7 +577,7 @@ function LeadDetailSheet({
             </div>
           )}
 
-          {/* If no quote, show lead fields */}
+          {/* ── If no quote, show lead fields ─────────────────────────────── */}
           {!quote && (
             <>
               {lead.serviceInterest && (
@@ -471,7 +595,7 @@ function LeadDetailSheet({
             </>
           )}
 
-          {/* Stage */}
+          {/* ── Stage ─────────────────────────────────────────────────────── */}
           <div>
             <Label className="text-xs">Stage</Label>
             <Select
@@ -487,19 +611,7 @@ function LeadDetailSheet({
             </Select>
           </div>
 
-          {lead.stage === 'lost' && (
-            <div>
-              <Label className="text-xs">Lost Reason</Label>
-              <Input
-                value={lostReason}
-                onChange={e => setLostReason(e.target.value)}
-                placeholder="Why was this lost?"
-                className="mt-1"
-              />
-            </div>
-          )}
-
-          {/* Lead notes */}
+          {/* ── Lead notes ────────────────────────────────────────────────── */}
           <div>
             <Label className="text-xs">Lead Notes</Label>
             <Textarea
@@ -511,14 +623,116 @@ function LeadDetailSheet({
             />
           </div>
 
-          {/* Schedule Job — only visible once the linked quote is e-signed */}
-          {quote?.signedAt && (
+          {/* ── Create Quote (when no quote linked yet) ────────────────────── */}
+          {!quote && lead.contactId && (
+            <Button
+              variant="outline"
+              className="w-full gap-2 border-primary/40 text-primary hover:bg-primary/5"
+              onClick={() => {
+                navigate(`/calculator?contactId=${lead.contactId}`)
+                onClose()
+              }}
+            >
+              <FileSignature className="h-4 w-4" />
+              Create Quote for This Lead
+            </Button>
+          )}
+
+          {/* ── Send Quote via SMS ────────────────────────────────────────── */}
+          {quote && phone && (
+            <Button
+              variant="outline"
+              className="w-full gap-2 border-blue-300 text-blue-700 hover:bg-blue-50"
+              disabled={sendQuoteMutation.isPending}
+              onClick={() => sendQuoteMutation.mutate()}
+            >
+              <Send className="h-4 w-4" />
+              {sendQuoteMutation.isPending
+                ? 'Sending…'
+                : quote.sentAt
+                  ? `Resend Quote (sent ${new Date(quote.sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })})`
+                  : 'Send Quote via SMS'}
+            </Button>
+          )}
+
+          {/* ── Schedule Job (gated on signatures) ───────────────────────── */}
+          {canSchedule && (
             <Button className="w-full bg-primary" onClick={() => setShowSchedule(true)}>
               <CalendarPlus className="h-4 w-4 mr-2" />Schedule Job
             </Button>
           )}
 
-          {/* Quote actions — archive / delete (only when quote is linked) */}
+          {/* ── Waiting for signatures info ───────────────────────────────── */}
+          {quote && !canSchedule && (
+            <div className="rounded-lg bg-muted/50 border border-dashed p-3 space-y-1">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Before Scheduling</p>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs">
+                  {quote.signedAt
+                    ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                    : <div className="h-3.5 w-3.5 rounded-full border-2 border-muted-foreground/40" />}
+                  <span className={quote.signedAt ? 'text-green-700 line-through' : 'text-muted-foreground'}>
+                    Quote signed by customer
+                  </span>
+                </div>
+                {isRecurring && (
+                  <div className="flex items-center gap-2 text-xs">
+                    {lead.agreementSignedAt
+                      ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                      : <div className="h-3.5 w-3.5 rounded-full border-2 border-muted-foreground/40" />}
+                    <span className={lead.agreementSignedAt ? 'text-green-700 line-through' : 'text-muted-foreground'}>
+                      Service agreement signed
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── Generate QB Invoice (Finished/Unpaid only) ────────────────── */}
+          {inFinishedUnpaid && quote && (
+            <div className="rounded-xl border border-dashed border-amber-400/60 bg-amber-50/40 p-3 space-y-2">
+              <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">Billing</p>
+              {hasInvoice ? (
+                <div className="flex items-center gap-2 text-xs text-amber-700">
+                  <Receipt className="h-4 w-4 shrink-0" />
+                  <span>Invoice <strong>#{quote.qbInvoiceId}</strong> created in QuickBooks — awaiting payment</span>
+                </div>
+              ) : !confirmInvoice ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full text-amber-700 border-amber-400 hover:bg-amber-100"
+                  onClick={() => setConfirmInvoice(true)}
+                >
+                  <Receipt className="h-3.5 w-3.5 mr-1.5" />
+                  Generate QB Invoice
+                </Button>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs text-amber-800 font-medium">
+                    Before generating the invoice, confirm the scope of work matches the original quote.
+                  </p>
+                  <p className="text-xs text-amber-700">Were there any upcharges or work outside the scope of the quote?</p>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" className="flex-1" onClick={() => setConfirmInvoice(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="flex-1 bg-amber-600 hover:bg-amber-700 text-white"
+                      disabled={generateInvoiceMutation.isPending}
+                      onClick={() => generateInvoiceMutation.mutate()}
+                    >
+                      {generateInvoiceMutation.isPending ? 'Creating…' : 'No Changes — Generate'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Quote actions ─────────────────────────────────────────────── */}
           {quote && (
             <div className="rounded-xl border border-dashed border-destructive/40 p-3 space-y-2">
               <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Quote Actions</p>
@@ -557,7 +771,7 @@ function LeadDetailSheet({
             </div>
           )}
 
-          {/* Lead actions — always available, quote or not */}
+          {/* ── Lead actions ─────────────────────────────────────────────── */}
           <div className="rounded-xl border border-dashed border-destructive/40 p-3 space-y-2">
             <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Lead Actions</p>
             {!confirmDeleteLead ? (
@@ -585,7 +799,7 @@ function LeadDetailSheet({
             )}
           </div>
 
-          {/* Actions */}
+          {/* ── Footer actions ────────────────────────────────────────────── */}
           <div className="flex gap-2">
             <Button
               className="flex-1"
@@ -743,12 +957,10 @@ export default function Leads() {
   const [activeQuote, setActiveQuote] = useState<Quote | null>(null)
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [showNew, setShowNew] = useState(false)
-  // Track the stage at drag-start so handleDragEnd doesn't read a stale closure
-  // (handleDragOver updates the cache optimistically which causes a re-render
-  //  before handleDragEnd fires, making lead.stage look like the new stage already)
-  const dragStartStageRef = useRef<LeadStage | null>(null)
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  // Track the stage at drag-start to prevent stale closure issues in handleDragEnd
+  const dragStartStageRef = useRef<LeadStage | null>(null)
 
   const { data: leads, isLoading: leadsLoading } = useQuery<Lead[]>({
     queryKey: ['/leads'],
@@ -780,7 +992,6 @@ export default function Leads() {
   }
 
   // Per-lead: display name and subline
-  // Priority: quote.customerName > contactNames[contactId] > 'Unknown'
   function getDisplayName(lead: Lead): string {
     if (lead.quoteId && quoteById[lead.quoteId]) return quoteById[lead.quoteId].customerName
     if (lead.contactId && contactNames[lead.contactId]) return contactNames[lead.contactId]
@@ -794,6 +1005,11 @@ export default function Leads() {
     }
     return lead.serviceInterest ?? ''
   }
+
+  // Agreement badge: show on recurring leads that have agreementSignedAt set
+  const agreementBadgeIds = new Set(
+    (leads ?? []).filter(l => !!l.agreementSignedAt).map(l => l.id)
+  )
 
   // ── Mutations ─────────────────────────────────────────────────────────────
 
@@ -851,7 +1067,6 @@ export default function Leads() {
       const lead = leads?.find(l => l.id === id) ?? null
       setActiveLead(lead)
       setActiveQuote(null)
-      // Capture stage BEFORE any optimistic updates from handleDragOver
       dragStartStageRef.current = lead?.stage ?? null
     }
   }
@@ -893,7 +1108,6 @@ export default function Leads() {
     // ── Lead card drag ────────────────────────────────────────────────────────
     setActiveLead(null)
 
-    // Read and clear the ref before any async work
     const originalStage = dragStartStageRef.current
     dragStartStageRef.current = null
 
@@ -901,10 +1115,6 @@ export default function Leads() {
       (STAGES.find(s => s.id === overId)?.id as LeadStage | undefined) ??
       leads?.find(l => l.id === overId)?.stage
 
-    // Compare against originalStage (captured at drag-start), NOT lead.stage from
-    // the current closure — by the time handleDragEnd fires, handleDragOver may
-    // have already updated the cache, making lead.stage === targetStage and
-    // causing the mutation to be skipped (cards snap back on next refetch).
     if (targetStage && targetStage !== originalStage) {
       updateStageMutation.mutate({ id: activeId, stage: targetStage })
     }
@@ -928,7 +1138,7 @@ export default function Leads() {
 
   // Quotes for right panel: exclude any already in the pipeline, sort by priority
   const sortedQuotes = [...(quotes ?? [])]
-    .filter(q => !quoteLeadMap[q.id])   // hide quotes already dragged into a stage
+    .filter(q => !quoteLeadMap[q.id])
     .sort((a, b) => {
       const order: Record<string, number> = { sent: 0, accepted: 1, draft: 2, declined: 3 }
       const sa = order[a.status] ?? 2
@@ -939,6 +1149,10 @@ export default function Leads() {
 
   // Selected lead's linked quote (if any)
   const selectedQuote = selectedLead?.quoteId ? (quoteById[selectedLead.quoteId] ?? null) : null
+
+  // Build display name/subline maps once
+  const displayNames = Object.fromEntries((leads ?? []).map(l => [l.id, getDisplayName(l)]))
+  const sublines     = Object.fromEntries((leads ?? []).map(l => [l.id, getSubline(l)]))
 
   return (
     <div className="flex flex-col h-full">
@@ -982,12 +1196,9 @@ export default function Leads() {
                     key={stage.id}
                     stage={stage}
                     leads={(leads ?? []).filter(l => l.stage === stage.id)}
-                    displayNames={Object.fromEntries(
-                      (leads ?? []).map(l => [l.id, getDisplayName(l)])
-                    )}
-                    sublines={Object.fromEntries(
-                      (leads ?? []).map(l => [l.id, getSubline(l)])
-                    )}
+                    displayNames={displayNames}
+                    sublines={sublines}
+                    agreementBadgeIds={agreementBadgeIds}
                     onCardClick={l => setSelectedLead(l)}
                   />
                 ))}

@@ -333,6 +333,16 @@ export const handler: Handler = async (event) => {
       // Write QB invoice ID back to the document
       if (documentType === 'quote') {
         await supabase.from('quotes').update({ qb_invoice_id: qbInvoiceId }).eq('id', documentId)
+        // Log activity on the contact
+        const { data: q } = await supabase.from('quotes').select('contact_id, customer_name').eq('id', documentId).single()
+        if (q?.contact_id) {
+          await supabase.from('activities').insert({
+            contact_id: q.contact_id,
+            type:       'invoice_sent',
+            summary:    `QB Invoice #${qbInvoiceId} generated for ${q.customer_name} — awaiting payment`,
+            metadata:   { qbInvoiceId, quoteId: documentId },
+          }).catch(() => {})
+        }
       } else {
         await supabase.from('service_agreements').update({ qb_invoice_id: qbInvoiceId }).eq('id', documentId)
       }
@@ -342,6 +352,102 @@ export const handler: Handler = async (event) => {
         headers: CORS,
         body: JSON.stringify({ success: true, qbInvoiceId, note: documentType === 'agreement' ? 'For subscription clients, set up the recurring schedule in QuickBooks Online under Recurring Transactions.' : undefined }),
       }
+    }
+
+    // ── QB Payment Webhook ─────────────────────────────────────────────────
+    // QuickBooks sends payment events here. Register this URL in the QB Developer portal.
+    // env var required: QBO_WEBHOOK_VERIFIER_TOKEN
+    if (action === 'webhook') {
+      // Verify the webhook signature
+      const verifierToken = process.env.QBO_WEBHOOK_VERIFIER_TOKEN ?? ''
+      const intuitSignature = event.headers['intuit-signature'] ?? ''
+
+      if (verifierToken && intuitSignature) {
+        // QB uses HMAC-SHA256: signature = base64(hmac(verifierToken, rawBody))
+        const { createHmac } = await import('crypto')
+        const rawBody = event.body ?? ''
+        const expectedSig = createHmac('sha256', verifierToken).update(rawBody).digest('base64')
+        if (intuitSignature !== expectedSig) {
+          console.warn('[qb webhook] Invalid signature — ignoring')
+          return { statusCode: 401, headers: CORS, body: JSON.stringify({ error: 'Invalid signature' }) }
+        }
+      }
+
+      try {
+        const payload = JSON.parse(event.body ?? '{}')
+        const notifications: Array<{ realmId: string; dataChangeEvent: { entities: Array<{ name: string; id: string; operation: string }> } }>
+          = payload.eventNotifications ?? []
+
+        for (const notification of notifications) {
+          const entities = notification.dataChangeEvent?.entities ?? []
+          for (const entity of entities) {
+            if (entity.name !== 'Payment') continue
+
+            // Fetch the payment from QB to get the linked invoice ID(s)
+            try {
+              const webhookSettings = await getSettings()
+              if (!webhookSettings?.qb_access_token) continue
+              const realmId = notification.realmId
+
+              let accessToken: string
+              try {
+                accessToken = await ensureValidToken(webhookSettings)
+              } catch {
+                console.error('[qb webhook] Could not refresh QB token — skipping')
+                continue
+              }
+
+              const paymentRes = await fetch(
+                `${qbBase()}/v3/company/${realmId}/payment/${entity.id}?minorversion=${MINOR_VERSION}`,
+                { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' } }
+              )
+              if (!paymentRes.ok) continue
+              const paymentData = await paymentRes.json()
+              const linkedInvoices: string[] = (paymentData?.Payment?.Line ?? [])
+                .flatMap((line: { LinkedTxn?: Array<{ TxnType: string; TxnId: string }> }) =>
+                  (line.LinkedTxn ?? []).filter(t => t.TxnType === 'Invoice').map(t => t.TxnId))
+
+              for (const qbInvoiceId of linkedInvoices) {
+                // Find a quote linked to this QB invoice
+                const { data: quote } = await supabase
+                  .from('quotes')
+                  .select('id, contact_id, customer_name')
+                  .eq('qb_invoice_id', qbInvoiceId)
+                  .maybeSingle()
+
+                if (!quote) continue
+
+                // Find the lead linked to this quote and advance to finished_paid
+                const { data: lead } = await supabase
+                  .from('leads')
+                  .select('id, stage')
+                  .eq('quote_id', quote.id)
+                  .maybeSingle()
+
+                if (lead && lead.stage !== 'finished_paid') {
+                  await supabase.from('leads').update({ stage: 'finished_paid' }).eq('id', lead.id)
+                  if (quote.contact_id) {
+                    await supabase.from('activities').insert({
+                      contact_id: quote.contact_id,
+                      type:       'payment_received',
+                      summary:    `Payment received — QB Invoice #${qbInvoiceId} paid`,
+                      metadata:   { qbInvoiceId, quoteId: quote.id, leadId: lead.id },
+                    }).catch(() => {})
+                  }
+                  console.log(`[qb webhook] Lead ${lead.id} → finished_paid (invoice ${qbInvoiceId})`)
+                }
+              }
+            } catch (entityErr) {
+              console.error('[qb webhook] Error processing payment entity:', entityErr)
+            }
+          }
+        }
+      } catch (parseErr) {
+        console.error('[qb webhook] Failed to parse payload:', parseErr)
+      }
+
+      // Always return 200 to QB so they don't retry
+      return { statusCode: 200, headers: CORS, body: JSON.stringify({ received: true }) }
     }
 
     return { statusCode: 404, headers: CORS, body: JSON.stringify({ error: 'Not found' }) }
