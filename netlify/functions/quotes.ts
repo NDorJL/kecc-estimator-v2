@@ -103,7 +103,8 @@ export const handler: Handler = async (event) => {
 
     // UPDATE quote
     if (method === 'PATCH' && id && !action) {
-      const body = JSON.parse(event.body ?? '{}')
+      let body: Record<string, unknown>
+      try { body = JSON.parse(event.body ?? '{}') } catch { return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'Invalid JSON body' }) } }
       const update: Record<string, unknown> = {}
       if (body.customerName !== undefined) update.customer_name = body.customerName
       if (body.customerAddress !== undefined) update.customer_address = body.customerAddress
@@ -125,8 +126,13 @@ export const handler: Handler = async (event) => {
       if (body.signedIp !== undefined)       update.signed_ip = body.signedIp
       if (body.qbInvoiceId !== undefined)    update.qb_invoice_id = body.qbInvoiceId
       if (body.sentAt !== undefined)         update.sent_at = body.sentAt
+      if (Object.keys(update).length === 0) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'No fields to update' }) }
       const { data, error } = await supabase.from('quotes').update(update).eq('id', id).select().single()
-      if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Quote not found' }) }
+      if (error) {
+        console.error('PATCH /quotes error:', error)
+        return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: error.message, details: error.details ?? null }) }
+      }
+      if (!data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Quote not found' }) }
 
       // ── Propagate customer identity changes back to the linked contact ────
       // So editing a name on a quote keeps the contact record in sync.
@@ -231,6 +237,7 @@ export const handler: Handler = async (event) => {
     return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Not found' }) }
   } catch (err) {
     console.error('quotes error:', err)
-    return { statusCode: 500, headers: CORS, body: JSON.stringify({ message: 'Internal server error' }) }
+    const msg = err instanceof Error ? err.message : String(err)
+    return { statusCode: 500, headers: CORS, body: JSON.stringify({ message: msg }) }
   }
 }

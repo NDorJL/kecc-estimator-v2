@@ -1035,13 +1035,39 @@ export default function Calculator() {
     queryFn: () => apiGet<CompanySettings>('/settings'),
   })
 
+  // Read contactId from hash URL param (e.g. /#/calculator?contactId=abc)
+  // Wouter hash routing puts params after "?" in the hash fragment.
+  const contactIdFromUrl = useMemo(() => {
+    const hash = window.location.hash          // e.g. "#/calculator?contactId=abc"
+    const qStart = hash.indexOf('?')
+    if (qStart < 0) return null
+    return new URLSearchParams(hash.slice(qStart + 1)).get('contactId')
+  }, [])
+
+  // Read contacts from React Query cache — Leads page already fetched them,
+  // so this is a cache hit with no network request.
+  const { data: allContacts, isLoading: contactsLoading } = useQuery<Contact[]>({
+    queryKey: ['/contacts'],
+    queryFn: () => apiGet<Contact[]>('/contacts'),
+    staleTime: 30_000,
+    enabled: !!contactIdFromUrl,
+  })
+
+  // Resolved prefill contact: URL param wins, then fall back to context (legacy).
+  const resolvedPrefillContact = useMemo<Contact | null>(() => {
+    if (contactIdFromUrl && allContacts) {
+      return allContacts.find(c => c.id === contactIdFromUrl) ?? null
+    }
+    return prefillContact
+  }, [contactIdFromUrl, allContacts, prefillContact])
+
   const [customerType, setCustomerType] = useState<CustomerType>('residential')
   const [serviceMode, setServiceMode] = useState<ServiceMode>('onetime')
   const [planType, setPlanType] = useState<PlanType>('tcep')
   const [cartOpen, setCartOpen] = useState(false)
 
-  // Direct quote creation — used when coming from a lead card (prefillContact is set
-  // synchronously by Leads.tsx before navigating here, so no async fetch needed).
+  // Direct quote creation — used when coming from a lead card.
+  // Reads contact from URL param → RQ cache; no async fetch, no context dependency.
   const directCreateMutation = useMutation({
     mutationFn: async (contact: Contact) => {
       const onetimeItems = cartItems.filter(i => !i.isSubscription)
@@ -1083,11 +1109,16 @@ export default function Calculator() {
   })
 
   const handleCreateQuote = () => {
-    // If we have a prefill contact (came from a lead card), skip the form entirely
+    // If there's a contactId in the URL but contacts are still loading, wait.
+    if (contactIdFromUrl && contactsLoading) {
+      toast({ title: 'Loading contact info…', description: 'Please try again in a moment.' })
+      return
+    }
+    // If we have a resolved prefill contact (from URL param or context), skip the form
     // and create the quote directly, then return to the lead pipeline.
-    if (prefillContact) {
+    if (resolvedPrefillContact) {
       setCartOpen(false)
-      directCreateMutation.mutate(prefillContact)
+      directCreateMutation.mutate(resolvedPrefillContact)
       return
     }
     // Normal flow — open QuoteCreateForm in the Quotes page

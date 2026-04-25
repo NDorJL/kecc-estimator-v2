@@ -356,7 +356,7 @@ function QuoteCreateForm({ onDone }: { onDone: () => void }) {
 
 interface EditLineItem extends LineItem { _key: string }
 
-function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => void; onUpdate: (q: Quote) => void }) {
+export function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack: () => void; onUpdate: (q: Quote) => void }) {
   const { toast } = useToast();
   const [, setLocation] = useLocation();
   const [showExportDialog, setShowExportDialog] = useState(false);

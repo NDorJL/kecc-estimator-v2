@@ -35,6 +35,7 @@ import {
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { ScheduleQuoteSheet } from '@/components/ScheduleQuoteSheet'
+import { QuoteDetail } from '@/pages/Quotes'
 
 // ── Stage config ─────────────────────────────────────────────────────────────
 
@@ -459,6 +460,11 @@ function LeadDetailSheet({
   const [serviceInterest, setServiceInterest] = useState(lead?.serviceInterest ?? '')
   const [estimatedValue, setEstimatedValue] = useState(lead?.estimatedValue?.toString() ?? '')
   const [showSchedule, setShowSchedule] = useState(false)
+  // Inline quote editor — when true, renders QuoteDetail inside this sheet
+  const [editingQuote, setEditingQuote] = useState(false)
+  // Local quote state updated after inline saves (so the sheet reflects edits immediately)
+  const [localQuote, setLocalQuote] = useState<Quote | null>(null)
+  const effectiveQuote = localQuote ?? quote
 
   // Sync form state when a different lead is selected
   useEffect(() => {
@@ -466,18 +472,20 @@ function LeadDetailSheet({
     setLostReason(lead?.lostReason ?? '')
     setServiceInterest(lead?.serviceInterest ?? '')
     setEstimatedValue(lead?.estimatedValue?.toString() ?? '')
+    setEditingQuote(false)
+    setLocalQuote(null)
   }, [lead?.id])
   const [confirmDeleteQuote, setConfirmDeleteQuote] = useState(false)
   const [confirmDeleteLead, setConfirmDeleteLead] = useState(false)
   const [confirmInvoice, setConfirmInvoice] = useState(false)
 
-  const isRecurring = isRecurringQuote(quote)
+  const isRecurring = isRecurringQuote(effectiveQuote)
   // For one-time: quote signed = can schedule
   // For recurring: BOTH quote signed AND service agreement signed = can schedule
-  const canSchedule = !!quote?.signedAt && (!isRecurring || !!lead?.agreementSignedAt)
+  const canSchedule = !!effectiveQuote?.signedAt && (!isRecurring || !!lead?.agreementSignedAt)
 
   // Phone number: prefer quote, fall back to lead contact info (if any in serviceInterest)
-  const phone = quote?.customerPhone ?? null
+  const phone = effectiveQuote?.customerPhone ?? null
 
   const updateMutation = useMutation({
     mutationFn: (updates: Partial<Lead>) =>
@@ -502,7 +510,7 @@ function LeadDetailSheet({
   })
 
   const archiveQuoteMutation = useMutation({
-    mutationFn: () => apiRequest('POST', `/quotes/${quote?.id}/trash`),
+    mutationFn: () => apiRequest('POST', `/quotes/${effectiveQuote?.id}/trash`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
@@ -513,7 +521,7 @@ function LeadDetailSheet({
   })
 
   const deleteQuoteMutation = useMutation({
-    mutationFn: () => apiRequest('DELETE', `/quotes/${quote?.id}`),
+    mutationFn: () => apiRequest('DELETE', `/quotes/${effectiveQuote?.id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
@@ -526,7 +534,7 @@ function LeadDetailSheet({
 
   // Send quote via SMS
   const sendQuoteMutation = useMutation({
-    mutationFn: () => apiRequest('POST', `/quotes/${quote?.id}/send`, {}),
+    mutationFn: () => apiRequest('POST', `/quotes/${effectiveQuote?.id}/send`, {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
@@ -537,7 +545,7 @@ function LeadDetailSheet({
 
   // Generate QB invoice
   const generateInvoiceMutation = useMutation({
-    mutationFn: () => apiRequest('POST', `/qb?action=invoice`, { quoteId: quote?.id }),
+    mutationFn: () => apiRequest('POST', `/qb?action=invoice`, { quoteId: effectiveQuote?.id }),
     onSuccess: (data: { qbInvoiceId: string }) => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
@@ -556,17 +564,32 @@ function LeadDetailSheet({
   if (!lead) return null
 
   const inFinishedUnpaid = lead.stage === 'finished_unpaid'
-  const hasInvoice = !!quote?.qbInvoiceId
+  const hasInvoice = !!effectiveQuote?.qbInvoiceId
 
   return (
     <Sheet open={open} onOpenChange={onClose}>
       <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[90dvh] overflow-y-auto">
+
+        {/* ── Inline quote editor (replaces full sheet content when editing) ── */}
+        {editingQuote && effectiveQuote ? (
+          <QuoteDetail
+            quote={effectiveQuote}
+            onBack={() => setEditingQuote(false)}
+            onUpdate={(updated) => {
+              setLocalQuote(updated)
+              queryClient.invalidateQueries({ queryKey: ['/quotes'] })
+              queryClient.invalidateQueries({ queryKey: ['/leads'] })
+              setEditingQuote(false)
+            }}
+          />
+        ) : (
+        <>
         <SheetHeader className="mb-3">
           <SheetTitle className="flex items-center gap-2">
             {displayName}
-            {quote && (
-              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${QUOTE_STATUS_COLORS[quote.status] ?? 'bg-muted'}`}>
-                {quote.status}
+            {effectiveQuote && (
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${QUOTE_STATUS_COLORS[effectiveQuote.status] ?? 'bg-muted'}`}>
+                {effectiveQuote.status}
               </span>
             )}
           </SheetTitle>
@@ -614,7 +637,7 @@ function LeadDetailSheet({
           )}
 
           {/* ── Full quote detail when linked ─────────────────────────────── */}
-          {quote && (
+          {effectiveQuote && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wide">Quote Details</p>
@@ -622,13 +645,13 @@ function LeadDetailSheet({
                   variant="ghost"
                   size="sm"
                   className="h-7 px-2 text-xs gap-1 text-primary"
-                  onClick={() => { navigate(`/quotes?quote=${quote.id}`); onClose() }}
+                  onClick={() => setEditingQuote(true)}
                 >
                   <FileSignature className="h-3.5 w-3.5" />
                   Edit Quote
                 </Button>
               </div>
-              <QuoteDetailPanel quote={quote} />
+              <QuoteDetailPanel quote={effectiveQuote!} />
             </div>
           )}
 
@@ -684,14 +707,15 @@ function LeadDetailSheet({
           </div>
 
           {/* ── Create Quote (when no quote linked yet) ────────────────────── */}
-          {!quote && (
+          {!effectiveQuote && (
             <Button
               variant="outline"
               className="w-full gap-2 border-primary/40 text-primary hover:bg-primary/5"
               onClick={() => {
-                // Pass the full contact object synchronously — no async fetch needed
-                setPrefillContact(contactForPrefill)
-                navigate('/calculator')
+                // Navigate to calculator with contactId in URL — Calculator reads it
+                // from the hash params and looks up the contact from the RQ cache.
+                const cId = lead?.contactId
+                navigate(cId ? `/calculator?contactId=${cId}` : '/calculator')
                 onClose()
               }}
             >
@@ -701,7 +725,7 @@ function LeadDetailSheet({
           )}
 
           {/* ── Send Quote via SMS ────────────────────────────────────────── */}
-          {quote && phone && (
+          {effectiveQuote && phone && (
             <Button
               variant="outline"
               className="w-full gap-2 border-blue-300 text-blue-700 hover:bg-blue-50"
@@ -711,8 +735,8 @@ function LeadDetailSheet({
               <Send className="h-4 w-4" />
               {sendQuoteMutation.isPending
                 ? 'Sending…'
-                : quote.sentAt
-                  ? `Resend Quote (sent ${new Date(quote.sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })})`
+                : effectiveQuote.sentAt
+                  ? `Resend Quote (sent ${new Date(effectiveQuote.sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })})`
                   : 'Send Quote via SMS'}
             </Button>
           )}
@@ -725,15 +749,15 @@ function LeadDetailSheet({
           )}
 
           {/* ── Waiting for signatures info ───────────────────────────────── */}
-          {quote && !canSchedule && (
+          {effectiveQuote && !canSchedule && (
             <div className="rounded-lg bg-muted/50 border border-dashed p-3 space-y-1">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Before Scheduling</p>
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-xs">
-                  {quote.signedAt
+                  {effectiveQuote.signedAt
                     ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
                     : <div className="h-3.5 w-3.5 rounded-full border-2 border-muted-foreground/40" />}
-                  <span className={quote.signedAt ? 'text-green-700 line-through' : 'text-muted-foreground'}>
+                  <span className={effectiveQuote.signedAt ? 'text-green-700 line-through' : 'text-muted-foreground'}>
                     Quote signed by customer
                   </span>
                 </div>
@@ -752,13 +776,13 @@ function LeadDetailSheet({
           )}
 
           {/* ── Generate QB Invoice (Finished/Unpaid only) ────────────────── */}
-          {inFinishedUnpaid && quote && (
+          {inFinishedUnpaid && effectiveQuote && (
             <div className="rounded-xl border border-dashed border-amber-400/60 bg-amber-50/40 p-3 space-y-2">
               <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">Billing</p>
               {hasInvoice ? (
                 <div className="flex items-center gap-2 text-xs text-amber-700">
                   <Receipt className="h-4 w-4 shrink-0" />
-                  <span>Invoice <strong>#{quote.qbInvoiceId}</strong> created in QuickBooks — awaiting payment</span>
+                  <span>Invoice <strong>#{effectiveQuote.qbInvoiceId}</strong> created in QuickBooks — awaiting payment</span>
                 </div>
               ) : !confirmInvoice ? (
                 <Button
@@ -795,7 +819,7 @@ function LeadDetailSheet({
           )}
 
           {/* ── Quote actions ─────────────────────────────────────────────── */}
-          {quote && (
+          {effectiveQuote && (
             <div className="rounded-xl border border-dashed border-destructive/40 p-3 space-y-2">
               <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Quote Actions</p>
               {!confirmDeleteQuote ? (
@@ -887,12 +911,14 @@ function LeadDetailSheet({
         </div>
 
         {/* Schedule sheet — nested so it shares the lead detail's quote context */}
-        {quote && (
+        {effectiveQuote && (
           <ScheduleQuoteSheet
-            quote={quote}
+            quote={effectiveQuote}
             open={showSchedule}
             onClose={() => setShowSchedule(false)}
           />
+        )}
+        </>
         )}
       </SheetContent>
     </Sheet>

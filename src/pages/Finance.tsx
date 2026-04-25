@@ -4,6 +4,7 @@ import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, LabelList,
+  ComposedChart, Area, AreaChart,
 } from 'recharts'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import type { Quote, Subscription } from '@/types'
+import type { Quote, Subscription, Lead, Job, Contact } from '@/types'
 import {
   Lock, AlertTriangle, Upload, Plus, Pencil, Trash2,
   Check, X, RefreshCw, Download, TrendingUp, TrendingDown, Settings2,
@@ -1663,196 +1664,848 @@ function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]
 // ═══════════════════════════════════════════════════════════════════════════
 // SALES TAB
 // ═══════════════════════════════════════════════════════════════════════════
-function SalesTab() {
-  const { data: quotes = [] } = useQuery<Quote[]>({
-    queryKey: ['/quotes'],
-    queryFn: () => apiGet('/quotes'),
-    staleTime: 60_000,
-  })
-  const { data: subs = [] } = useQuery<Subscription[]>({
-    queryKey: ['/subscriptions'],
-    queryFn: () => apiGet('/subscriptions'),
-    staleTime: 60_000,
-  })
+// ═══════════════════════════════════════════════════════════════════════════
+// ANALYTICS TAB — TYPES & HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+type RangeDays = 7 | 30 | 90 | 180 | 'ytd' | 365
+type MetricKey = 'revenue' | 'expenses' | 'net' | 'quoteValue' | 'leadsCreated' | 'jobsCompleted' | 'newContacts' | 'quotesCreated'
+type Granularity = 'daily' | 'weekly' | 'monthly'
+type AChartType = 'bar' | 'line' | 'area'
 
-  const currentYear = new Date().getFullYear()
+interface Bucket { label: string; start: Date; end: Date }
 
-  // ── KPI calculations ──────────────────────────────────────────────────────
-  const nonDraft  = quotes.filter(q => q.status !== 'draft' && !q.trashedAt)
-  const sent      = quotes.filter(q => q.status === 'sent' && !q.trashedAt)
-  const accepted  = quotes.filter(q => q.status === 'accepted' && !q.trashedAt)
-  const declined  = quotes.filter(q => q.status === 'declined' && !q.trashedAt)
-  const draft     = quotes.filter(q => q.status === 'draft' && !q.trashedAt)
+function getRangeWindow(range: RangeDays): { start: Date; end: Date } {
+  const now = new Date()
+  const end = new Date(now)
+  let start: Date
+  if (range === 'ytd') {
+    start = new Date(now.getFullYear(), 0, 1)
+  } else {
+    start = new Date(now.getTime() - range * 86400_000)
+  }
+  return { start, end }
+}
 
-  const denominator = sent.length + accepted.length + declined.length
-  const winRate = denominator > 0 ? (accepted.length / denominator) * 100 : 0
-  const closedValue = accepted.reduce((s, q) => s + (q.total || 0), 0)
-  const pipelineValue = sent.reduce((s, q) => s + (q.total || 0), 0)
+function getPriorWindow(range: RangeDays): { start: Date; end: Date } {
+  const { start: curStart, end: curEnd } = getRangeWindow(range)
+  if (range === 'ytd') {
+    const dur = curEnd.getTime() - curStart.getTime()
+    return { start: new Date(curStart.getTime() - dur - 86400_000), end: new Date(curStart.getTime() - 86400_000) }
+  }
+  const dur = curEnd.getTime() - curStart.getTime()
+  return { start: new Date(curStart.getTime() - dur), end: new Date(curStart.getTime() - 1) }
+}
 
-  // ── Monthly Quoted vs Closed ──────────────────────────────────────────────
-  const monthlyData = useMemo(() => MONTHS.map((label, i) => {
-    const mo = i + 1
-    const quoted = nonDraft
-      .filter(q => { const d = new Date(q.createdAt); return d.getFullYear() === currentYear && d.getMonth() + 1 === mo })
-      .reduce((s, q) => s + (q.total || 0), 0)
-    const closed = accepted
-      .filter(q => { const d = new Date(q.createdAt); return d.getFullYear() === currentYear && d.getMonth() + 1 === mo })
-      .reduce((s, q) => s + (q.total || 0), 0)
-    return { month: label, Quoted: Math.round(quoted), Closed: Math.round(closed) }
-  }), [quotes, currentYear]) // eslint-disable-line react-hooks/exhaustive-deps
+function inWindow(dateStr: string, win: { start: Date; end: Date }): boolean {
+  const d = new Date(dateStr)
+  return d >= win.start && d <= win.end
+}
 
-  // ── Revenue split ─────────────────────────────────────────────────────────
-  const activeSubs = subs.filter(s => s.status === 'ACTIVE')
-  const subARR = activeSubs.reduce((s, sub) => s + (sub.inSeasonMonthlyTotal || 0), 0) * 12
-  const onetimeClosed = accepted
-    .filter(q => (q.quoteType || '').includes('onetime'))
-    .reduce((s, q) => s + (q.total || 0), 0)
+function getBuckets(range: RangeDays, gran: Granularity): Bucket[] {
+  const { start, end } = getRangeWindow(range)
+  const buckets: Bucket[] = []
+  let cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate())
+  while (cursor <= end) {
+    const s = new Date(cursor)
+    let e: Date
+    let label: string
+    if (gran === 'daily') {
+      e = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate(), 23, 59, 59, 999)
+      label = `${cursor.getMonth() + 1}/${cursor.getDate()}`
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1)
+    } else if (gran === 'weekly') {
+      e = new Date(cursor.getTime() + 6 * 86400_000)
+      if (e > end) e = new Date(end)
+      label = `${cursor.getMonth() + 1}/${cursor.getDate()}`
+      cursor = new Date(cursor.getTime() + 7 * 86400_000)
+    } else {
+      e = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0, 23, 59, 59, 999)
+      if (e > end) e = new Date(end)
+      label = MONTHS[cursor.getMonth()]
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1)
+    }
+    buckets.push({ label, start: s, end: e })
+  }
+  return buckets
+}
 
-  const revenuePie = [
-    { name: 'Subscription ARR', value: Math.round(subARR), fill: '#52B788' },
-    { name: 'Closed One-Time', value: Math.round(onetimeClosed), fill: '#1B4332' },
-  ].filter(x => x.value > 0)
+function inBucket(dateStr: string | null | undefined, b: Bucket): boolean {
+  if (!dateStr) return false
+  const d = new Date(dateStr)
+  return d >= b.start && d <= b.end
+}
 
-  // ── YTD closed one-time ───────────────────────────────────────────────────
-  const nowMonth = new Date().getMonth() + 1
-  const closedYTD = accepted
-    .filter(q => {
-      const d = new Date(q.createdAt)
-      return d.getFullYear() === currentYear && d.getMonth() + 1 <= nowMonth
+function metricLabel(k: MetricKey): string {
+  const MAP: Record<MetricKey, string> = {
+    revenue: 'Revenue', expenses: 'Expenses', net: 'Net Profit',
+    quoteValue: 'Quote Value', leadsCreated: 'Leads Created',
+    jobsCompleted: 'Jobs Completed', newContacts: 'New Contacts', quotesCreated: 'Quotes Created',
+  }
+  return MAP[k]
+}
+
+function metricIsDollar(k: MetricKey): boolean {
+  return ['revenue', 'expenses', 'net', 'quoteValue'].includes(k)
+}
+
+function computeMetric(
+  k: MetricKey,
+  b: Bucket,
+  txs: Transaction[],
+  quotes: Quote[],
+  leads: Lead[],
+  jobs: Job[],
+  contacts: Contact[],
+): number {
+  switch (k) {
+    case 'revenue':   return txs.filter(t => t.type === 'Income'  && inBucket(t.date, b)).reduce((s, t) => s + Number(t.amount), 0)
+    case 'expenses':  return txs.filter(t => t.type === 'Expense' && inBucket(t.date, b)).reduce((s, t) => s + Number(t.amount), 0)
+    case 'net': {
+      const r = txs.filter(t => t.type === 'Income'  && inBucket(t.date, b)).reduce((s, t) => s + Number(t.amount), 0)
+      const e = txs.filter(t => t.type === 'Expense' && inBucket(t.date, b)).reduce((s, t) => s + Number(t.amount), 0)
+      return r - e
+    }
+    case 'quoteValue':    return quotes.filter(q => !q.trashedAt && inBucket(q.createdAt, b)).reduce((s, q) => s + (q.total || 0), 0)
+    case 'leadsCreated':  return leads.filter(l => inBucket(l.createdAt, b)).length
+    case 'jobsCompleted': return jobs.filter(j => j.status === 'completed' && inBucket(j.scheduledDate, b)).length
+    case 'newContacts':   return contacts.filter(c => inBucket(c.createdAt, b)).length
+    case 'quotesCreated': return quotes.filter(q => !q.trashedAt && inBucket(q.createdAt, b)).length
+  }
+}
+
+function computeKpiForWindow(
+  k: MetricKey,
+  win: { start: Date; end: Date },
+  txs: Transaction[],
+  quotes: Quote[],
+  leads: Lead[],
+  jobs: Job[],
+  contacts: Contact[],
+): number {
+  const fakeBucket: Bucket = { label: '', start: win.start, end: win.end }
+  return computeMetric(k, fakeBucket, txs, quotes, leads, jobs, contacts)
+}
+
+function deltaBadge(cur: number, prior: number): { pct: number; up: boolean } | null {
+  if (prior === 0) return null
+  const pct = ((cur - prior) / Math.abs(prior)) * 100
+  return { pct: Math.abs(pct), up: pct >= 0 }
+}
+
+function avgDays(pairs: Array<{ from: string; to: string }>): number | null {
+  if (!pairs.length) return null
+  const total = pairs.reduce((s, p) => {
+    const diff = new Date(p.to).getTime() - new Date(p.from).getTime()
+    return s + diff / 86400_000
+  }, 0)
+  return total / pairs.length
+}
+
+const METRIC_OPTIONS: MetricKey[] = ['revenue', 'expenses', 'net', 'quoteValue', 'leadsCreated', 'jobsCompleted', 'newContacts', 'quotesCreated']
+const RANGE_OPTIONS: Array<{ label: string; value: RangeDays }> = [
+  { label: '7D', value: 7 }, { label: '30D', value: 30 }, { label: '90D', value: 90 },
+  { label: '6M', value: 180 }, { label: 'YTD', value: 'ytd' }, { label: '1Y', value: 365 },
+]
+
+const STAGE_LABEL: Record<string, string> = {
+  new: 'New', contacted: 'Contacted', follow_up: 'Follow-Up', quoted: 'Quoted',
+  scheduled: 'Scheduled', recurring: 'Recurring', finished_unpaid: 'Finished/Unpaid',
+  finished_paid: 'Finished/Paid', lost: 'Lost',
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ANALYTICS TAB
+// ═══════════════════════════════════════════════════════════════════════════
+function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
+  const { data: quotes = [] }   = useQuery<Quote[]>({ queryKey: ['/quotes'], queryFn: () => apiGet('/quotes'), staleTime: 60_000 })
+  const { data: subs = [] }     = useQuery<Subscription[]>({ queryKey: ['/subscriptions'], queryFn: () => apiGet('/subscriptions'), staleTime: 60_000 })
+  const { data: leads = [] }    = useQuery<Lead[]>({ queryKey: ['/leads'], queryFn: () => apiGet('/leads'), staleTime: 60_000 })
+  const { data: jobs = [] }     = useQuery<Job[]>({ queryKey: ['/jobs'], queryFn: () => apiGet('/jobs'), staleTime: 60_000 })
+  const { data: contacts = [] } = useQuery<Contact[]>({ queryKey: ['/contacts'], queryFn: () => apiGet('/contacts'), staleTime: 60_000 })
+
+  const [range, setRange]         = useState<RangeDays>(30)
+  const [primary, setPrimary]     = useState<MetricKey>('revenue')
+  const [overlay, setOverlay]     = useState<MetricKey | null>(null)
+  const [granularity, setGran]    = useState<Granularity>('weekly')
+  const [chartType, setChartType] = useState<AChartType>('bar')
+
+  const curWin  = useMemo(() => getRangeWindow(range),  [range])
+  const priorWin = useMemo(() => getPriorWindow(range), [range])
+
+  // ── Filtered data for range ──────────────────────────────────────────────
+  const txsInRange     = useMemo(() => transactions.filter(t => inWindow(t.date, curWin)), [transactions, curWin])
+  const quotesInRange  = useMemo(() => quotes.filter(q => !q.trashedAt && inWindow(q.createdAt, curWin)), [quotes, curWin])
+  const leadsInRange   = useMemo(() => leads.filter(l => inWindow(l.createdAt, curWin)), [leads, curWin])
+  const jobsInRange    = useMemo(() => jobs.filter(j => j.status === 'completed' && inWindow(j.scheduledDate ?? '', curWin)), [jobs, curWin])
+  const contactsInRange = useMemo(() => contacts.filter(c => inWindow(c.createdAt, curWin)), [contacts, curWin])
+
+  const txsPrior    = useMemo(() => transactions.filter(t => inWindow(t.date, priorWin)), [transactions, priorWin])
+
+  // ── KPI computations ────────────────────────────────────────────────────
+  const grossRevenue  = useMemo(() => txsInRange.filter(t => t.type === 'Income').reduce((s, t) => s + Number(t.amount), 0), [txsInRange])
+  const totalExpenses = useMemo(() => txsInRange.filter(t => t.type === 'Expense').reduce((s, t) => s + Number(t.amount), 0), [txsInRange])
+  const netProfit     = grossRevenue - totalExpenses
+
+  const accepted    = useMemo(() => quotes.filter(q => q.status === 'accepted' && !q.trashedAt), [quotes])
+  const sent        = useMemo(() => quotes.filter(q => q.status === 'sent' && !q.trashedAt), [quotes])
+  const declined    = useMemo(() => quotes.filter(q => q.status === 'declined' && !q.trashedAt), [quotes])
+  const draft       = useMemo(() => quotes.filter(q => q.status === 'draft' && !q.trashedAt), [quotes])
+
+  const acceptedInRange = useMemo(() => accepted.filter(q => inWindow(q.createdAt, curWin)), [accepted, curWin])
+  const sentInRange     = useMemo(() => sent.filter(q => inWindow(q.createdAt, curWin)), [sent, curWin])
+  const declinedInRange = useMemo(() => declined.filter(q => inWindow(q.createdAt, curWin)), [declined, curWin])
+
+  const winDenom = sentInRange.length + acceptedInRange.length + declinedInRange.length
+  const winRate  = winDenom > 0 ? (acceptedInRange.length / winDenom) * 100 : 0
+
+  // Prior KPIs
+  const priorRevenue  = useMemo(() => txsPrior.filter(t => t.type === 'Income').reduce((s, t) => s + Number(t.amount), 0), [txsPrior])
+  const priorExpenses = useMemo(() => txsPrior.filter(t => t.type === 'Expense').reduce((s, t) => s + Number(t.amount), 0), [txsPrior])
+  const priorNet      = priorRevenue - priorExpenses
+  const priorLeads    = useMemo(() => leads.filter(l => inWindow(l.createdAt, priorWin)).length, [leads, priorWin])
+  const priorJobs     = useMemo(() => jobs.filter(j => j.status === 'completed' && inWindow(j.scheduledDate ?? '', priorWin)).length, [jobs, priorWin])
+  const priorWinDenom = useMemo(() => quotes.filter(q => !q.trashedAt && inWindow(q.createdAt, priorWin) && ['sent','accepted','declined'].includes(q.status)).length, [quotes, priorWin])
+  const priorAccepted = useMemo(() => quotes.filter(q => q.status === 'accepted' && !q.trashedAt && inWindow(q.createdAt, priorWin)).length, [quotes, priorWin])
+  const priorWinRate  = priorWinDenom > 0 ? (priorAccepted / priorWinDenom) * 100 : 0
+
+  // ── Hero chart buckets ────────────────────────────────────────────────────
+  const buckets = useMemo(() => getBuckets(range, granularity), [range, granularity])
+
+  const heroData = useMemo(() => buckets.map(b => {
+    const pVal = computeMetric(primary, b, transactions, quotes, leads, jobs, contacts)
+    const oVal = overlay ? computeMetric(overlay, b, transactions, quotes, leads, jobs, contacts) : undefined
+    return { label: b.label, primary: pVal, ...(oVal !== undefined ? { overlay: oVal } : {}) }
+  }), [buckets, primary, overlay, transactions, quotes, leads, jobs, contacts])
+
+  const primaryTotal   = heroData.reduce((s, d) => s + d.primary, 0)
+  const primaryAvg     = heroData.length > 0 ? primaryTotal / heroData.length : 0
+  const priorPrimary   = useMemo(() => computeKpiForWindow(primary, priorWin, transactions, quotes, leads, jobs, contacts), [primary, priorWin, transactions, quotes, leads, jobs, contacts])
+  const heroDelta      = deltaBadge(primaryTotal, priorPrimary)
+
+  // ── Chart sub-data ────────────────────────────────────────────────────────
+  const revByCat = useMemo(() => {
+    const map: Record<string, number> = {}
+    txsInRange.filter(t => t.type === 'Income').forEach(t => { map[t.category] = (map[t.category] || 0) + Number(t.amount) })
+    return Object.entries(map).map(([name, value]) => ({ name, value: Math.round(value), fill: CAT_COLORS[name] || '#52B788' })).sort((a, b) => b.value - a.value)
+  }, [txsInRange])
+
+  const expByCat = useMemo(() => {
+    const map: Record<string, number> = {}
+    txsInRange.filter(t => t.type === 'Expense').forEach(t => { map[t.category] = (map[t.category] || 0) + Number(t.amount) })
+    return Object.entries(map).map(([name, value]) => ({ name, value: Math.round(value), fill: CAT_COLORS[name] || '#94a3b8' })).sort((a, b) => b.value - a.value)
+  }, [txsInRange])
+
+  // Quote pipeline: range-filtered counts per the plan ("quotes in range by status")
+  const quotePipeline = useMemo(() => {
+    const draftR    = quotesInRange.filter(q => q.status === 'draft').length
+    const sentR     = quotesInRange.filter(q => q.status === 'sent').length
+    const acceptedR = quotesInRange.filter(q => q.status === 'accepted').length
+    const declinedR = quotesInRange.filter(q => q.status === 'declined').length
+    const total     = quotesInRange.length
+    return [
+      { label: 'Draft', count: draftR, total, color: '#94a3b8' },
+      { label: 'Sent', count: sentR, total, color: '#3b82f6' },
+      { label: 'Accepted', count: acceptedR, total, color: '#22c55e' },
+      { label: 'Declined', count: declinedR, total, color: '#ef4444' },
+    ]
+  }, [quotesInRange])
+
+  const leadsByStage = useMemo(() => {
+    const map: Record<string, number> = {}
+    leads.forEach(l => { map[l.stage] = (map[l.stage] || 0) + 1 })
+    return Object.entries(map)
+      .filter(([s]) => s !== 'lost')
+      .map(([stage, count]) => ({ stage: STAGE_LABEL[stage] || stage, count }))
+      .sort((a, b) => b.count - a.count)
+  }, [leads])
+
+  // Win rate over time (last 8 weekly buckets for line chart)
+  const winRateOverTime = useMemo(() => {
+    const win8: Bucket[] = getBuckets(180, 'weekly').slice(-8)
+    return win8.map(b => {
+      const acc = quotes.filter(q => q.status === 'accepted' && !q.trashedAt && inBucket(q.createdAt, b)).length
+      const denom = quotes.filter(q => !q.trashedAt && ['sent','accepted','declined'].includes(q.status) && inBucket(q.createdAt, b)).length
+      return { label: b.label, 'Win Rate': denom > 0 ? Math.round((acc / denom) * 100) : null }
     })
-    .reduce((s, q) => s + (q.total || 0), 0)
+  }, [quotes])
 
-  const conversionRate = sent.length > 0 ? (accepted.length / (sent.length + accepted.length)) * 100 : 0
+  // Revenue per service from quote lineItems
+  const revPerService = useMemo(() => {
+    const map: Record<string, number> = {}
+    accepted.forEach(q => {
+      if (Array.isArray(q.lineItems)) {
+        q.lineItems.forEach((li: any) => {
+          const name = li.serviceName || li.name || 'Unknown'
+          map[name] = (map[name] || 0) + (Number(li.total) || Number(li.price) || 0)
+        })
+      }
+    })
+    return Object.entries(map).map(([name, value]) => ({ name, value: Math.round(value) })).sort((a, b) => b.value - a.value).slice(0, 8)
+  }, [accepted])
+
+  // ── Business Insights ─────────────────────────────────────────────────────
+  const signedQuotes = useMemo(() => quotes.filter(q => q.signedAt && q.createdAt), [quotes])
+  const avgQuoteToSign = useMemo(() => avgDays(signedQuotes.map(q => ({ from: q.createdAt, to: q.signedAt! }))), [signedQuotes])
+
+  const avgQuoteValue = useMemo(() => {
+    if (!accepted.length) return null
+    return accepted.reduce((s, q) => s + (q.total || 0), 0) / accepted.length
+  }, [accepted])
+
+  const sentQuotes = useMemo(() => quotes.filter(q => (q as any).sentAt && q.createdAt), [quotes])
+  const avgSendLag = useMemo(() => avgDays(sentQuotes.map(q => ({ from: q.createdAt, to: (q as any).sentAt }))), [sentQuotes])
+
+  const recurringAcceptedValue = useMemo(() => accepted.filter(q => (q.quoteType || '').includes('recurring') || (q.quoteType || '').includes('subscription')).reduce((s, q) => s + (q.total || 0), 0), [accepted])
+  const totalAcceptedValue = useMemo(() => accepted.reduce((s, q) => s + (q.total || 0), 0), [accepted])
+  const recurringPct = totalAcceptedValue > 0 ? (recurringAcceptedValue / totalAcceptedValue) * 100 : 0
+
+  const activeSubs  = useMemo(() => subs.filter(s => s.status === 'ACTIVE'), [subs])
+  const activeMRR   = useMemo(() => activeSubs.reduce((s, sub) => s + (sub.inSeasonMonthlyTotal || 0), 0), [activeSubs])
+  const subARR      = activeMRR * 12
+
+  const now = new Date()
+  const nowMonth = now.getMonth() + 1
+  const closedYTD = useMemo(() => accepted.filter(q => {
+    const d = new Date(q.createdAt)
+    return d.getFullYear() === now.getFullYear() && d.getMonth() + 1 <= nowMonth && (q.quoteType || '').includes('onetime')
+  }).reduce((s, q) => s + (q.total || 0), 0), [accepted]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const finishedPaidLeads = useMemo(() => leads.filter(l => l.stage === 'finished_paid').length, [leads])
+  const leadToCustomerRate = leads.length > 0 ? (finishedPaidLeads / leads.length) * 100 : 0
+
+  const openLeads = useMemo(() => leads.filter(l => !['finished_paid', 'finished_unpaid', 'lost'].includes(l.stage)), [leads])
+  const avgLeadAge = useMemo(() => {
+    if (!openLeads.length) return null
+    const total = openLeads.reduce((s, l) => s + (now.getTime() - new Date(l.createdAt).getTime()), 0)
+    return total / openLeads.length / 86400_000
+  }, [openLeads]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Pipeline Intelligence ─────────────────────────────────────────────────
+  const ORDERED_STAGES = ['new','contacted','follow_up','quoted','scheduled','recurring','finished_unpaid','finished_paid']
+  const stageFunnel = useMemo(() => ORDERED_STAGES.map(s => ({
+    stage: STAGE_LABEL[s] || s,
+    count: leads.filter(l => l.stage === s).length,
+  })).filter(x => x.count > 0), [leads])
+
+  const openPipelineValue = useMemo(() => leads.filter(l => ['quoted','follow_up'].includes(l.stage)).reduce((s, l) => s + (l.estimatedValue || 0), 0), [leads])
+
+  // Lead velocity: leads per week for last 8 weeks
+  const leadVelocity = useMemo(() => {
+    const win8 = getBuckets(56, 'weekly')
+    return win8.map(b => ({
+      label: b.label,
+      'New Leads': leads.filter(l => inBucket(l.createdAt, b)).length,
+    }))
+  }, [leads])
+
+  // Quote-to-sign trend: per month avg days for last 6 months
+  const signTrend = useMemo(() => {
+    const win6 = getBuckets(180, 'monthly')
+    return win6.map(b => {
+      const qs = signedQuotes.filter(q => inBucket(q.createdAt, b))
+      const avg = qs.length ? qs.reduce((s, q) => s + (new Date(q.signedAt!).getTime() - new Date(q.createdAt).getTime()) / 86400_000, 0) / qs.length : null
+      return { label: b.label, 'Avg Days to Sign': avg !== null ? Math.round(avg) : null }
+    })
+  }, [signedQuotes])
+
+  // ── Customer Intelligence ─────────────────────────────────────────────────
+  const topCustomers = useMemo(() => {
+    const map: Record<string, { name: string; value: number }> = {}
+    accepted.forEach(q => {
+      const key = q.contactId || q.customerName || 'Unknown'
+      const name = q.customerName || 'Unknown'
+      if (!map[key]) map[key] = { name, value: 0 }
+      map[key].value += (q.total || 0)
+    })
+    return Object.values(map).sort((a, b) => b.value - a.value).slice(0, 10).map(x => ({ ...x, value: Math.round(x.value) }))
+  }, [accepted])
+
+  const repeatCustomerRate = useMemo(() => {
+    const map: Record<string, number> = {}
+    accepted.forEach(q => {
+      const key = q.contactId || q.customerName || 'Unknown'
+      map[key] = (map[key] || 0) + 1
+    })
+    const totalContacts = Object.keys(map).length
+    const repeat = Object.values(map).filter(v => v >= 2).length
+    return totalContacts > 0 ? (repeat / totalContacts) * 100 : 0
+  }, [accepted])
+
+  const resByType = useMemo(() => [
+    { name: 'Residential', value: Math.round(accepted.filter(q => (q.quoteType || '').includes('residential')).reduce((s, q) => s + (q.total || 0), 0)) },
+    { name: 'Commercial', value: Math.round(accepted.filter(q => (q.quoteType || '').includes('commercial')).reduce((s, q) => s + (q.total || 0), 0)) },
+  ].filter(x => x.value > 0), [accepted])
+
+  const clvBuckets = useMemo(() => {
+    const map: Record<string, number> = {}
+    accepted.forEach(q => {
+      const key = q.contactId || q.customerName || 'Unknown'
+      map[key] = (map[key] || 0) + (q.total || 0)
+    })
+    const vals = Object.values(map)
+    return [
+      { range: '$0–500', count: vals.filter(v => v <= 500).length },
+      { range: '$500–1k', count: vals.filter(v => v > 500 && v <= 1000).length },
+      { range: '$1k–2k', count: vals.filter(v => v > 1000 && v <= 2000).length },
+      { range: '$2k+', count: vals.filter(v => v > 2000).length },
+    ]
+  }, [accepted])
+
+  // ── Churn Risk: subs paused >30 days with no reactivation ───────────────
+  const THIRTY_DAYS_MS = 30 * 86400_000
+  const churnRiskSubs = useMemo(() => subs.filter(s => {
+    if (s.status !== 'PAUSED') return false
+    const lastChange = s.updatedAt || s.createdAt
+    return (now.getTime() - new Date(lastChange).getTime()) > THIRTY_DAYS_MS
+  }), [subs]) // eslint-disable-line react-hooks/exhaustive-deps
+  const churnRiskMRR = churnRiskSubs.reduce((s, sub) => s + (sub.inSeasonMonthlyTotal || 0), 0)
+
+  // ── Forecasting ─────────────────────────────────────────────────────────
+  const last3MonthsOneTime = useMemo(() => {
+    const win3 = getBuckets(90, 'monthly')
+    const totals = win3.map(b => accepted.filter(q => (q.quoteType || '').includes('onetime') && inBucket(q.createdAt, b)).reduce((s, q) => s + (q.total || 0), 0))
+    return totals.reduce((s, v) => s + v, 0) / Math.max(win3.length, 1)
+  }, [accepted])
+
+  const nextMonthForecast = activeMRR + last3MonthsOneTime
+  const allQuoteWinRate = (accepted.length + sent.length + declined.length) > 0
+    ? accepted.length / (accepted.length + sent.length + declined.length)
+    : 0
+  const pipelineForecast = leads.filter(l => ['quoted','follow_up'].includes(l.stage)).reduce((s, l) => s + (l.estimatedValue || 0), 0) * allQuoteWinRate
+
+  // ── Render helpers ────────────────────────────────────────────────────────
+  function DeltaBadge({ cur, prior }: { cur: number; prior: number }) {
+    const d = deltaBadge(cur, prior)
+    if (!d) return null
+    return (
+      <span className={`text-xs font-semibold ml-1 ${d.up ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
+        {d.up ? '↑' : '↓'}{d.pct.toFixed(0)}%
+      </span>
+    )
+  }
+
+  function SectionTitle({ children }: { children: React.ReactNode }) {
+    return <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-3 mt-6 px-1">{children}</h2>
+  }
+
+  function SubChart({ title, children, className = '' }: { title: string; children: React.ReactNode; className?: string }) {
+    return (
+      <div className={`rounded-xl border bg-card p-4 ${className}`}>
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">{title}</h3>
+        {children}
+      </div>
+    )
+  }
+
+  const tickFmt = (v: number, isDollar: boolean) => isDollar ? `$${(v / 1000).toFixed(0)}k` : String(v)
+  const tooltipFmt = (v: number | null, isDollar: boolean) => v === null ? '—' : isDollar ? fmt$(v) : String(v)
+
+  const primaryIsDollar = metricIsDollar(primary)
+  const overlayIsDollar = overlay ? metricIsDollar(overlay) : false
+
+  function renderHeroSeries() {
+    const commonProps = { dataKey: 'primary', fill: '#1B4332', stroke: '#1B4332', yAxisId: 'left', dot: false }
+    if (chartType === 'bar')  return <Bar {...commonProps} radius={[2, 2, 0, 0]} />
+    if (chartType === 'area') return <Area {...commonProps} fillOpacity={0.25} type="monotone" />
+    return <Line {...commonProps} type="monotone" strokeWidth={2} />
+  }
 
   return (
-    <div className="p-4 space-y-5">
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 gap-3">
-        <KpiCard
-          label="Quotes Sent"
-          value={String(nonDraft.length)}
-          sub={`${draft.length} draft${draft.length !== 1 ? 's' : ''} pending`}
-          icon={<TrendingUp className="h-4 w-4" />}
-        />
-        <KpiCard
-          label="Win Rate"
-          value={`${winRate.toFixed(1)}%`}
-          sub={`${accepted.length} accepted · ${declined.length} declined`}
-          positive={winRate >= 50}
-        />
-        <KpiCard
-          label="Closed Value"
-          value={fmt$(closedValue)}
-          sub={`${accepted.length} accepted quote${accepted.length !== 1 ? 's' : ''}`}
-          positive={closedValue > 0}
-        />
-        <KpiCard
-          label="Pipeline Value"
-          value={fmt$(pipelineValue)}
-          sub={`${sent.length} open quote${sent.length !== 1 ? 's' : ''}`}
-          icon={<TrendingUp className="h-4 w-4" />}
-        />
+    <div className="p-4 pb-8 space-y-1">
+
+      {/* ── Date range bar ── */}
+      <div className="flex gap-1.5 flex-wrap pt-1 pb-2">
+        {RANGE_OPTIONS.map(opt => (
+          <button
+            key={String(opt.value)}
+            onClick={() => setRange(opt.value)}
+            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors
+              ${range === opt.value
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-transparent text-muted-foreground border-border hover:border-primary hover:text-primary'}`}
+          >
+            {opt.label}
+          </button>
+        ))}
       </div>
 
-      {/* Monthly Quoted vs Closed */}
-      <div className="rounded-xl border bg-card p-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-          Monthly Quoted vs Closed — {currentYear}
-        </h3>
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={monthlyData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-            <XAxis dataKey="month" tick={{ fontSize: 10 }} />
-            <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-            <Tooltip formatter={(v: number) => fmt$d(v)} />
-            <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-            <Bar dataKey="Quoted" fill="#74C69D" radius={[2, 2, 0, 0]} />
-            <Bar dataKey="Closed" fill="#1B4332" radius={[2, 2, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-
-      {/* Revenue Split KPI cards */}
-      <div className="grid grid-cols-2 gap-3">
-        <KpiCard
-          label="Sub ARR"
-          value={fmt$(subARR)}
-          sub={`${activeSubs.length} active sub${activeSubs.length !== 1 ? 's' : ''}`}
-          positive={subARR > 0}
-        />
-        <KpiCard
-          label="Closed One-Time"
-          value={fmt$(onetimeClosed)}
-          sub="Accepted one-time quotes"
-          positive={onetimeClosed > 0}
-        />
-      </div>
-
-      {/* Revenue Split Pie */}
-      {revenuePie.length > 0 && (
-        <div className="rounded-xl border bg-card p-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-            Revenue Split — Subscription vs One-Time
-          </h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <PieChart>
-              <Pie data={revenuePie} dataKey="value" nameKey="name" cx="40%" cy="50%" outerRadius={80} innerRadius={40}>
-                {revenuePie.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-              </Pie>
-              <Tooltip formatter={(v: number) => fmt$d(v)} />
-              <Legend layout="vertical" align="right" verticalAlign="middle" iconSize={10} wrapperStyle={{ fontSize: 11 }} />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* Quote Status Funnel */}
-      <div className="rounded-xl border bg-card p-4 space-y-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quote Pipeline Funnel</h3>
+      {/* ── KPI Strip ── */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {[
-          { label: 'Draft', count: draft.length, color: 'bg-muted-foreground/40' },
-          { label: 'Sent', count: sent.length, color: 'bg-blue-500' },
-          { label: 'Accepted', count: accepted.length, color: 'bg-green-500' },
-          { label: 'Declined', count: declined.length, color: 'bg-destructive' },
-        ].map(row => (
-          <div key={row.label} className="space-y-0.5">
-            <div className="flex justify-between text-xs">
-              <span className="text-muted-foreground">{row.label}</span>
-              <span className="font-semibold">{row.count}</span>
+          { label: 'Gross Revenue', val: grossRevenue, prior: priorRevenue, dollar: true },
+          { label: 'Total Expenses', val: totalExpenses, prior: priorExpenses, dollar: true },
+          { label: 'Net Profit', val: netProfit, prior: priorNet, dollar: true },
+          { label: 'Quote Win Rate', val: winRate, prior: priorWinRate, dollar: false, suffix: '%', decimals: 1 },
+          { label: 'New Leads', val: leadsInRange.length, prior: priorLeads, dollar: false },
+          { label: 'Jobs Completed', val: jobsInRange.length, prior: priorJobs, dollar: false },
+        ].map(({ label, val, prior, dollar, suffix = '', decimals = 0 }) => (
+          <div key={label} className="rounded-xl border bg-card p-3 space-y-0.5">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
+            <div className="flex items-baseline gap-1 flex-wrap">
+              <span className="text-lg font-bold">{dollar ? fmt$(val) : val.toFixed(decimals) + suffix}</span>
+              <DeltaBadge cur={val} prior={prior} />
             </div>
-            <div className="h-2 bg-muted rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full ${row.color}`}
-                style={{ width: quotes.length > 0 ? `${(row.count / quotes.length) * 100}%` : '0%' }}
-              />
-            </div>
+            <div className="text-[10px] text-muted-foreground">vs prior period</div>
           </div>
         ))}
-        {denominator > 0 && (
-          <p className="text-xs text-muted-foreground pt-1">
-            Conversion rate (accepted/sent+accepted): <strong>{conversionRate.toFixed(1)}%</strong>
-          </p>
-        )}
       </div>
 
-      {/* Growth Trajectory */}
-      <div className="rounded-xl border bg-card p-4 space-y-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Revenue Projection</h3>
-        <div className="grid grid-cols-1 gap-2">
-          <div className="flex justify-between items-center py-2 border-b">
-            <span className="text-sm text-muted-foreground">Projected Annual Sub Revenue</span>
-            <span className="font-bold text-green-700 dark:text-green-400">{fmt$(subARR)}</span>
+      {/* ── Hero Chart ── */}
+      <div className="rounded-xl border bg-card p-4 mt-4">
+        {/* Controls */}
+        <div className="flex flex-wrap gap-2 items-center justify-between mb-3">
+          <div className="flex gap-2 flex-wrap">
+            {/* Primary metric */}
+            <select
+              value={primary}
+              onChange={e => setPrimary(e.target.value as MetricKey)}
+              className="text-xs border rounded-md px-2 py-1 bg-background text-foreground"
+            >
+              {METRIC_OPTIONS.map(k => <option key={k} value={k}>{metricLabel(k)}</option>)}
+            </select>
+            {/* Overlay */}
+            {overlay ? (
+              <div className="flex items-center gap-1">
+                <select
+                  value={overlay}
+                  onChange={e => setOverlay(e.target.value as MetricKey)}
+                  className="text-xs border rounded-md px-2 py-1 bg-background text-foreground"
+                >
+                  {METRIC_OPTIONS.filter(k => k !== primary).map(k => <option key={k} value={k}>{metricLabel(k)}</option>)}
+                </select>
+                <button onClick={() => setOverlay(null)} className="text-muted-foreground hover:text-foreground text-xs border rounded px-1.5 py-1">×</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setOverlay(METRIC_OPTIONS.find(k => k !== primary) || null)}
+                className="text-xs border rounded-md px-2 py-1 bg-background text-muted-foreground hover:text-foreground"
+              >
+                + Overlay
+              </button>
+            )}
           </div>
-          <div className="flex justify-between items-center py-2 border-b">
-            <span className="text-sm text-muted-foreground">Closed One-Time YTD</span>
-            <span className="font-bold">{fmt$(closedYTD)}</span>
+          <div className="flex gap-1.5 items-center">
+            {/* Granularity */}
+            {(['daily','weekly','monthly'] as Granularity[]).map(g => (
+              <button key={g} onClick={() => setGran(g)}
+                className={`text-[10px] font-semibold capitalize px-2 py-1 rounded border transition-colors
+                  ${granularity === g ? 'bg-primary text-primary-foreground border-primary' : 'text-muted-foreground border-border hover:border-primary'}`}
+              >{g.slice(0, 1).toUpperCase() + g.slice(1)}</button>
+            ))}
+            <span className="mx-1 text-border">|</span>
+            {/* Chart type */}
+            {([['bar', '▐▌'], ['line', '∿'], ['area', '▲']] as [AChartType, string][]).map(([t, icon]) => (
+              <button key={t} onClick={() => setChartType(t)}
+                className={`text-xs font-semibold px-2 py-1 rounded border transition-colors
+                  ${chartType === t ? 'bg-primary text-primary-foreground border-primary' : 'text-muted-foreground border-border hover:border-primary'}`}
+              >{icon}</button>
+            ))}
           </div>
-          <div className="flex justify-between items-center py-2">
-            <span className="text-sm font-semibold">Total Revenue Projection</span>
-            <span className="font-bold text-lg">{fmt$(subARR + closedYTD)}</span>
+        </div>
+
+        {/* Chart */}
+        <ResponsiveContainer width="100%" height={220}>
+          <ComposedChart data={heroData} margin={{ top: 4, right: overlay ? 50 : 8, left: -16, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+            <XAxis dataKey="label" tick={{ fontSize: 9 }} />
+            <YAxis yAxisId="left" tick={{ fontSize: 9 }} tickFormatter={v => tickFmt(v, primaryIsDollar)} width={56} />
+            {overlay && <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9 }} tickFormatter={v => tickFmt(v, overlayIsDollar)} width={48} />}
+            <Tooltip
+              formatter={(value: number, name: string) => [
+                tooltipFmt(value, name === 'primary' ? primaryIsDollar : overlayIsDollar),
+                name === 'primary' ? metricLabel(primary) : (overlay ? metricLabel(overlay) : name),
+              ]}
+            />
+            <Legend
+              formatter={(value) => value === 'primary' ? metricLabel(primary) : (overlay ? metricLabel(overlay) : value)}
+              iconSize={10} wrapperStyle={{ fontSize: 11 }}
+            />
+            {renderHeroSeries()}
+            {overlay && <Line dataKey="overlay" stroke="#52B788" yAxisId="right" type="monotone" strokeWidth={2} dot={{ r: 3 }} />}
+          </ComposedChart>
+        </ResponsiveContainer>
+
+        {/* Summary strip */}
+        <div className="flex gap-4 mt-2 text-xs text-muted-foreground flex-wrap">
+          <span>Total: <strong className="text-foreground">{primaryIsDollar ? fmt$(primaryTotal) : Math.round(primaryTotal)}</strong></span>
+          <span>Avg/period: <strong className="text-foreground">{primaryIsDollar ? fmt$(primaryAvg) : Math.round(primaryAvg)}</strong></span>
+          {heroDelta && (
+            <span>vs prior: <strong className={heroDelta.up ? 'text-green-600 dark:text-green-400' : 'text-destructive'}>
+              {heroDelta.up ? '↑' : '↓'}{heroDelta.pct.toFixed(0)}%
+            </strong></span>
+          )}
+        </div>
+      </div>
+
+      {/* ── Section: Revenue & Expenses ── */}
+      <SectionTitle>Revenue &amp; Expenses</SectionTitle>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <SubChart title="Revenue by Category">
+          {revByCat.length === 0
+            ? <p className="text-xs text-muted-foreground">No income transactions in this period.</p>
+            : (
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart layout="vertical" data={revByCat} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
+                  <XAxis type="number" tick={{ fontSize: 9 }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 9 }} width={110} />
+                  <Tooltip formatter={(v: number) => fmt$d(v)} />
+                  <Bar dataKey="value" radius={[0, 3, 3, 0]}>
+                    {revByCat.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+        </SubChart>
+
+        <SubChart title="Expense Breakdown">
+          {expByCat.length === 0
+            ? <p className="text-xs text-muted-foreground">No expense transactions in this period.</p>
+            : (
+              <ResponsiveContainer width="100%" height={160}>
+                <PieChart>
+                  <Pie data={expByCat} dataKey="value" nameKey="name" cx="40%" cy="50%" outerRadius={65} innerRadius={32}>
+                    {expByCat.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                  </Pie>
+                  <Tooltip formatter={(v: number) => fmt$d(v)} />
+                  <Legend layout="vertical" align="right" verticalAlign="middle" iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+        </SubChart>
+      </div>
+
+      {/* ── Section: Quote & Lead Pipeline ── */}
+      <SectionTitle>Quote &amp; Lead Pipeline</SectionTitle>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <SubChart title="Quote Pipeline">
+          <div className="space-y-2">
+            {quotePipeline.map(row => (
+              <div key={row.label}>
+                <div className="flex justify-between text-xs mb-0.5">
+                  <span className="text-muted-foreground">{row.label}</span>
+                  <span className="font-semibold">{row.count}</span>
+                </div>
+                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                  <div className="h-full rounded-full" style={{
+                    width: row.total > 0 ? `${(row.count / row.total) * 100}%` : '0%',
+                    background: row.color,
+                  }} />
+                </div>
+              </div>
+            ))}
+            {winDenom > 0 && <p className="text-xs text-muted-foreground pt-1">Win rate (period): <strong>{winRate.toFixed(1)}%</strong></p>}
+          </div>
+        </SubChart>
+
+        <SubChart title="Lead Stage Distribution">
+          {leadsByStage.length === 0
+            ? <p className="text-xs text-muted-foreground">No leads yet.</p>
+            : (
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart layout="vertical" data={leadsByStage} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
+                  <XAxis type="number" tick={{ fontSize: 9 }} allowDecimals={false} />
+                  <YAxis type="category" dataKey="stage" tick={{ fontSize: 9 }} width={100} />
+                  <Tooltip />
+                  <Bar dataKey="count" fill="#1B4332" radius={[0, 3, 3, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+        </SubChart>
+
+        <SubChart title="Win Rate Over Time (6M Weekly)">
+          {winRateOverTime.every(d => d['Win Rate'] === null)
+            ? <p className="text-xs text-muted-foreground">Not enough quote data.</p>
+            : (
+              <ResponsiveContainer width="100%" height={160}>
+                <LineChart data={winRateOverTime} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                  <XAxis dataKey="label" tick={{ fontSize: 9 }} />
+                  <YAxis tick={{ fontSize: 9 }} domain={[0, 100]} tickFormatter={v => `${v}%`} />
+                  <Tooltip formatter={(v: number) => `${v}%`} />
+                  <Line dataKey="Win Rate" stroke="#52B788" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+        </SubChart>
+
+        <SubChart title="Revenue by Service Type">
+          {revPerService.length === 0
+            ? <p className="text-xs text-muted-foreground">No accepted quotes with line items.</p>
+            : (
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart layout="vertical" data={revPerService} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
+                  <XAxis type="number" tick={{ fontSize: 9 }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 9 }} width={110} />
+                  <Tooltip formatter={(v: number) => fmt$d(v)} />
+                  <Bar dataKey="value" fill="#52B788" radius={[0, 3, 3, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+        </SubChart>
+      </div>
+
+      {/* ── Section: Business Insights ── */}
+      <SectionTitle>Business Insights</SectionTitle>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <KpiCard label="Avg Quote-to-Sign" value={avgQuoteToSign !== null ? `${avgQuoteToSign.toFixed(1)} days` : '—'} sub={`${signedQuotes.length} signed quotes`} positive={avgQuoteToSign !== null && avgQuoteToSign <= 7} />
+        <KpiCard label="Avg Quote Value" value={avgQuoteValue !== null ? fmt$(avgQuoteValue) : '—'} sub={`${accepted.length} accepted`} positive={avgQuoteValue !== null && avgQuoteValue > 0} />
+        <KpiCard label="Avg Send Lag" value={avgSendLag !== null ? `${avgSendLag.toFixed(1)} days` : '—'} sub="Quote created → sent" />
+        <KpiCard label="Recurring Split" value={`${recurringPct.toFixed(0)}%`} sub="Of accepted revenue" positive={recurringPct > 0} />
+        <KpiCard label="Active MRR" value={fmt$(activeMRR)} sub={`${activeSubs.length} active subs`} positive={activeMRR > 0} />
+        <KpiCard label="Est. Annual Rev." value={fmt$(subARR + closedYTD)} sub="ARR + closed one-time YTD" positive={subARR + closedYTD > 0} />
+        <KpiCard label="Lead→Customer Rate" value={`${leadToCustomerRate.toFixed(1)}%`} sub={`${finishedPaidLeads} of ${leads.length} leads`} positive={leadToCustomerRate > 20} />
+        <KpiCard label="Avg Lead Age" value={avgLeadAge !== null ? `${avgLeadAge.toFixed(0)} days` : '—'} sub={`${openLeads.length} open leads`} />
+      </div>
+
+      {/* ── Section: Pipeline Intelligence ── */}
+      <SectionTitle>Pipeline Intelligence</SectionTitle>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <KpiCard label="Open Pipeline" value={fmt$(openPipelineValue)} sub="Quoted + follow-up leads" positive={openPipelineValue > 0} />
+        <KpiCard label="Pipeline Forecast" value={fmt$(pipelineForecast)} sub={`×${(allQuoteWinRate * 100).toFixed(0)}% win rate`} positive={pipelineForecast > 0} />
+        <KpiCard label="Total Win Rate" value={`${(allQuoteWinRate * 100).toFixed(1)}%`} sub={`${accepted.length} accepted all-time`} positive={allQuoteWinRate >= 0.5} />
+        <KpiCard label="Open Leads" value={String(openLeads.length)} sub={`${leads.filter(l => l.stage === 'new').length} new`} />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+        <SubChart title="Lead Stage Funnel">
+          {stageFunnel.length === 0
+            ? <p className="text-xs text-muted-foreground">No leads yet.</p>
+            : (
+              <div className="space-y-1.5">
+                {stageFunnel.map(row => (
+                  <div key={row.stage}>
+                    <div className="flex justify-between text-xs mb-0.5">
+                      <span className="text-muted-foreground">{row.stage}</span>
+                      <span className="font-semibold">{row.count} <span className="text-muted-foreground font-normal">({leads.length > 0 ? Math.round((row.count / leads.length) * 100) : 0}%)</span></span>
+                    </div>
+                    <div className="h-1.5 bg-muted rounded-full overflow-hidden">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${leads.length > 0 ? (row.count / leads.length) * 100 : 0}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+        </SubChart>
+
+        <SubChart title="Lead Velocity (8 Weeks)">
+          {leadVelocity.every(d => d['New Leads'] === 0)
+            ? <p className="text-xs text-muted-foreground">No recent leads.</p>
+            : (
+              <ResponsiveContainer width="100%" height={160}>
+                <AreaChart data={leadVelocity} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                  <XAxis dataKey="label" tick={{ fontSize: 9 }} />
+                  <YAxis tick={{ fontSize: 9 }} allowDecimals={false} />
+                  <Tooltip />
+                  <Area dataKey="New Leads" fill="#1B4332" stroke="#1B4332" fillOpacity={0.2} type="monotone" />
+                </AreaChart>
+              </ResponsiveContainer>
+            )}
+        </SubChart>
+
+        <SubChart title="Quote-to-Sign Trend (6M)">
+          {signTrend.every(d => d['Avg Days to Sign'] === null)
+            ? <p className="text-xs text-muted-foreground">No signed quotes yet.</p>
+            : (
+              <ResponsiveContainer width="100%" height={160}>
+                <LineChart data={signTrend} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                  <XAxis dataKey="label" tick={{ fontSize: 9 }} />
+                  <YAxis tick={{ fontSize: 9 }} />
+                  <Tooltip formatter={(v: number) => `${v} days`} />
+                  <Line dataKey="Avg Days to Sign" stroke="#52B788" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
+        </SubChart>
+
+        <SubChart title="Revenue Split">
+          {resByType.length === 0
+            ? <p className="text-xs text-muted-foreground">No accepted quotes.</p>
+            : (
+              <ResponsiveContainer width="100%" height={160}>
+                <PieChart>
+                  <Pie data={resByType} dataKey="value" nameKey="name" cx="40%" cy="50%" outerRadius={65} innerRadius={32}>
+                    <Cell fill="#1B4332" />
+                    <Cell fill="#52B788" />
+                  </Pie>
+                  <Tooltip formatter={(v: number) => fmt$d(v)} />
+                  <Legend layout="vertical" align="right" verticalAlign="middle" iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
+        </SubChart>
+      </div>
+
+      {/* ── Section: Customer Intelligence ── */}
+      <SectionTitle>Customer Intelligence</SectionTitle>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        <KpiCard label="Repeat Customer Rate" value={`${repeatCustomerRate.toFixed(0)}%`} sub="Contacts with ≥2 accepted quotes" positive={repeatCustomerRate > 0} />
+        <KpiCard label="Total Customers" value={String(new Set(accepted.map(q => q.contactId || q.customerName)).size)} sub="With accepted quotes" positive />
+        <KpiCard label="Avg CLV" value={topCustomers.length > 0 ? fmt$(topCustomers.reduce((s, c) => s + c.value, 0) / topCustomers.length) : '—'} sub="Avg revenue per customer" positive />
+        <KpiCard label="Churn Risk Subs" value={String(churnRiskSubs.length)} sub={`Paused >30 days · ${fmt$(churnRiskMRR)}/mo at risk`} positive={churnRiskSubs.length === 0} />
+        <KpiCard label="At-Risk MRR" value={fmt$(churnRiskMRR)} sub="MRR from paused subs" positive={churnRiskMRR === 0} />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+        <SubChart title="Top 10 Customers by Revenue">
+          {topCustomers.length === 0
+            ? <p className="text-xs text-muted-foreground">No accepted quotes yet.</p>
+            : (
+              <ResponsiveContainer width="100%" height={Math.min(topCustomers.length * 24 + 20, 220)}>
+                <BarChart layout="vertical" data={topCustomers} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
+                  <XAxis type="number" tick={{ fontSize: 9 }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 9 }} width={120} />
+                  <Tooltip formatter={(v: number) => fmt$d(v)} />
+                  <Bar dataKey="value" fill="#1B4332" radius={[0, 3, 3, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+        </SubChart>
+
+        <SubChart title="CLV Distribution">
+          {clvBuckets.every(b => b.count === 0)
+            ? <p className="text-xs text-muted-foreground">No accepted quotes yet.</p>
+            : (
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart data={clvBuckets} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                  <XAxis dataKey="range" tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 9 }} allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="count" fill="#52B788" radius={[2, 2, 0, 0]} label={{ position: 'top', fontSize: 10 }} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+        </SubChart>
+      </div>
+
+      {/* ── Section: Revenue Forecasting ── */}
+      <SectionTitle>Revenue Forecasting</SectionTitle>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <KpiCard label="Active MRR" value={fmt$(activeMRR)} sub={`${activeSubs.length} active subs`} positive={activeMRR > 0} />
+        <KpiCard label="Avg Monthly One-Time" value={fmt$(last3MonthsOneTime)} sub="Based on last 3 months" positive={last3MonthsOneTime > 0} />
+        <KpiCard label="Next-Month Forecast" value={fmt$(nextMonthForecast)} sub="MRR + avg one-time" positive={nextMonthForecast > 0} icon={<TrendingUp className="h-4 w-4" />} />
+        <KpiCard label="Pipeline Forecast" value={fmt$(pipelineForecast)} sub={`Open quotes × ${(allQuoteWinRate * 100).toFixed(0)}% win rate`} positive={pipelineForecast > 0} />
+      </div>
+      <div className="rounded-xl border bg-card p-4 mt-3">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Annual Revenue Projection</h3>
+        <div className="space-y-2">
+          {[
+            { label: 'Projected Sub Revenue (ARR)', value: subARR, color: 'text-green-700 dark:text-green-400' },
+            { label: 'Closed One-Time YTD', value: closedYTD, color: '' },
+            { label: 'Projected Next-Month × 12', value: nextMonthForecast * 12, color: 'text-blue-600 dark:text-blue-400' },
+          ].map(row => (
+            <div key={row.label} className="flex justify-between items-center py-1.5 border-b last:border-0">
+              <span className="text-sm text-muted-foreground">{row.label}</span>
+              <span className={`font-bold ${row.color}`}>{fmt$(row.value)}</span>
+            </div>
+          ))}
+          <div className="flex justify-between items-center pt-2">
+            <span className="text-sm font-semibold">Optimistic Annual Estimate</span>
+            <span className="font-bold text-lg">{fmt$(subARR + closedYTD + nextMonthForecast * 12)}</span>
           </div>
         </div>
       </div>
+
     </div>
   )
 }
@@ -1950,7 +2603,7 @@ export default function Finance() {
               { value: 'balance', label: 'Balance Sheet' },
               { value: 'transactions', label: 'Transactions' },
               { value: 'import', label: 'CSV Import' },
-              { value: 'sales', label: 'Sales' },
+              { value: 'analytics', label: 'Analytics' },
             ].map(t => (
               <TabsTrigger key={t.value} value={t.value}
                 className="shrink-0 text-xs px-3 h-9 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
@@ -1965,7 +2618,7 @@ export default function Finance() {
         <TabsContent value="balance" className="mt-0"><BalanceSheetTab snapshots={snapshots} period={period} onRefresh={refresh} /></TabsContent>
         <TabsContent value="transactions" className="mt-0"><TransactionsTab transactions={transactions} period={period} onRefresh={refresh} /></TabsContent>
         <TabsContent value="import" className="mt-0"><CsvImportTab transactions={transactions} onRefresh={refresh} /></TabsContent>
-        <TabsContent value="sales" className="mt-0"><SalesTab /></TabsContent>
+        <TabsContent value="analytics" className="mt-0"><AnalyticsTab transactions={transactions} /></TabsContent>
       </Tabs>
     </div>
   )
