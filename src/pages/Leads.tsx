@@ -712,10 +712,16 @@ function LeadDetailSheet({
               variant="outline"
               className="w-full gap-2 border-primary/40 text-primary hover:bg-primary/5"
               onClick={() => {
-                // Navigate to calculator with contactId in URL — Calculator reads it
-                // from the hash params and looks up the contact from the RQ cache.
-                const cId = lead?.contactId
-                navigate(cId ? `/calculator?contactId=${cId}` : '/calculator')
+                // Encode contact fields directly into URL params so Calculator can
+                // read them synchronously — no async fetch, no race condition.
+                const p = new URLSearchParams()
+                if (lead?.contactId) p.set('contactId', lead.contactId)
+                if (contactForPrefill?.name)         p.set('name',         contactForPrefill.name)
+                if (contactForPrefill?.phone)        p.set('phone',        contactForPrefill.phone)
+                if (contactForPrefill?.email)        p.set('email',        contactForPrefill.email)
+                if (contactForPrefill?.businessName) p.set('businessName', contactForPrefill.businessName)
+                const qs = p.toString()
+                navigate(qs ? `/calculator?${qs}` : '/calculator')
                 onClose()
               }}
             >

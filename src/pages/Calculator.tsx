@@ -1035,31 +1035,38 @@ export default function Calculator() {
     queryFn: () => apiGet<CompanySettings>('/settings'),
   })
 
-  // Read contactId from hash URL param (e.g. /#/calculator?contactId=abc)
-  // Wouter hash routing puts params after "?" in the hash fragment.
-  const contactIdFromUrl = useMemo(() => {
-    const hash = window.location.hash          // e.g. "#/calculator?contactId=abc"
-    const qStart = hash.indexOf('?')
-    if (qStart < 0) return null
-    return new URLSearchParams(hash.slice(qStart + 1)).get('contactId')
-  }, [])
-
-  // Read contacts from React Query cache — Leads page already fetched them,
-  // so this is a cache hit with no network request.
-  const { data: allContacts, isLoading: contactsLoading } = useQuery<Contact[]>({
-    queryKey: ['/contacts'],
-    queryFn: () => apiGet<Contact[]>('/contacts'),
-    staleTime: 30_000,
-    enabled: !!contactIdFromUrl,
-  })
-
-  // Resolved prefill contact: URL param wins, then fall back to context (legacy).
+  // Parse contact fields directly from URL params — synchronous, no async fetch needed.
+  // Leads encodes name/phone/email/businessName/contactId into the URL when navigating here.
   const resolvedPrefillContact = useMemo<Contact | null>(() => {
-    if (contactIdFromUrl && allContacts) {
-      return allContacts.find(c => c.id === contactIdFromUrl) ?? null
+    const hash = window.location.hash   // e.g. "#/calculator?contactId=abc&name=John+Smith"
+    const qStart = hash.indexOf('?')
+    if (qStart >= 0) {
+      const p = new URLSearchParams(hash.slice(qStart + 1))
+      const name = p.get('name')
+      const contactId = p.get('contactId')
+      if (name || contactId) {
+        // Construct a minimal Contact shape from URL params — no network request needed
+        return {
+          id:           contactId ?? '',
+          name:         name ?? '',
+          phone:        p.get('phone'),
+          email:        p.get('email'),
+          businessName: p.get('businessName'),
+          type:         'residential',
+          source:       null,
+          notes:        null,
+          tags:         [],
+          customFields: {},
+          leadScore:    0,
+          referredBy:   null,
+          nextFollowup: null,
+          createdAt:    '',
+        } as Contact
+      }
     }
+    // Fall back to context (legacy path — direct navigation to /calculator without params)
     return prefillContact
-  }, [contactIdFromUrl, allContacts, prefillContact])
+  }, [prefillContact]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [customerType, setCustomerType] = useState<CustomerType>('residential')
   const [serviceMode, setServiceMode] = useState<ServiceMode>('onetime')
@@ -1109,13 +1116,8 @@ export default function Calculator() {
   })
 
   const handleCreateQuote = () => {
-    // If there's a contactId in the URL but contacts are still loading, wait.
-    if (contactIdFromUrl && contactsLoading) {
-      toast({ title: 'Loading contact info…', description: 'Please try again in a moment.' })
-      return
-    }
-    // If we have a resolved prefill contact (from URL param or context), skip the form
-    // and create the quote directly, then return to the lead pipeline.
+    // If we have a prefill contact (from URL params or context), skip the customer
+    // info form and create the quote directly, then return to the lead pipeline.
     if (resolvedPrefillContact) {
       setCartOpen(false)
       directCreateMutation.mutate(resolvedPrefillContact)
