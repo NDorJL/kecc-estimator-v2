@@ -59,6 +59,7 @@ export const handler: Handler = async (event) => {
           source: body.source ?? null,
           service_interest: body.serviceInterest ?? null,
           estimated_value: body.estimatedValue ?? null,
+          contractor_cost: body.contractorCost ?? null,
           quote_id: body.quoteId ?? null,
           lost_reason: body.lostReason ?? null,
           notes: body.notes ?? null,
@@ -74,13 +75,14 @@ export const handler: Handler = async (event) => {
     if (method === 'PATCH' && id) {
       const body = JSON.parse(event.body ?? '{}')
       const updates: Record<string, unknown> = {}
-      if (body.stage !== undefined)           updates.stage = body.stage
-      if (body.notes !== undefined)           updates.notes = body.notes
-      if (body.lostReason !== undefined)      updates.lost_reason = body.lostReason
-      if (body.estimatedValue !== undefined)  updates.estimated_value = body.estimatedValue
-      if (body.serviceInterest !== undefined) updates.service_interest = body.serviceInterest
-      if (body.quoteId !== undefined)         updates.quote_id = body.quoteId
-      if (body.contactId !== undefined)       updates.contact_id = body.contactId
+      if (body.stage !== undefined)            updates.stage = body.stage
+      if (body.notes !== undefined)            updates.notes = body.notes
+      if (body.lostReason !== undefined)       updates.lost_reason = body.lostReason
+      if (body.estimatedValue !== undefined)   updates.estimated_value = body.estimatedValue
+      if (body.contractorCost !== undefined)   updates.contractor_cost = body.contractorCost
+      if (body.serviceInterest !== undefined)  updates.service_interest = body.serviceInterest
+      if (body.quoteId !== undefined)          updates.quote_id = body.quoteId
+      if (body.contactId !== undefined)        updates.contact_id = body.contactId
       // Stamp contacted_at whenever a lead is manually moved to 'contacted'
       if (body.stage === 'contacted')         updates.contacted_at = new Date().toISOString()
 

@@ -459,6 +459,7 @@ function LeadDetailSheet({
   const [lostReason, setLostReason] = useState(lead?.lostReason ?? '')
   const [serviceInterest, setServiceInterest] = useState(lead?.serviceInterest ?? '')
   const [estimatedValue, setEstimatedValue] = useState(lead?.estimatedValue?.toString() ?? '')
+  const [contractorCost, setContractorCost] = useState(lead?.contractorCost?.toString() ?? '')
   const [showSchedule, setShowSchedule] = useState(false)
   // Inline quote editor — when true, renders QuoteDetail inside this sheet
   const [editingQuote, setEditingQuote] = useState(false)
@@ -472,6 +473,7 @@ function LeadDetailSheet({
     setLostReason(lead?.lostReason ?? '')
     setServiceInterest(lead?.serviceInterest ?? '')
     setEstimatedValue(lead?.estimatedValue?.toString() ?? '')
+    setContractorCost(lead?.contractorCost?.toString() ?? '')
     setEditingQuote(false)
     setLocalQuote(null)
   }, [lead?.id])
@@ -676,6 +678,34 @@ function LeadDetailSheet({
                 className="mt-1 h-9 text-sm"
               />
             </div>
+            <div>
+              <Label className="text-xs">Subcontractor Cost ($)</Label>
+              <Input
+                type="number"
+                value={contractorCost}
+                onChange={e => setContractorCost(e.target.value)}
+                placeholder="0"
+                className="mt-1 h-9 text-sm"
+              />
+            </div>
+            {/* Profit margin preview — only shown when both values are filled */}
+            {estimatedValue && contractorCost && (
+              <div className="flex flex-col justify-end pb-0.5">
+                <Label className="text-xs text-muted-foreground">Est. Profit</Label>
+                {(() => {
+                  const rev = parseFloat(estimatedValue) || 0
+                  const cost = parseFloat(contractorCost) || 0
+                  const profit = rev - cost
+                  const margin = rev > 0 ? (profit / rev) * 100 : 0
+                  return (
+                    <p className={`text-sm font-bold mt-1 ${profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
+                      {profit >= 0 ? '+' : ''}{fmtMoney(profit)}
+                      <span className="text-xs font-normal text-muted-foreground ml-1">({margin.toFixed(0)}%)</span>
+                    </p>
+                  )
+                })()}
+              </div>
+            )}
           </div>
 
           {/* ── Stage ─────────────────────────────────────────────────────── */}
@@ -901,6 +931,7 @@ function LeadDetailSheet({
                 lostReason: lostReason || null,
                 serviceInterest: serviceInterest.trim() || null,
                 estimatedValue: estimatedValue ? parseFloat(estimatedValue) : null,
+                contractorCost: contractorCost ? parseFloat(contractorCost) : null,
               })}
             >
               {updateMutation.isPending ? 'Saving…' : 'Save Changes'}

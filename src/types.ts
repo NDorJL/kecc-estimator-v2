@@ -257,6 +257,7 @@ export interface Lead {
   source: string | null;
   serviceInterest: string | null;
   estimatedValue: number | null;
+  contractorCost: number | null;
   quoteId: string | null;
   lostReason: string | null;
   notes: string | null;
@@ -421,6 +422,7 @@ export function rowToLead(r: any): Lead {
     source: r.source,
     serviceInterest: r.service_interest,
     estimatedValue: r.estimated_value !== null ? Number(r.estimated_value) : null,
+    contractorCost: r.contractor_cost !== null && r.contractor_cost !== undefined ? Number(r.contractor_cost) : null,
     quoteId: r.quote_id,
     lostReason: r.lost_reason,
     notes: r.notes,
