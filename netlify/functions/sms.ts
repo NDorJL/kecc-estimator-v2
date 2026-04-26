@@ -158,6 +158,74 @@ export const handler: Handler = async (event) => {
       return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true }) }
     }
 
+    // ── Reschedule notification ────────────────────────────────────────────
+    if (action === 'reschedule-notification') {
+      const {
+        to, customerName, serviceName,
+        oldDate, newDate, newWindow,
+        reasonType, reasonText, contactId,
+      } = body
+      if (!to || !customerName || !newDate) {
+        return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'to, customerName, newDate required' }) }
+      }
+
+      const firstName = (customerName as string).split(' ')[0]
+
+      // Format a date string 'YYYY-MM-DD' → 'Monday, April 28'
+      function fmtDate(d: string): string {
+        const [yr, mo, dy] = (d as string).split('-').map(Number)
+        const obj = new Date(yr, mo - 1, dy)
+        return obj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+      }
+
+      const windowLabels: Record<string, string> = {
+        morning: 'in the morning (8 am–12 pm)',
+        afternoon: 'in the afternoon (12 pm–5 pm)',
+        anytime: '',
+      }
+      const windowStr = newWindow && windowLabels[newWindow] ? ` ${windowLabels[newWindow]}` : ''
+      const newDateFmt = fmtDate(newDate)
+      const oldDateFmt = oldDate ? fmtDate(oldDate) : null
+      const svc = serviceName ?? 'service appointment'
+
+      let message = ''
+      if (reasonType === 'weather') {
+        message =
+          `Hi ${firstName}! Due to weather conditions, we need to reschedule your ${svc}` +
+          (oldDateFmt ? ` originally set for ${oldDateFmt}` : '') + `. ` +
+          `Your new appointment is ${newDateFmt}${windowStr}. ` +
+          `We apologize for any inconvenience and appreciate your understanding! ` +
+          `Call or text us with any questions. — ${companyName}\n\nReply STOP to opt out.`
+      } else if (reasonType === 'customer_request') {
+        message =
+          `Hi ${firstName}! As requested, your ${svc} has been rescheduled to ${newDateFmt}${windowStr}. ` +
+          `Looking forward to seeing you then! Call or text us with any questions. ` +
+          `— ${companyName}\n\nReply STOP to opt out.`
+      } else {
+        // 'other' — use custom reason text
+        const reason = (reasonText as string)?.trim() || 'an unforeseen circumstance'
+        message =
+          `Hi ${firstName}! We need to reschedule your ${svc}` +
+          (oldDateFmt ? ` originally set for ${oldDateFmt}` : '') + `. ` +
+          `Reason: ${reason}. ` +
+          `Your new appointment is ${newDateFmt}${windowStr}. ` +
+          `Call or text us with any questions. — ${companyName}\n\nReply STOP to opt out.`
+      }
+
+      await sendQuoSms(apiKey, fromNumber, to, message)
+
+      if (contactId) {
+        await supabase.from('activities').insert({
+          contact_id: contactId,
+          type: 'sms_out',
+          summary: `Reschedule notification sent — new date: ${newDate}${newWindow ? ' (' + newWindow + ')' : ''}`,
+          metadata: { to, oldDate, newDate, newWindow, reasonType, reasonText },
+        }).catch(() => {})
+      }
+
+      return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true, message }) }
+    }
+
     return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'Unknown action' }) }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message

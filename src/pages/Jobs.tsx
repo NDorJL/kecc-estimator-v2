@@ -14,9 +14,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/hooks/use-toast'
 import {
-  CalendarDays, User, MapPin, Phone, Mail, Wrench,
+  CalendarDays, MapPin, Phone, Mail, Wrench,
   ChevronRight, Clock, AlertCircle, CheckCircle2, RefreshCw, Calendar,
+  CloudRain, UserCheck, FileText,
 } from 'lucide-react'
+
+type RescheduleReason = 'weather' | 'customer_request' | 'other'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -79,13 +82,18 @@ function JobDetailSheet({
     altEmail: job?.propertyInfo?.altEmail ?? '',
   })
 
+  // Track original scheduled date to detect rescheduling
+  const [originalScheduledDate, setOriginalScheduledDate] = useState<string>(job?.scheduledDate ?? '')
+
   // Re-sync form when job changes
   const [lastJobId, setLastJobId] = useState<string | null>(null)
   if (job && job.id !== lastJobId) {
     setLastJobId(job.id)
+    const newDate = job.scheduledDate ?? ''
+    setOriginalScheduledDate(newDate)
     setForm({
       status: job.status,
-      scheduledDate: job.scheduledDate ?? '',
+      scheduledDate: newDate,
       contractorId: job.contractorId ?? '',
       notes: job.notes ?? '',
       internalNotes: job.internalNotes ?? '',
@@ -98,7 +106,12 @@ function JobDetailSheet({
     })
   }
 
-  const saveMutation = useMutation({
+  // Reschedule reason dialog state
+  const [showRescheduleDialog, setShowRescheduleDialog] = useState(false)
+  const [rescheduleReason, setRescheduleReason] = useState<RescheduleReason>('weather')
+  const [rescheduleText, setRescheduleText] = useState('')
+
+  const doSaveJob = useMutation({
     mutationFn: () => apiRequest('PATCH', `/jobs/${job!.id}`, {
       status: form.status,
       scheduledDate: form.scheduledDate || null,
@@ -122,11 +135,67 @@ function JobDetailSheet({
     onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
   })
 
+  const sendSmsMutation = useMutation({
+    mutationFn: (payload: {
+      to: string
+      customerName: string
+      serviceName: string
+      oldDate: string
+      newDate: string
+      newWindow: string | null
+      reasonType: RescheduleReason
+      reasonText: string
+      contactId: string | null
+    }) => apiRequest('POST', '/sms', { action: 'reschedule-notification', ...payload }),
+  })
+
+  function handleSave() {
+    if (!job) return
+    const dateChanged = form.scheduledDate && form.scheduledDate !== originalScheduledDate && originalScheduledDate !== ''
+    const isOneTime = job.jobType === 'one_time'
+    const hasPhone = !!job.customerPhone
+
+    if (dateChanged && isOneTime && hasPhone) {
+      // Show reason picker before saving
+      setRescheduleReason('weather')
+      setRescheduleText('')
+      setShowRescheduleDialog(true)
+    } else {
+      // No reschedule SMS needed — just save
+      doSaveJob.mutate()
+    }
+  }
+
+  async function confirmReschedule() {
+    if (!job) return
+    setShowRescheduleDialog(false)
+
+    try {
+      await sendSmsMutation.mutateAsync({
+        to: job.customerPhone!,
+        customerName: job.customerName ?? 'Customer',
+        serviceName: job.serviceName,
+        oldDate: originalScheduledDate,
+        newDate: form.scheduledDate,
+        newWindow: null,
+        reasonType: rescheduleReason,
+        reasonText: rescheduleText,
+        contactId: job.contactId ?? null,
+      })
+      toast({ title: 'Reschedule notification sent', description: `SMS sent to ${job.customerPhone}` })
+    } catch {
+      toast({ title: 'SMS failed', description: 'Could not send reschedule notification, but the job will still be saved.', variant: 'destructive' })
+    }
+
+    doSaveJob.mutate()
+  }
+
   if (!job) return null
 
   const contractor = contractors.find(c => c.id === form.contractorId)
 
   return (
+    <>
     <Sheet open={open} onOpenChange={onClose}>
       <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[92dvh] overflow-y-auto">
         <SheetHeader className="mb-4">
@@ -264,12 +333,108 @@ function JobDetailSheet({
             <Textarea className="mt-1" rows={2} value={form.internalNotes} onChange={e => setForm(f => ({ ...f, internalNotes: e.target.value }))} placeholder="Internal only — pricing, flags, history…" />
           </div>
 
-          <Button className="w-full" disabled={saveMutation.isPending} onClick={() => saveMutation.mutate()}>
-            {saveMutation.isPending ? 'Saving…' : 'Save Job'}
+          <Button
+            className="w-full"
+            disabled={doSaveJob.isPending || sendSmsMutation.isPending}
+            onClick={handleSave}
+          >
+            {doSaveJob.isPending || sendSmsMutation.isPending ? 'Saving…' : 'Save Job'}
           </Button>
         </div>
       </SheetContent>
     </Sheet>
+
+    {/* ── Reschedule Reason Dialog ─────────────────────────────────────── */}
+    <Sheet open={showRescheduleDialog} onOpenChange={v => { if (!v) setShowRescheduleDialog(false) }}>
+      <SheetContent side="bottom" className="rounded-t-2xl pb-safe">
+        <SheetHeader className="mb-4">
+          <SheetTitle className="text-base">Notify Customer of Reschedule</SheetTitle>
+          <p className="text-sm text-muted-foreground">
+            An SMS will be sent to {job?.customerPhone} about the new date.
+          </p>
+        </SheetHeader>
+
+        <div className="space-y-4">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Reason for rescheduling</p>
+
+          <div className="space-y-2">
+            {/* Weather */}
+            <button
+              onClick={() => setRescheduleReason('weather')}
+              className={`w-full flex items-center gap-3 rounded-xl border p-3 text-left transition-colors ${
+                rescheduleReason === 'weather'
+                  ? 'border-primary bg-primary/5'
+                  : 'hover:bg-muted/40'
+              }`}
+            >
+              <CloudRain className={`h-5 w-5 shrink-0 ${rescheduleReason === 'weather' ? 'text-primary' : 'text-muted-foreground'}`} />
+              <div>
+                <p className="text-sm font-medium">Weather Conditions</p>
+                <p className="text-xs text-muted-foreground">Rain, wind, or unsafe conditions</p>
+              </div>
+            </button>
+
+            {/* Customer Request */}
+            <button
+              onClick={() => setRescheduleReason('customer_request')}
+              className={`w-full flex items-center gap-3 rounded-xl border p-3 text-left transition-colors ${
+                rescheduleReason === 'customer_request'
+                  ? 'border-primary bg-primary/5'
+                  : 'hover:bg-muted/40'
+              }`}
+            >
+              <UserCheck className={`h-5 w-5 shrink-0 ${rescheduleReason === 'customer_request' ? 'text-primary' : 'text-muted-foreground'}`} />
+              <div>
+                <p className="text-sm font-medium">Customer Request</p>
+                <p className="text-xs text-muted-foreground">Customer asked to move the appointment</p>
+              </div>
+            </button>
+
+            {/* Other */}
+            <button
+              onClick={() => setRescheduleReason('other')}
+              className={`w-full flex items-center gap-3 rounded-xl border p-3 text-left transition-colors ${
+                rescheduleReason === 'other'
+                  ? 'border-primary bg-primary/5'
+                  : 'hover:bg-muted/40'
+              }`}
+            >
+              <FileText className={`h-5 w-5 shrink-0 ${rescheduleReason === 'other' ? 'text-primary' : 'text-muted-foreground'}`} />
+              <div>
+                <p className="text-sm font-medium">Other Reason</p>
+                <p className="text-xs text-muted-foreground">Specify a custom reason below</p>
+              </div>
+            </button>
+          </div>
+
+          {rescheduleReason === 'other' && (
+            <div>
+              <Label className="text-xs">Custom Reason</Label>
+              <Textarea
+                className="mt-1"
+                rows={2}
+                placeholder="e.g. Equipment issue, crew unavailable…"
+                value={rescheduleText}
+                onChange={e => setRescheduleText(e.target.value)}
+              />
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <Button variant="outline" onClick={() => { setShowRescheduleDialog(false); doSaveJob.mutate() }}>
+              Skip SMS · Just Save
+            </Button>
+            <Button
+              onClick={confirmReschedule}
+              disabled={rescheduleReason === 'other' && !rescheduleText.trim()}
+            >
+              Send &amp; Save
+            </Button>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+    </>
   )
 }
 
