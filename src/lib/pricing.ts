@@ -892,6 +892,56 @@ export const services: ServiceDefinition[] = [
   // ──────────────────────────────────────────
   // LANDSCAPING / MULCH
   // ──────────────────────────────────────────
+  // ──────────────────────────────────────────
+  // GENERAL GROUNDS KEEPING
+  // ──────────────────────────────────────────
+  {
+    id: "grounds_keeping_res",
+    name: "General Grounds Keeping (Residential)",
+    category: "General Grounds Keeping",
+    subcategory: "Residential",
+    serviceType: "residential",
+    tags: ["onetime", "standalonesub", "subaddin"],
+    pricingModel: "flat",
+    unitLabel: "per visit",
+    tiers: [
+      { label: "Per Visit", min: 0, price: 0 },
+    ],
+    frequencies: [
+      FREQ_ONETIME,
+      { ...FREQ_WEEKLY,    discountPct: 12 },
+      { ...FREQ_BIWEEKLY,  discountPct: 10 },
+      { ...FREQ_MONTHLY,   discountPct: 8  },
+      { ...FREQ_BIMONTHLY, discountPct: 6  },
+      { ...FREQ_QUARTERLY, discountPct: 5  },
+    ],
+    notes: "General grounds keeping — set per-visit price in the Price Book. Covers any combination of blowing, light debris pickup, edging touch-ups, and general property tidying not covered under full lawn care. Customize scope per customer agreement.",
+    subCostPct: 0.75,
+  },
+  {
+    id: "grounds_keeping_comm",
+    name: "General Grounds Keeping (Commercial)",
+    category: "General Grounds Keeping",
+    subcategory: "Commercial",
+    serviceType: "commercial",
+    tags: ["onetime", "standalonesub", "subaddin"],
+    pricingModel: "flat",
+    unitLabel: "per visit",
+    tiers: [
+      { label: "Per Visit", min: 0, price: 0 },
+    ],
+    frequencies: [
+      FREQ_ONETIME,
+      { ...FREQ_WEEKLY,    discountPct: 12 },
+      { ...FREQ_BIWEEKLY,  discountPct: 10 },
+      { ...FREQ_MONTHLY,   discountPct: 8  },
+      { ...FREQ_BIMONTHLY, discountPct: 6  },
+      { ...FREQ_QUARTERLY, discountPct: 5  },
+    ],
+    notes: "Commercial grounds keeping — set per-visit price in the Price Book. Covers blowing, debris pickup, entryway tidying, light edging, and general property appearance maintenance. Scope customized per contract.",
+    subCostPct: 0.75,
+  },
+
   {
     id: "mulch_install",
     name: "Mulch Installation",
