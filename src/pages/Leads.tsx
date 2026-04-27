@@ -31,7 +31,8 @@ import {
   Plus, Clock, GripVertical, FileText, ArrowRight,
   MapPin, Phone, Mail, User, CalendarPlus,
   Trash2, Archive, PhoneCall, MessageSquare, FileSignature,
-  Send, Receipt, CheckCircle2,
+  Send, Receipt, CheckCircle2, XCircle, RotateCcw, TrendingDown,
+  Users, DollarSign, ChevronRight,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { ScheduleQuoteSheet } from '@/components/ScheduleQuoteSheet'
@@ -476,10 +477,16 @@ function LeadDetailSheet({
     setContractorCost(lead?.contractorCost?.toString() ?? '')
     setEditingQuote(false)
     setLocalQuote(null)
+    setShowMarkLost(false)
+    setLostReasonPreset('')
+    setLostReasonCustom('')
   }, [lead?.id])
   const [confirmDeleteQuote, setConfirmDeleteQuote] = useState(false)
   const [confirmDeleteLead, setConfirmDeleteLead] = useState(false)
   const [confirmInvoice, setConfirmInvoice] = useState(false)
+  const [showMarkLost, setShowMarkLost] = useState(false)
+  const [lostReasonPreset, setLostReasonPreset] = useState('')
+  const [lostReasonCustom, setLostReasonCustom] = useState('')
 
   const isRecurring = isRecurringQuote(effectiveQuote)
   // For one-time: quote signed = can schedule
@@ -509,6 +516,18 @@ function LeadDetailSheet({
       onClose()
     },
     onError: (err: Error) => toast({ title: 'Failed to delete lead', description: err.message, variant: 'destructive' }),
+  })
+
+  const markLostMutation = useMutation({
+    mutationFn: (reason: string) =>
+      apiRequest('PATCH', `/leads/${lead?.id}`, { stage: 'lost', lostReason: reason || null }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      toast({ title: 'Lead marked as lost', description: 'Removed from pipeline. View lost leads from the header.' })
+      setShowMarkLost(false)
+      onClose()
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
   })
 
   const archiveQuoteMutation = useMutation({
@@ -893,20 +912,112 @@ function LeadDetailSheet({
             </div>
           )}
 
-          {/* ── Lead actions ─────────────────────────────────────────────── */}
+          {/* ── Mark as Lost ──────────────────────────────────────────────── */}
+          {lead.stage !== 'lost' && (
+            <div className="rounded-xl border border-dashed border-rose-300/60 bg-rose-50/30 dark:bg-rose-950/10 p-3 space-y-3">
+              <p className="text-xs text-rose-700 dark:text-rose-400 font-semibold uppercase tracking-wide flex items-center gap-1.5">
+                <XCircle className="h-3.5 w-3.5" />Lost / Not Moving Forward
+              </p>
+
+              {!showMarkLost ? (
+                <Button
+                  variant="outline" size="sm"
+                  className="w-full text-rose-700 border-rose-300 hover:bg-rose-50 dark:text-rose-400 dark:border-rose-800 dark:hover:bg-rose-950/30"
+                  onClick={() => { setShowMarkLost(true); setLostReasonPreset(''); setLostReasonCustom('') }}
+                >
+                  <XCircle className="h-3.5 w-3.5 mr-1.5" />Mark as Lost
+                </Button>
+              ) : (
+                <div className="space-y-2.5">
+                  <p className="text-xs text-rose-700 dark:text-rose-400">Why did you lose this lead?</p>
+
+                  {/* Preset reasons */}
+                  <div className="space-y-1.5">
+                    {[
+                      { value: 'chose_competitor', label: 'Chose a competitor' },
+                      { value: 'price_too_high',   label: 'Price was too high' },
+                      { value: 'no_response',      label: 'No response / went cold' },
+                      { value: 'bad_timing',        label: 'Not ready / bad timing' },
+                      { value: 'other',             label: 'Other reason…' },
+                    ].map(opt => (
+                      <button
+                        key={opt.value}
+                        onClick={() => { setLostReasonPreset(opt.value); setLostReasonCustom('') }}
+                        className={`w-full flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
+                          lostReasonPreset === opt.value
+                            ? 'border-rose-400 bg-rose-100 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 font-medium'
+                            : 'border-border hover:bg-muted/50 text-muted-foreground'
+                        }`}
+                      >
+                        <div className={`h-3.5 w-3.5 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                          lostReasonPreset === opt.value ? 'border-rose-500' : 'border-muted-foreground/40'
+                        }`}>
+                          {lostReasonPreset === opt.value && <div className="h-1.5 w-1.5 rounded-full bg-rose-500" />}
+                        </div>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Custom text for "Other" */}
+                  {lostReasonPreset === 'other' && (
+                    <Input
+                      value={lostReasonCustom}
+                      onChange={e => setLostReasonCustom(e.target.value)}
+                      placeholder="Describe the reason…"
+                      className="text-sm h-9"
+                    />
+                  )}
+
+                  <div className="flex gap-2 pt-0.5">
+                    <Button
+                      variant="outline" size="sm" className="flex-1"
+                      onClick={() => setShowMarkLost(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="flex-1 bg-rose-600 hover:bg-rose-700 text-white"
+                      disabled={
+                        !lostReasonPreset ||
+                        (lostReasonPreset === 'other' && !lostReasonCustom.trim()) ||
+                        markLostMutation.isPending
+                      }
+                      onClick={() => {
+                        const reason = lostReasonPreset === 'other'
+                          ? lostReasonCustom.trim()
+                          : ({
+                              chose_competitor: 'Chose a competitor',
+                              price_too_high:   'Price was too high',
+                              no_response:      'No response / went cold',
+                              bad_timing:       'Not ready / bad timing',
+                            } as Record<string, string>)[lostReasonPreset] ?? lostReasonPreset
+                        markLostMutation.mutate(reason)
+                      }}
+                    >
+                      {markLostMutation.isPending ? 'Saving…' : 'Confirm Lost'}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Lead actions (delete) ─────────────────────────────────────── */}
           <div className="rounded-xl border border-dashed border-destructive/40 p-3 space-y-2">
-            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Lead Actions</p>
+            <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Danger Zone</p>
             {!confirmDeleteLead ? (
               <Button
                 variant="outline" size="sm" className="w-full text-destructive border-destructive/30 hover:bg-destructive/5"
                 onClick={() => setConfirmDeleteLead(true)}
                 disabled={deleteLeadMutation.isPending}
               >
-                <Trash2 className="h-3.5 w-3.5 mr-1.5" />Delete This Lead
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />Delete This Lead Permanently
               </Button>
             ) : (
               <div className="space-y-2">
-                <p className="text-xs text-destructive font-medium">Remove this lead from the pipeline? The linked quote (if any) stays intact.</p>
+                <p className="text-xs text-destructive font-medium">Permanently remove this lead? The linked quote (if any) stays intact.</p>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" className="flex-1" onClick={() => setConfirmDeleteLead(false)}>Cancel</Button>
                   <Button
@@ -956,6 +1067,106 @@ function LeadDetailSheet({
           />
         )}
         </>
+        )}
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+// ── Lost Leads Sheet ──────────────────────────────────────────────────────────
+
+const LOST_REASON_LABEL: Record<string, string> = {
+  'Chose a competitor':      'Chose a competitor',
+  'Price was too high':      'Price too high',
+  'No response / went cold': 'Went cold',
+  'Not ready / bad timing':  'Bad timing',
+}
+
+function LostLeadsSheet({
+  open,
+  onClose,
+  lostLeads,
+  displayNames,
+  onRestore,
+}: {
+  open: boolean
+  onClose: () => void
+  lostLeads: Lead[]
+  displayNames: Record<string, string>
+  onRestore: (lead: Lead) => void
+}) {
+  const totalLostValue = lostLeads.reduce((s, l) => s + (l.estimatedValue ?? 0), 0)
+
+  function fmtLostReason(r: string | null): string {
+    if (!r) return 'No reason given'
+    return LOST_REASON_LABEL[r] ?? r
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={onClose}>
+      <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[88dvh] overflow-y-auto">
+        <SheetHeader className="mb-4">
+          <SheetTitle className="flex items-center gap-2">
+            <XCircle className="h-4 w-4 text-rose-500" />
+            Lost Leads
+          </SheetTitle>
+        </SheetHeader>
+
+        {/* Summary strip */}
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="rounded-xl border bg-muted/30 p-3 text-center">
+            <p className="text-2xl font-bold">{lostLeads.length}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Total Lost</p>
+          </div>
+          <div className="rounded-xl border bg-muted/30 p-3 text-center">
+            <p className="text-2xl font-bold text-rose-600">
+              {totalLostValue >= 1000 ? `$${(totalLostValue / 1000).toFixed(1)}k` : `$${totalLostValue.toFixed(0)}`}
+            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">Est. Value Lost</p>
+          </div>
+        </div>
+
+        {lostLeads.length === 0 ? (
+          <div className="text-center py-10 text-muted-foreground">
+            <TrendingDown className="h-8 w-8 mx-auto mb-2 opacity-30" />
+            <p className="text-sm font-medium">No lost leads yet</p>
+            <p className="text-xs mt-1">Great work keeping the pipeline clean!</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {lostLeads
+              .slice()
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+              .map(lead => (
+                <div key={lead.id} className="rounded-xl border bg-card p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{displayNames[lead.id] ?? 'Unknown'}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300 font-medium">
+                          {fmtLostReason(lead.lostReason)}
+                        </span>
+                        {lead.estimatedValue && (
+                          <span className="text-xs text-muted-foreground font-medium">
+                            ${lead.estimatedValue.toFixed(0)}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-1">
+                        Lost {daysAgo(lead.createdAt)} ago
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline" size="sm"
+                      className="shrink-0 h-8 text-xs gap-1 text-primary border-primary/30 hover:bg-primary/5"
+                      onClick={() => onRestore(lead)}
+                    >
+                      <RotateCcw className="h-3 w-3" />Restore
+                    </Button>
+                  </div>
+                </div>
+              ))}
+          </div>
         )}
       </SheetContent>
     </Sheet>
@@ -1078,6 +1289,7 @@ export default function Leads() {
   const [activeQuote, setActiveQuote] = useState<Quote | null>(null)
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [showNew, setShowNew] = useState(false)
+  const [showLost, setShowLost] = useState(false)
   const queryClient = useQueryClient()
   const { toast } = useToast()
   // Track the stage at drag-start to prevent stale closure issues in handleDragEnd
@@ -1170,6 +1382,16 @@ export default function Leads() {
       toast({ title: 'Failed to update stage', variant: 'destructive' })
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: ['/leads'] }),
+  })
+
+  const restoreLeadMutation = useMutation({
+    mutationFn: ({ id }: { id: string }) =>
+      apiRequest('PATCH', `/leads/${id}`, { stage: 'new', lostReason: null }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      toast({ title: 'Lead restored', description: 'Moved back to New Lead column.' })
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
   })
 
   // Create a lead from a dragged quote — carries all quote data
@@ -1277,6 +1499,9 @@ export default function Leads() {
 
   const loading = leadsLoading || contactsLoading
 
+  const lostLeads   = (leads ?? []).filter(l => l.stage === 'lost')
+  const activeLeads = (leads ?? []).filter(l => l.stage !== 'lost')
+
   // Quotes for right panel: exclude any already in the pipeline, sort by priority
   const sortedQuotes = [...(quotes ?? [])]
     .filter(q => !quoteLeadMap[q.id])
@@ -1305,9 +1530,20 @@ export default function Leads() {
       <div className="flex items-center justify-between px-3 py-2.5 border-b shrink-0">
         <div>
           <h2 className="text-base font-bold">Lead Pipeline</h2>
-          <p className="text-xs text-muted-foreground">
-            {leads?.length ?? 0} leads · drag quotes into stages
-          </p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-xs text-muted-foreground">
+              {activeLeads.length} active
+            </p>
+            {lostLeads.length > 0 && (
+              <button
+                onClick={() => setShowLost(true)}
+                className="text-xs text-rose-600 dark:text-rose-400 flex items-center gap-1 hover:underline"
+              >
+                <XCircle className="h-3 w-3" />
+                {lostLeads.length} lost
+              </button>
+            )}
+          </div>
         </div>
         <Button size="sm" onClick={() => setShowNew(true)}>
           <Plus className="h-4 w-4 mr-1" />New Lead
@@ -1340,7 +1576,7 @@ export default function Leads() {
                   <KanbanColumn
                     key={stage.id}
                     stage={stage}
-                    leads={(leads ?? []).filter(l => l.stage === stage.id)}
+                    leads={activeLeads.filter(l => l.stage === stage.id)}
                     displayNames={displayNames}
                     sublines={sublines}
                     phones={phones}
@@ -1424,6 +1660,13 @@ export default function Leads() {
       <NewLeadSheet
         open={showNew}
         onClose={() => setShowNew(false)}
+      />
+      <LostLeadsSheet
+        open={showLost}
+        onClose={() => setShowLost(false)}
+        lostLeads={lostLeads}
+        displayNames={displayNames}
+        onRestore={lead => restoreLeadMutation.mutate({ id: lead.id })}
       />
     </div>
   )
