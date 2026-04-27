@@ -48,6 +48,7 @@ export interface Quote {
   signedIp: string | null;
   qbInvoiceId: string | null;
   sentAt: string | null;
+  leadId: string | null;
 }
 
 // ── Subscription Types ─────────────────────────────────────────────────
@@ -309,6 +310,7 @@ export function rowToQuote(r: any): Quote {
     signedIp: r.signed_ip ?? null,
     qbInvoiceId: r.qb_invoice_id ?? null,
     sentAt: r.sent_at ?? null,
+    leadId: r.lead_id ?? null,
   };
 }
 

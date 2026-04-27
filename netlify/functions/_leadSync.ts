@@ -32,6 +32,8 @@ const STAGE_ORDER = [
 type LeadStage = typeof STAGE_ORDER[number]
 
 interface SyncOptions {
+  /** Direct lead ID — used when a quote is created from a specific lead */
+  leadId?: string | null
   /** Preferred lookup: find lead where quote_id = this */
   quoteId?: string | null
   /** Fallback lookup: find most-recent lead for this contact */
@@ -50,40 +52,51 @@ interface SyncOptions {
  */
 export async function advanceLeadStage(
   supabase: SupabaseClient,
-  { quoteId, contactId, stage, extraInsert = {} }: SyncOptions
+  { leadId, quoteId, contactId, stage, extraInsert = {} }: SyncOptions
 ): Promise<void> {
   try {
-    let lead: { id: string; stage: string } | null = null
+    let lead: { id: string; stage: string; quote_id: string | null } | null = null
+    let foundByLeadId = false
     let foundByQuoteId = false
 
-    // ── 1. Look up by quoteId first (quote already linked) ───────────────
-    if (quoteId) {
+    // ── 1. Direct lead lookup (quote created from a specific lead) ────────
+    if (leadId) {
       const { data } = await supabase
         .from('leads')
-        .select('id, stage')
+        .select('id, stage, quote_id')
+        .eq('id', leadId)
+        .limit(1)
+        .single()
+      if (data) { lead = data; foundByLeadId = true }
+    }
+
+    // ── 2. Look up by quoteId (quote already linked as primary) ──────────
+    if (!lead && quoteId) {
+      const { data } = await supabase
+        .from('leads')
+        .select('id, stage, quote_id')
         .eq('quote_id', quoteId)
         .limit(1)
         .single()
       if (data) { lead = data; foundByQuoteId = true }
     }
 
-    // ── 2. Dedup: find existing lead for this contact ─────────────────────
-    //    This fires when a brand-new quote is created for a contact who
-    //    already has a lead (e.g. from a manual entry or earlier form).
-    //    We attach the quote to that lead instead of creating a duplicate.
-    if (!lead && contactId) {
+    // ── 3. Dedup: find existing lead for this contact ─────────────────────
+    //    Fires when a brand-new quote is created for a contact who already
+    //    has a lead. We attach only if no lead_id was specified.
+    if (!lead && !leadId && contactId) {
       const { data } = await supabase
         .from('leads')
-        .select('id, stage')
+        .select('id, stage, quote_id')
         .eq('contact_id', contactId)
+        .neq('stage', 'lost')
         .order('created_at', { ascending: false })
         .limit(1)
         .single()
       lead = data ?? null
-      // foundByQuoteId stays false → we'll write quote_id onto this lead below
     }
 
-    // ── 3. Auto-create if no lead exists at all ───────────────────────────
+    // ── 4. Auto-create if no lead exists at all ───────────────────────────
     if (!lead) {
       if (quoteId) {
         await supabase.from('leads').insert({
@@ -97,7 +110,7 @@ export async function advanceLeadStage(
       return
     }
 
-    // ── 4. Build the update payload ───────────────────────────────────────
+    // ── 5. Build the update payload ───────────────────────────────────────
     if (lead.stage === 'lost') return   // never auto-move out of lost
 
     const currentIdx = STAGE_ORDER.indexOf(lead.stage as LeadStage)
@@ -105,10 +118,11 @@ export async function advanceLeadStage(
 
     const patch: Record<string, unknown> = {}
 
-    // Attach quote to existing contact lead (dedup case)
-    if (!foundByQuoteId && quoteId) {
+    // Set the primary quote only if:
+    //  (a) found via direct leadId lookup and lead has no primary quote yet, OR
+    //  (b) found via contact dedup (not yet linked to any quote)
+    if (quoteId && !lead.quote_id && (foundByLeadId || (!foundByQuoteId && !foundByLeadId))) {
       patch.quote_id = quoteId
-      // Also pull in value + service interest from the new quote
       if (extraInsert.estimated_value  !== undefined) patch.estimated_value  = extraInsert.estimated_value
       if (extraInsert.service_interest !== undefined) patch.service_interest = extraInsert.service_interest
     }
@@ -116,7 +130,6 @@ export async function advanceLeadStage(
     // Advance stage if target is ahead of current
     if (targetIdx > currentIdx) {
       patch.stage = stage
-      // Stamp contacted_at the first time a lead enters the 'contacted' stage
       if (stage === 'contacted') {
         patch.contacted_at = new Date().toISOString()
       }
@@ -126,7 +139,6 @@ export async function advanceLeadStage(
       await supabase.from('leads').update(patch).eq('id', lead.id)
     }
   } catch (err) {
-    // Non-fatal: log but never crash the parent request
     console.error('[leadSync] advanceLeadStage error:', err)
   }
 }

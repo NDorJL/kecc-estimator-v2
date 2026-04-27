@@ -1035,37 +1035,43 @@ export default function Calculator() {
     queryFn: () => apiGet<CompanySettings>('/settings'),
   })
 
-  // Parse contact fields directly from URL params — synchronous, no async fetch needed.
-  // Leads encodes name/phone/email/businessName/contactId into the URL when navigating here.
-  const resolvedPrefillContact = useMemo<Contact | null>(() => {
-    const hash = window.location.hash   // e.g. "#/calculator?contactId=abc&name=John+Smith"
+  // Parse contact fields + leadId directly from URL params — synchronous, no async fetch needed.
+  // Leads encodes name/phone/email/businessName/contactId/leadId into the URL when navigating here.
+  const { resolvedPrefillContact, prefillLeadId } = useMemo<{
+    resolvedPrefillContact: Contact | null
+    prefillLeadId: string | null
+  }>(() => {
+    const hash = window.location.hash   // e.g. "#/calculator?leadId=abc&contactId=xyz&name=John"
     const qStart = hash.indexOf('?')
     if (qStart >= 0) {
       const p = new URLSearchParams(hash.slice(qStart + 1))
       const name = p.get('name')
       const contactId = p.get('contactId')
+      const leadId = p.get('leadId')
       if (name || contactId) {
-        // Construct a minimal Contact shape from URL params — no network request needed
         return {
-          id:           contactId ?? '',
-          name:         name ?? '',
-          phone:        p.get('phone'),
-          email:        p.get('email'),
-          businessName: p.get('businessName'),
-          type:         'residential',
-          source:       null,
-          notes:        null,
-          tags:         [],
-          customFields: {},
-          leadScore:    0,
-          referredBy:   null,
-          nextFollowup: null,
-          createdAt:    '',
-        } as Contact
+          prefillLeadId: leadId,
+          resolvedPrefillContact: {
+            id:           contactId ?? '',
+            name:         name ?? '',
+            phone:        p.get('phone'),
+            email:        p.get('email'),
+            businessName: p.get('businessName'),
+            type:         'residential',
+            source:       null,
+            notes:        null,
+            tags:         [],
+            customFields: {},
+            leadScore:    0,
+            referredBy:   null,
+            nextFollowup: null,
+            createdAt:    '',
+          } as Contact,
+        }
       }
     }
     // Fall back to context (legacy path — direct navigation to /calculator without params)
-    return prefillContact
+    return { resolvedPrefillContact: prefillContact, prefillLeadId: null }
   }, [prefillContact]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [customerType, setCustomerType] = useState<CustomerType>('residential')
@@ -1094,6 +1100,7 @@ export default function Calculator() {
         customerAddress: null,
         businessName:    contact.businessName ?? null,
         contactId:       contact.id,
+        leadId:          prefillLeadId ?? null,
         quoteType,
         lineItems:       cartItems,
         subtotal:        total,

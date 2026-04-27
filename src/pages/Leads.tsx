@@ -440,6 +440,7 @@ function QuoteDetailPanel({ quote }: { quote: Quote }) {
 function LeadDetailSheet({
   lead,
   quote,
+  allLeadQuotes,
   displayName,
   contactForPrefill,
   open,
@@ -447,6 +448,7 @@ function LeadDetailSheet({
 }: {
   lead: Lead | null
   quote: Quote | null
+  allLeadQuotes: Quote[]
   displayName: string
   contactForPrefill: Contact | null
   open: boolean
@@ -487,6 +489,8 @@ function LeadDetailSheet({
   const [showMarkLost, setShowMarkLost] = useState(false)
   const [lostReasonPreset, setLostReasonPreset] = useState('')
   const [lostReasonCustom, setLostReasonCustom] = useState('')
+  // Which quote (by id) is expanded inline in the multi-quote list
+  const [expandedQuoteId, setExpandedQuoteId] = useState<string | null>(null)
 
   const isRecurring = isRecurringQuote(effectiveQuote)
   // For one-time: quote signed = can schedule
@@ -526,6 +530,16 @@ function LeadDetailSheet({
       toast({ title: 'Lead marked as lost', description: 'Removed from pipeline. View lost leads from the header.' })
       setShowMarkLost(false)
       onClose()
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  const setPrimaryMutation = useMutation({
+    mutationFn: (quoteId: string) =>
+      apiRequest('PATCH', `/leads/${lead?.id}`, { quoteId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      toast({ title: 'Primary quote updated' })
     },
     onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
   })
@@ -657,22 +671,114 @@ function LeadDetailSheet({
             </div>
           )}
 
-          {/* ── Full quote detail when linked ─────────────────────────────── */}
-          {effectiveQuote && (
+          {/* ── All quotes for this lead ───────────────────────────────── */}
+          {allLeadQuotes.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wide">Quote Details</p>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs gap-1 text-primary"
-                  onClick={() => setEditingQuote(true)}
+                <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wide">
+                  Quotes ({allLeadQuotes.length})
+                </p>
+                <button
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
+                  onClick={() => {
+                    const p = new URLSearchParams()
+                    if (lead?.id)        p.set('leadId',    lead.id)
+                    if (lead?.contactId) p.set('contactId', lead.contactId)
+                    if (contactForPrefill?.name)         p.set('name',         contactForPrefill.name)
+                    if (contactForPrefill?.phone)        p.set('phone',        contactForPrefill.phone)
+                    if (contactForPrefill?.email)        p.set('email',        contactForPrefill.email)
+                    if (contactForPrefill?.businessName) p.set('businessName', contactForPrefill.businessName)
+                    const qs = p.toString()
+                    navigate(qs ? `/calculator?${qs}` : '/calculator')
+                    onClose()
+                  }}
                 >
-                  <FileSignature className="h-3.5 w-3.5" />
-                  Edit Quote
-                </Button>
+                  <Plus className="h-3 w-3" />Add Quote
+                </button>
               </div>
-              <QuoteDetailPanel quote={effectiveQuote!} />
+
+              <div className="space-y-2">
+                {allLeadQuotes
+                  .slice()
+                  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                  .map(q => {
+                    const isPrimary = q.id === lead?.quoteId
+                    const isExpanded = expandedQuoteId === q.id
+                    const summary = servicesSummary(q.lineItems)
+                    return (
+                      <div key={q.id} className={`rounded-xl border overflow-hidden ${isPrimary ? 'border-primary/40' : ''}`}>
+                        {/* Quote row header */}
+                        <div className="flex items-center gap-2 px-3 py-2 bg-muted/20">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {isPrimary && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground">
+                                  Primary
+                                </span>
+                              )}
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${QUOTE_STATUS_COLORS[q.status] ?? 'bg-muted text-muted-foreground'}`}>
+                                {q.status}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-sm font-bold text-primary">${q.total.toFixed(0)}</span>
+                              {summary && <span className="text-xs text-muted-foreground truncate">{summary}</span>}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              variant="ghost" size="sm"
+                              className="h-7 px-2 text-xs gap-1 text-primary"
+                              onClick={() => { setLocalQuote(q); setEditingQuote(true) }}
+                            >
+                              <FileSignature className="h-3 w-3" />Edit
+                            </Button>
+                            <button
+                              onClick={() => setExpandedQuoteId(isExpanded ? null : q.id)}
+                              className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-1"
+                            >
+                              {isExpanded ? '▲' : '▼'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Expanded detail */}
+                        {isExpanded && (
+                          <div className="border-t">
+                            <QuoteDetailPanel quote={q} />
+                            <div className="flex gap-2 px-3 pb-3">
+                              {!isPrimary && (
+                                <Button
+                                  variant="outline" size="sm"
+                                  className="flex-1 text-xs text-primary border-primary/30"
+                                  disabled={setPrimaryMutation.isPending}
+                                  onClick={() => setPrimaryMutation.mutate(q.id)}
+                                >
+                                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                                  {setPrimaryMutation.isPending ? 'Setting…' : 'Set as Primary'}
+                                </Button>
+                              )}
+                              {q.customerPhone && (
+                                <Button
+                                  variant="outline" size="sm"
+                                  className="flex-1 text-xs text-blue-700 border-blue-300 hover:bg-blue-50"
+                                  disabled={sendQuoteMutation.isPending}
+                                  onClick={() => {
+                                    setLocalQuote(q)
+                                    sendQuoteMutation.mutate()
+                                  }}
+                                >
+                                  <Send className="h-3 w-3 mr-1" />
+                                  {q.sentAt ? 'Resend' : 'Send SMS'}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+              </div>
             </div>
           )}
 
@@ -755,15 +861,14 @@ function LeadDetailSheet({
             />
           </div>
 
-          {/* ── Create Quote (when no quote linked yet) ────────────────────── */}
-          {!effectiveQuote && (
+          {/* ── Create Quote (only when zero quotes exist for this lead) ──── */}
+          {allLeadQuotes.length === 0 && (
             <Button
               variant="outline"
               className="w-full gap-2 border-primary/40 text-primary hover:bg-primary/5"
               onClick={() => {
-                // Encode contact fields directly into URL params so Calculator can
-                // read them synchronously — no async fetch, no race condition.
                 const p = new URLSearchParams()
+                if (lead?.id)        p.set('leadId',    lead.id)
                 if (lead?.contactId) p.set('contactId', lead.contactId)
                 if (contactForPrefill?.name)         p.set('name',         contactForPrefill.name)
                 if (contactForPrefill?.phone)        p.set('phone',        contactForPrefill.phone)
@@ -776,23 +881,6 @@ function LeadDetailSheet({
             >
               <FileSignature className="h-4 w-4" />
               Create Quote for This Lead
-            </Button>
-          )}
-
-          {/* ── Send Quote via SMS ────────────────────────────────────────── */}
-          {effectiveQuote && phone && (
-            <Button
-              variant="outline"
-              className="w-full gap-2 border-blue-300 text-blue-700 hover:bg-blue-50"
-              disabled={sendQuoteMutation.isPending}
-              onClick={() => sendQuoteMutation.mutate()}
-            >
-              <Send className="h-4 w-4" />
-              {sendQuoteMutation.isPending
-                ? 'Sending…'
-                : effectiveQuote.sentAt
-                  ? `Resend Quote (sent ${new Date(effectiveQuote.sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })})`
-                  : 'Send Quote via SMS'}
             </Button>
           )}
 
@@ -1323,9 +1411,16 @@ export default function Leads() {
   for (const q of quotes ?? []) quoteById[q.id] = q
 
   // Map quoteId → lead stage (for indicator on right panel)
+  // Covers both legacy quote_id links and new lead_id links
   const quoteLeadMap: Record<string, LeadStage> = {}
   for (const l of leads ?? []) {
     if (l.quoteId) quoteLeadMap[l.quoteId] = l.stage
+  }
+  for (const q of quotes ?? []) {
+    if (q.leadId && !quoteLeadMap[q.id]) {
+      const lead = (leads ?? []).find(l => l.id === q.leadId)
+      if (lead) quoteLeadMap[q.id] = lead.stage
+    }
   }
 
   // Per-lead: display name and subline
@@ -1513,8 +1608,18 @@ export default function Leads() {
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     })
 
-  // Selected lead's linked quote (if any)
+  // Selected lead's primary quote (if any)
   const selectedQuote = selectedLead?.quoteId ? (quoteById[selectedLead.quoteId] ?? null) : null
+
+  // All quotes for the selected lead: by lead_id OR by the legacy quote_id link
+  const selectedLeadQuotes = selectedLead
+    ? (quotes ?? []).filter(q =>
+        !q.trashedAt && (
+          q.leadId === selectedLead.id ||
+          q.id === selectedLead.quoteId
+        )
+      )
+    : []
 
   // Build display name/subline/contact info maps once
   const displayNames = Object.fromEntries((leads ?? []).map(l => [l.id, getDisplayName(l)]))
@@ -1650,6 +1755,7 @@ export default function Leads() {
       <LeadDetailSheet
         lead={selectedLead}
         quote={selectedQuote}
+        allLeadQuotes={selectedLeadQuotes}
         displayName={selectedLead ? getDisplayName(selectedLead) : ''}
         contactForPrefill={
           selectedLead?.contactId ? (contactById[selectedLead.contactId] ?? null) : null
