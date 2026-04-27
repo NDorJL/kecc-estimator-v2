@@ -8,7 +8,7 @@
 // ============================================================
 
 export type ServiceType = "residential" | "commercial" | "both";
-export type PricingModel = "flat" | "per_unit" | "tiered" | "hourly" | "per_sqft" | "per_lf" | "per_acre" | "mulch";
+export type PricingModel = "flat" | "per_unit" | "tiered" | "hourly" | "per_sqft" | "per_lf" | "per_acre" | "mulch" | "per_dollar";
 
 export interface PriceTier {
   label: string;
@@ -902,20 +902,20 @@ export const services: ServiceDefinition[] = [
     subcategory: "Residential",
     serviceType: "residential",
     tags: ["onetime", "standalonesub", "subaddin"],
-    pricingModel: "flat",
+    pricingModel: "per_dollar",
     unitLabel: "per visit",
     tiers: [
-      { label: "Per Visit", min: 0, price: 0 },
+      { label: "Amount ($)", min: 0, price: 1 },
     ],
     frequencies: [
       FREQ_ONETIME,
-      { ...FREQ_WEEKLY,    discountPct: 12 },
-      { ...FREQ_BIWEEKLY,  discountPct: 10 },
-      { ...FREQ_MONTHLY,   discountPct: 8  },
-      { ...FREQ_BIMONTHLY, discountPct: 6  },
-      { ...FREQ_QUARTERLY, discountPct: 5  },
+      { ...FREQ_WEEKLY,    discountPct: 0 },
+      { ...FREQ_BIWEEKLY,  discountPct: 0 },
+      { ...FREQ_MONTHLY,   discountPct: 0 },
+      { ...FREQ_BIMONTHLY, discountPct: 0 },
+      { ...FREQ_QUARTERLY, discountPct: 0 },
     ],
-    notes: "General grounds keeping — set per-visit price in the Price Book. Covers any combination of blowing, light debris pickup, edging touch-ups, and general property tidying not covered under full lawn care. Customize scope per customer agreement.",
+    notes: "Flexible custom pricing — enter a dollar amount as the quantity (e.g. 500 = $500/visit). Amount × frequency visits/month = monthly total. Covers any combination of blowing, debris pickup, edging touch-ups, and general property tidying. Scope set per customer agreement.",
     subCostPct: 0.75,
   },
   {
@@ -925,20 +925,20 @@ export const services: ServiceDefinition[] = [
     subcategory: "Commercial",
     serviceType: "commercial",
     tags: ["onetime", "standalonesub", "subaddin"],
-    pricingModel: "flat",
+    pricingModel: "per_dollar",
     unitLabel: "per visit",
     tiers: [
-      { label: "Per Visit", min: 0, price: 0 },
+      { label: "Amount ($)", min: 0, price: 1 },
     ],
     frequencies: [
       FREQ_ONETIME,
-      { ...FREQ_WEEKLY,    discountPct: 12 },
-      { ...FREQ_BIWEEKLY,  discountPct: 10 },
-      { ...FREQ_MONTHLY,   discountPct: 8  },
-      { ...FREQ_BIMONTHLY, discountPct: 6  },
-      { ...FREQ_QUARTERLY, discountPct: 5  },
+      { ...FREQ_WEEKLY,    discountPct: 0 },
+      { ...FREQ_BIWEEKLY,  discountPct: 0 },
+      { ...FREQ_MONTHLY,   discountPct: 0 },
+      { ...FREQ_BIMONTHLY, discountPct: 0 },
+      { ...FREQ_QUARTERLY, discountPct: 0 },
     ],
-    notes: "Commercial grounds keeping — set per-visit price in the Price Book. Covers blowing, debris pickup, entryway tidying, light edging, and general property appearance maintenance. Scope customized per contract.",
+    notes: "Flexible custom pricing — enter a dollar amount as the quantity (e.g. 500 = $500/visit). Amount × frequency visits/month = monthly total. Covers blowing, debris pickup, entryway tidying, light edging, and general property appearance maintenance. Scope set per contract.",
     subCostPct: 0.75,
   },
 

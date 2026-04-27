@@ -54,21 +54,23 @@ function fmt(n: number): string {
   return '$' + n.toFixed(2)
 }
 
-// Determine if a service uses quantity-based unit pricing (acres, sqft, lf)
+// Determine if a service uses quantity-based unit pricing (acres, sqft, lf, or custom $)
 function isUnitPriced(model: string) {
-  return model === 'per_sqft' || model === 'per_lf' || model === 'per_acre'
+  return model === 'per_sqft' || model === 'per_lf' || model === 'per_acre' || model === 'per_dollar'
 }
 
 function unitLabel(model: string) {
   if (model === 'per_sqft') return 'Sqft'
   if (model === 'per_lf') return 'LF'
   if (model === 'per_acre') return 'Acres'
+  if (model === 'per_dollar') return 'Amount ($)'
   return 'Qty'
 }
 
 function unitPlaceholder(model: string) {
   if (model === 'per_sqft') return 'e.g. 2000'
   if (model === 'per_acre') return 'e.g. 0.5'
+  if (model === 'per_dollar') return 'e.g. 500'
   return '1'
 }
 
@@ -77,8 +79,11 @@ function calcUnitTotal(model: string, tierPrice: number, min: number, qty: numbe
     return calculatePerSqftPrice({ label: '', min, price: tierPrice }, qty)
   }
   if (model === 'per_acre') {
-    // no minimum floor for per_acre
     return tierPrice * qty
+  }
+  if (model === 'per_dollar') {
+    // qty IS the dollar amount (price = $1, so total = qty × 1 = qty)
+    return qty
   }
   return tierPrice * qty
 }
