@@ -8,7 +8,7 @@
 // ============================================================
 
 export type ServiceType = "residential" | "commercial" | "both";
-export type PricingModel = "flat" | "per_unit" | "tiered" | "hourly" | "per_sqft" | "per_lf" | "per_acre" | "mulch" | "per_dollar";
+export type PricingModel = "flat" | "per_unit" | "tiered" | "hourly" | "per_sqft" | "per_lf" | "per_acre" | "mulch" | "per_dollar" | "per_annual";
 
 export interface PriceTier {
   label: string;
@@ -939,6 +939,36 @@ export const services: ServiceDefinition[] = [
       { ...FREQ_QUARTERLY, discountPct: 0 },
     ],
     notes: "Flexible custom pricing — enter a dollar amount as the quantity (e.g. 500 = $500/visit). Amount × frequency visits/month = monthly total. Covers blowing, debris pickup, entryway tidying, light edging, and general property appearance maintenance. Scope set per contract.",
+    subCostPct: 0.75,
+  },
+
+  // ──────────────────────────────────────────
+  // CUSTOM SUBSCRIPTION (flexible, user-named)
+  // ──────────────────────────────────────────
+  // pricingModel "per_annual": quantity = annual contract price.
+  // Monthly billing = annual ÷ 12 regardless of visit frequency.
+  // ($1 annual → $0.083/mo → $0.019/week — "about a penny per week")
+  {
+    id: "custom_subscription",
+    name: "Custom Service",
+    category: "Custom",
+    subcategory: "",
+    serviceType: "both",
+    tags: ["standalonesub", "subaddin"],
+    pricingModel: "per_annual",
+    unitLabel: "per year",
+    tiers: [
+      { label: "Annual Amount", min: 0, price: 1 },
+    ],
+    frequencies: [
+      { frequency: "weekly",    label: "Weekly",     multiplierPerMonth: 1 / 12, discountPct: 0, annualMultiplier: 12 },
+      { frequency: "biweekly",  label: "Bi-Weekly",  multiplierPerMonth: 1 / 12, discountPct: 0, annualMultiplier: 12 },
+      { frequency: "monthly",   label: "Monthly",    multiplierPerMonth: 1 / 12, discountPct: 0, annualMultiplier: 12 },
+      { frequency: "bimonthly", label: "Bi-Monthly", multiplierPerMonth: 1 / 12, discountPct: 0, annualMultiplier: 12 },
+      { frequency: "quarterly", label: "Quarterly",  multiplierPerMonth: 1 / 12, discountPct: 0, annualMultiplier: 12 },
+      { frequency: "annual",    label: "Annual",     multiplierPerMonth: 1 / 12, discountPct: 0, annualMultiplier: 12 },
+    ],
+    notes: "User-named flexible subscription. Enter the annual contract price — monthly billing is always annual ÷ 12. Frequency describes how often the service is performed. Rename each line item when adding to a quote.",
     subCostPct: 0.75,
   },
 

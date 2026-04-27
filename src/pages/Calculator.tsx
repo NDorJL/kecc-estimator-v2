@@ -54,9 +54,10 @@ function fmt(n: number): string {
   return '$' + n.toFixed(2)
 }
 
-// Determine if a service uses quantity-based unit pricing (acres, sqft, lf, or custom $)
+// Determine if a service uses quantity-based unit pricing (acres, sqft, lf, custom $, annual)
 function isUnitPriced(model: string) {
-  return model === 'per_sqft' || model === 'per_lf' || model === 'per_acre' || model === 'per_dollar'
+  return model === 'per_sqft' || model === 'per_lf' || model === 'per_acre'
+    || model === 'per_dollar' || model === 'per_annual'
 }
 
 function unitLabel(model: string) {
@@ -64,6 +65,7 @@ function unitLabel(model: string) {
   if (model === 'per_lf') return 'LF'
   if (model === 'per_acre') return 'Acres'
   if (model === 'per_dollar') return 'Amount ($)'
+  if (model === 'per_annual') return 'Annual Price ($)'
   return 'Qty'
 }
 
@@ -71,6 +73,7 @@ function unitPlaceholder(model: string) {
   if (model === 'per_sqft') return 'e.g. 2000'
   if (model === 'per_acre') return 'e.g. 0.5'
   if (model === 'per_dollar') return 'e.g. 500'
+  if (model === 'per_annual') return 'e.g. 1200'
   return '1'
 }
 
@@ -83,6 +86,10 @@ function calcUnitTotal(model: string, tierPrice: number, min: number, qty: numbe
   }
   if (model === 'per_dollar') {
     // qty IS the dollar amount (price = $1, so total = qty × 1 = qty)
+    return qty
+  }
+  if (model === 'per_annual') {
+    // qty = annual contract price; multiplierPerMonth=1/12 produces monthly in calculateSubscriptionPrice
     return qty
   }
   return tierPrice * qty
@@ -513,6 +520,8 @@ interface SubLine {
   tierIndex: number
   quantity: number
   frequency: FrequencyDiscount
+  /** Only used when service.id === 'custom_subscription' — overrides service.name on the cart item */
+  customName?: string
 }
 
 function SubServiceLine({
@@ -539,17 +548,19 @@ function SubServiceLine({
     })
   }
 
-  const isUnit = isUnitPriced(line.service.pricingModel)
+  const isUnit   = isUnitPriced(line.service.pricingModel)
+  const isAcre   = line.service.pricingModel === 'per_acre'
+  const isAnnual = line.service.pricingModel === 'per_annual'
+  const isCustom = line.service.id === 'custom_subscription'
   const tier = line.service.tiers[line.tierIndex]
   const rawTotal = isUnit && tier
     ? calcUnitTotal(line.service.pricingModel, tier.price, tier.min, line.quantity)
     : (tier?.price ?? 0) * line.quantity
   const sub = calculateSubscriptionPrice(rawTotal, line.frequency)
   const minVal = (line.service.minimum && line.service.minimum > 0) ? line.service.minimum : 0
-  // Apply minimum to monthly total, not per-cut price
   const effectiveMonthly = minVal > 0 ? Math.max(sub.monthlyAmount, minVal) : sub.monthlyAmount
   const hitMinimum = effectiveMonthly > sub.monthlyAmount
-  const isAcre = line.service.pricingModel === 'per_acre'
+  const fmt = (n: number) => `$${n.toFixed(2)}`
 
   return (
     <Card className="border-l-2 border-l-primary/30">
@@ -578,9 +589,22 @@ function SubServiceLine({
           </Button>
         </div>
 
+        {/* Custom service name input — appears only for "Custom Service" */}
+        {isCustom && (
+          <div className="space-y-1">
+            <Label className="text-xs">Service Name <span className="text-muted-foreground">(shown on quote)</span></Label>
+            <Input
+              value={line.customName ?? ''}
+              onChange={e => onUpdate(lineIndex, { customName: e.target.value })}
+              placeholder="e.g. Irrigation System Checks, Seasonal Cleanup…"
+              className="min-h-[44px] text-sm"
+            />
+          </div>
+        )}
+
         <div className="grid grid-cols-3 gap-2">
-          {/* Tier selector — hide for single-tier services */}
-          {line.service.tiers.length > 1 ? (
+          {/* Tier selector — hide for single-tier or annual/custom services */}
+          {line.service.tiers.length > 1 && !isAnnual ? (
             <div className="space-y-1">
               <Label className="text-xs">Tier</Label>
               <Select
@@ -609,7 +633,7 @@ function SubServiceLine({
           </div>
 
           <div className="space-y-1">
-            <Label className="text-xs">Freq</Label>
+            <Label className="text-xs">{isAnnual ? 'Visit Freq' : 'Freq'}</Label>
             <Select
               value={line.frequency.frequency}
               onValueChange={(val) => {
@@ -632,12 +656,14 @@ function SubServiceLine({
         <div className="space-y-1">
           <div className="flex justify-between text-xs text-muted-foreground">
             <span>
-              {isAcre
-                ? `${line.quantity} acre${line.quantity !== 1 ? 's' : ''} × ${fmt(tier?.price ?? 0)}/acre = ${fmt(rawTotal)}/cut`
-                : isUnit
-                  ? `${fmt(tier?.price ?? 0)}/unit × ${line.quantity.toLocaleString()}`
-                  : `${fmt(tier?.price ?? 0)} × ${line.quantity}`}
-              {line.frequency.frequency !== 'onetime' && ` · ${line.frequency.label}`}
+              {isAnnual
+                ? `Annual ${fmt(line.quantity)} ÷ 12 · ${line.frequency.label} service`
+                : isAcre
+                  ? `${line.quantity} acre${line.quantity !== 1 ? 's' : ''} × ${fmt(tier?.price ?? 0)}/acre = ${fmt(rawTotal)}/cut`
+                  : isUnit
+                    ? `${fmt(tier?.price ?? 0)}/unit × ${line.quantity.toLocaleString()}`
+                    : `${fmt(tier?.price ?? 0)} × ${line.quantity}`}
+              {!isAnnual && line.frequency.frequency !== 'onetime' && ` · ${line.frequency.label}`}
             </span>
             <span className="font-medium text-foreground">
               {line.frequency.frequency !== 'onetime'
@@ -645,6 +671,11 @@ function SubServiceLine({
                 : fmt(rawTotal)}
             </span>
           </div>
+          {isAnnual && line.quantity > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Weekly rate ≈ {fmt(line.quantity / 52)} · Bi-weekly ≈ {fmt(line.quantity / 26)}
+            </p>
+          )}
           {hitMinimum && (
             <p className="text-xs text-amber-600 dark:text-amber-400">
               Monthly minimum of {fmt(line.service.minimum ?? 0)} applied (calculated {fmt(sub.monthlyAmount)})
@@ -764,13 +795,19 @@ function SubPlanBuilder({
       const rawMonthly = sub.monthlyAmount
       const effectiveMonthly = minVal > 0 ? Math.max(rawMonthly, minVal) : rawMonthly
       const isSub = line.frequency.frequency !== 'onetime'
+      const isAnnualLine = line.service.pricingModel === 'per_annual'
+      const resolvedName = (line.service.id === 'custom_subscription' && line.customName?.trim())
+        ? line.customName.trim()
+        : line.service.name
       return {
         serviceId: line.service.id,
-        serviceName: line.service.name,
-        category: line.service.category,
-        description: describeUnit(line.service.pricingModel, tier?.label ?? '', line.quantity),
+        serviceName: resolvedName,
+        category: isAnnualLine ? 'Custom' : line.service.category,
+        description: isAnnualLine
+          ? `${line.frequency.label} service · $${line.quantity.toFixed(0)}/yr`
+          : describeUnit(line.service.pricingModel, tier?.label ?? '', line.quantity),
         quantity: line.quantity,
-        unitLabel: line.service.unitLabel,
+        unitLabel: isAnnualLine ? 'per year' : line.service.unitLabel,
         frequency: line.frequency.label,
         unitPrice: isUnit ? rawCartTotal : (tier?.price ?? 0),
         lineTotal: isSub ? effectiveMonthly : rawCartTotal,
