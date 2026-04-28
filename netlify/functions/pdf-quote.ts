@@ -158,48 +158,39 @@ export const handler: Handler = async (event) => {
 
     // ── Signature block ──────────────────────────────────────────────────────
     if (quote.signedAt) {
-      // Signed — draw an electronic signature stamp
-      const stampH = 90
-      if (y + stampH + 20 > 720) { doc.addPage(); y = 50 }
-      else { y += 10 }
+      const stampH = quote.signedIp ? 86 : 74
+      if (y + stampH + 16 > 730) { doc.addPage(); y = 50 }
+      else { y += 14 }
 
       const signedDate = new Date(quote.signedAt)
-      const dateStr = signedDate.toLocaleDateString('en-US', {
-        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-      })
-      const timeStr = signedDate.toLocaleTimeString('en-US', {
-        hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short',
-      })
+      const dayStr  = signedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+      const timeStr = signedDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
 
-      // Green stamp box
+      // Light green background + border (matches in-app style)
       doc.rect(50, y, 512, stampH).fillColor('#f0fdf4').fill()
-      doc.rect(50, y, 512, stampH).strokeColor('#16a34a').lineWidth(1).stroke()
+      doc.rect(50, y, 512, stampH).strokeColor('#bbf7d0').lineWidth(1).stroke()
 
-      // Checkmark badge header
-      doc.fontSize(9).font('Helvetica-Bold').fillColor('#15803d')
-      doc.text('✓  ELECTRONICALLY SIGNED', 62, y + 10)
+      // Green circle with checkmark (mimics the icon in the app)
+      const cx = 72; const cy = y + 18
+      doc.circle(cx, cy, 9).fillColor('#16a34a').fill()
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#ffffff').text('✓', cx - 5, cy - 6, { width: 10, align: 'center', lineBreak: false })
 
-      // Divider line
-      doc.moveTo(62, y + 22).lineTo(550, y + 22).strokeColor('#bbf7d0').lineWidth(0.5).stroke()
+      // "E-Signed by [Name]" — bold, larger
+      doc.fontSize(10).font('Helvetica-Bold').fillColor('#15803d')
+      doc.text(`E-Signed by ${quote.customerName}`, 88, y + 11, { width: 460 })
 
-      // Fields
-      doc.fontSize(8).font('Helvetica-Bold').fillColor('#166534')
-      doc.text('Signed by:', 62, y + 28)
-      doc.font('Helvetica').fillColor('#15803d')
-      doc.text(quote.customerName, 120, y + 28)
+      // Signed timestamp
+      doc.fontSize(8).font('Helvetica').fillColor('#16a34a')
+      doc.text(`Signed on ${dayStr} at ${timeStr}`, 88, y + 27, { width: 460 })
 
-      doc.font('Helvetica-Bold').fillColor('#166534').text('Date & Time:', 62, y + 40)
-      doc.font('Helvetica').fillColor('#15803d').text(`${dateStr} at ${timeStr}`, 120, y + 40)
-
+      // IP address (if available)
       if (quote.signedIp) {
-        doc.font('Helvetica-Bold').fillColor('#166534').text('IP Address:', 62, y + 52)
-        doc.font('Helvetica').fillColor('#15803d').text(quote.signedIp, 120, y + 52)
+        doc.text(`IP address: ${quote.signedIp}`, 88, y + 39, { width: 460 })
       }
 
-      // Legal note
-      doc.fontSize(7).font('Helvetica').fillColor('#4ade80')
-      const legalNote = 'This estimate was accepted via electronic signature. The signer\'s IP address, timestamp, and consent are on file as a legally binding acceptance of the scope and pricing above.'
-      doc.text(legalNote, 62, y + 66, { width: 488 })
+      // Legal line
+      const legalY = quote.signedIp ? y + 53 : y + 41
+      doc.fillColor('#4ade80').text('Digital signature on file · Legally binding electronic acceptance', 88, legalY, { width: 460 })
 
       y += stampH + 6
     } else {
