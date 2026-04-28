@@ -100,11 +100,12 @@ export const handler: Handler = async (event) => {
     doc.fillColor('#555555').text(new Date(quote.createdAt).toLocaleDateString(), 400, y - 13)
     y += 10
 
-    const colX = [50, 210, 350, 410, 480]
-    const colW = [160, 140, 55, 65, 80]
-    const tableHeaders = ['Service', 'Description', 'Qty', 'Frequency', 'Total']
+    // Columns: Service | Description | Total  (no Qty, no Unit Price, no Frequency)
+    const colX = [50, 280, 482]
+    const colW = [230, 200, 80]
+    const tableHeaders = ['Service', 'Description', 'Total']
     doc.fontSize(8).font('Helvetica-Bold').fillColor('#000000')
-    tableHeaders.forEach((h, i) => doc.text(h, colX[i], y, { width: colW[i], align: i >= 2 ? 'right' : 'left' }))
+    tableHeaders.forEach((h, i) => doc.text(h, colX[i], y, { width: colW[i], align: i === 2 ? 'right' : 'left' }))
     y += 14
     doc.moveTo(50, y).lineTo(562, y).strokeColor('#dddddd').stroke()
     y += 6
@@ -112,14 +113,19 @@ export const handler: Handler = async (event) => {
     doc.fontSize(9).font('Helvetica').fillColor('#000000')
     for (const item of lineItems) {
       if (y > 700) { doc.addPage(); y = 50 }
-      doc.font('Helvetica-Bold').text(item.serviceName, colX[0], y, { width: colW[0] })
-      doc.font('Helvetica').fillColor('#555555').text(item.description ?? '', colX[1], y, { width: colW[1] })
-      doc.fillColor('#000000')
-      doc.text(String(item.quantity), colX[2], y, { width: colW[2], align: 'right' })
-      doc.text(item.frequency ?? 'One-Time', colX[3], y, { width: colW[3], align: 'right' })
-      doc.font('Helvetica-Bold').text(fmt(item.lineTotal) + (item.isSubscription ? '/mo' : ''), colX[4], y, { width: colW[4], align: 'right' })
+      // Measure row height to handle multi-line descriptions
+      const serviceH     = doc.heightOfString(item.serviceName, { width: colW[0] })
+      const descText     = item.description ?? ''
+      const descH        = descText ? doc.heightOfString(descText, { width: colW[1] }) : 0
+      const rowH         = Math.max(serviceH, descH, 14) + 6
+      doc.font('Helvetica-Bold').fillColor('#000000').text(item.serviceName, colX[0], y, { width: colW[0] })
+      if (descText) doc.font('Helvetica').fillColor('#555555').text(descText, colX[1], y, { width: colW[1] })
+      doc.font('Helvetica-Bold').fillColor('#000000').text(
+        fmt(item.lineTotal) + (item.isSubscription ? '/mo' : ''),
+        colX[2], y, { width: colW[2], align: 'right' },
+      )
       doc.font('Helvetica').fillColor('#000000')
-      y += 18
+      y += rowH
     }
 
     y += 8
