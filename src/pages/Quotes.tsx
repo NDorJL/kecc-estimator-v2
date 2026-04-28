@@ -471,12 +471,19 @@ export function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack:
       return;
     }
     const url = `${window.location.origin}/.netlify/functions/esign?token=${quote.acceptToken}`;
+    const firstName = quote.customerName?.split(' ')[0] ?? 'there';
+    const message =
+      `Hi ${firstName}, Knox Exterior Care Co. here! Your quote is ready — follow this link to view. ` +
+      `If you'd like to move forward, simply sign the e-sign at the bottom of the quote, and we'll reach out about getting you on the schedule.\n\n` +
+      `Please reach out to this number with any questions or concerns - thank you for the opportunity to serve!\n\n` +
+      `Automated msg. Reply STOP to opt out.\n\n` +
+      url;
     try {
-      await navigator.clipboard.writeText(url);
-      toast({ title: 'Quote link copied!', description: 'Paste it into a text message or email and send to your customer. They\'ll see the full quote and can sign right there.' });
+      await navigator.clipboard.writeText(message);
+      toast({ title: 'Message copied!', description: 'Paste it directly into a text message — the full message and link are ready to send.' });
     } catch {
-      // Clipboard blocked — show the URL so they can copy manually
-      toast({ title: 'Copy this link and send to your customer', description: url });
+      // Clipboard blocked — show the full message so they can copy manually
+      toast({ title: 'Copy this message and send to your customer', description: message });
     }
   };
 
