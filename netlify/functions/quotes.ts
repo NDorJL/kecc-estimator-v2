@@ -199,9 +199,9 @@ export const handler: Handler = async (event) => {
 
       const message =
         `Hi ${firstName}, Knox Exterior Care Co. here! Your quote is ready — follow this link to view. ` +
-        `If you'd like to move forward, simply sign the e-sign at the bottom of the quote, and we'll ` +
-        `reach out about getting you on the schedule. Please reach out to this number with any questions ` +
-        `or concerns - thank you for the opportunity to serve! Automated msg. Reply STOP to opt out.\n\n` +
+        `If you'd like to move forward, simply sign the e-sign at the bottom of the quote, and we'll reach out about getting you on the schedule.\n\n` +
+        `Please reach out to this number with any questions or concerns - thank you for the opportunity to serve!\n\n` +
+        `Automated msg. Reply STOP to opt out.\n\n` +
         esignUrl
 
       await sendOpenPhoneSms(apiKey, fromNumber, quote.customer_phone, message)
@@ -224,7 +224,8 @@ export const handler: Handler = async (event) => {
         }).catch(() => {})
       }
 
-      return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToQuote(updated)) }
+      // Return success — frontend invalidates the /quotes cache to pick up sent_at
+      return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true }) }
     }
 
     // TRASH quote
