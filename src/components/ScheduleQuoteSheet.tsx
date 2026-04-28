@@ -3,20 +3,19 @@
  *
  * A bottom sheet that lets you book a job directly from a signed quote.
  * Supports multi-service quotes — each service chip maps to one scheduled day.
- * Appears on both the Quotes page and the Leads pipeline lead-detail sheet.
- * On submit it POSTs /jobs, which automatically advances the linked lead
- * to the "Scheduled" kanban column via the jobs.ts → _leadSync.ts pipeline.
+ * After scheduling, optionally sends an appointment confirmation SMS to the customer.
  */
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiRequest } from '@/lib/queryClient'
 import { Quote, LineItem } from '@/types'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { CalendarDays, Clock, MapPin, User, CheckCircle2 } from 'lucide-react'
+import { CalendarDays, Clock, MapPin, User, CheckCircle2, MessageSquare } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
 type Window = 'morning' | 'afternoon' | 'anytime'
@@ -27,29 +26,61 @@ const WINDOWS: { id: Window; label: string; sub: string }[] = [
   { id: 'anytime',   label: 'Any Time',  sub: 'Flexible'      },
 ]
 
+const WINDOW_LABELS: Record<Window, string> = {
+  morning:   'in the morning (8 am–12 pm)',
+  afternoon: 'in the afternoon (12 pm–5 pm)',
+  anytime:   '',
+}
+
 interface Props {
   quote: Quote
   open: boolean
   onClose: () => void
 }
 
+/** Build the SMS message the customer will receive */
+function buildConfirmationMessage(opts: {
+  firstName: string
+  serviceName: string
+  date: string       // YYYY-MM-DD
+  window: Window
+  companyName: string
+}): string {
+  const { firstName, serviceName, date, window, companyName } = opts
+  const [yr, mo, dy] = date.split('-').map(Number)
+  const dateObj  = new Date(yr, mo - 1, dy)
+  const dayOfWeek = dateObj.toLocaleDateString('en-US', { weekday: 'long' })
+  const monthName = dateObj.toLocaleDateString('en-US', { month: 'long' })
+  const windowStr = WINDOW_LABELS[window] ? ` ${WINDOW_LABELS[window]}` : ''
+
+  return (
+    `Hi ${firstName}! Your ${serviceName} with ${companyName} is confirmed for ` +
+    `${dayOfWeek}, ${monthName} ${dy}, ${yr}${windowStr}.\n\n` +
+    `If you have any questions or need to make changes, just reply to this message.\n\n` +
+    `Thank you for choosing ${companyName}!\n\n` +
+    `Automated msg. Reply STOP to opt out.`
+  )
+}
+
 export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
   const { toast } = useToast()
   const qc = useQueryClient()
 
-  // All schedulable line items (one-time services and subscriptions both count)
   const lineItems: LineItem[] = Array.isArray(quote.lineItems) ? quote.lineItems : []
-
-  // Default: first line item, or fallback to quote type label
-  const defaultService =
-    lineItems.length > 0 ? lineItems[0].serviceName : quote.quoteType
+  const defaultService = lineItems.length > 0 ? lineItems[0].serviceName : quote.quoteType
 
   const [selectedService, setSelectedService] = useState<string>(defaultService)
-  const [customService, setCustomService]     = useState('')   // shown only when no line items
+  const [customService, setCustomService]     = useState('')
   const [date, setDate]       = useState('')
   const [window, setWindow]   = useState<Window>('anytime')
   const [time, setTime]       = useState('')
   const [notes, setNotes]     = useState('')
+
+  // SMS confirmation prompt state — shown after a job is created
+  const [showSmsPrompt, setShowSmsPrompt]       = useState(false)
+  const [pendingJobInfo, setPendingJobInfo]      = useState<{
+    service: string; date: string; window: Window; phone: string; name: string
+  } | null>(null)
 
   function reset() {
     setSelectedService(defaultService)
@@ -58,6 +89,13 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
     setWindow('anytime')
     setTime('')
     setNotes('')
+  }
+
+  function closeAll() {
+    reset()
+    setShowSmsPrompt(false)
+    setPendingJobInfo(null)
+    onClose()
   }
 
   const effectiveService = lineItems.length > 0 ? selectedService : (customService || defaultService)
@@ -82,6 +120,7 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['/jobs'] })
       qc.invalidateQueries({ queryKey: ['/leads'] })
+
       const dateLabel = date
         ? new Date(date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
         : 'TBD'
@@ -89,153 +128,258 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
         title: 'Job scheduled',
         description: `${effectiveService} for ${quote.customerName} — ${dateLabel}`,
       })
-      reset()
-      onClose()
+
+      // If there's a phone number, offer to send a confirmation text
+      if (quote.customerPhone && date) {
+        const firstName = quote.customerName?.split(' ')[0] ?? quote.customerName
+        setPendingJobInfo({
+          service: effectiveService,
+          date,
+          window,
+          phone: quote.customerPhone,
+          name: firstName,
+        })
+        reset()
+        setShowSmsPrompt(true)
+      } else {
+        reset()
+        onClose()
+      }
     },
     onError: (err: Error) =>
       toast({ title: 'Failed to schedule', description: err.message, variant: 'destructive' }),
   })
 
+  const sendSmsMutation = useMutation({
+    mutationFn: (payload: { to: string; message: string; contactId: string | null }) =>
+      apiRequest('POST', '/sms', {
+        action:    'send',
+        to:        payload.to,
+        message:   payload.message,
+        contactId: payload.contactId,
+      }),
+    onSuccess: () => {
+      toast({ title: 'Confirmation sent!', description: `Text delivered to ${pendingJobInfo?.phone}` })
+      closeAll()
+    },
+    onError: (err: Error) => {
+      toast({ title: 'SMS failed', description: err.message, variant: 'destructive' })
+      closeAll()
+    },
+  })
+
+  function handleSendConfirmation() {
+    if (!pendingJobInfo) return
+    const companyName = 'Knox Exterior Care Co.'
+    const message = buildConfirmationMessage({
+      firstName:   pendingJobInfo.name,
+      serviceName: pendingJobInfo.service,
+      date:        pendingJobInfo.date,
+      window:      pendingJobInfo.window,
+      companyName,
+    })
+    sendSmsMutation.mutate({
+      to:        pendingJobInfo.phone,
+      message,
+      contactId: quote.contactId ?? null,
+    })
+  }
+
+  // ── SMS confirmation prompt preview ──────────────────────────────────────
+  const smsPreview = pendingJobInfo
+    ? buildConfirmationMessage({
+        firstName:   pendingJobInfo.name,
+        serviceName: pendingJobInfo.service,
+        date:        pendingJobInfo.date,
+        window:      pendingJobInfo.window,
+        companyName: 'Knox Exterior Care Co.',
+      })
+    : ''
+
   return (
-    <Sheet open={open} onOpenChange={v => { if (!v) { reset(); onClose() } }}>
-      <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[92dvh] overflow-y-auto">
-        <SheetHeader className="mb-4">
-          <SheetTitle className="flex items-center gap-2">
-            <CalendarDays className="h-5 w-5 text-primary" />
-            Schedule a Day
-          </SheetTitle>
-          <p className="text-xs text-muted-foreground">
-            Each tap schedules one service on one day. Come back to add more days for other services.
-          </p>
-        </SheetHeader>
+    <>
+      <Sheet open={open && !showSmsPrompt} onOpenChange={v => { if (!v) { reset(); onClose() } }}>
+        <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[92dvh] overflow-y-auto">
+          <SheetHeader className="mb-4">
+            <SheetTitle className="flex items-center gap-2">
+              <CalendarDays className="h-5 w-5 text-primary" />
+              Schedule a Day
+            </SheetTitle>
+            <p className="text-xs text-muted-foreground">
+              Each tap schedules one service on one day. Come back to add more days for other services.
+            </p>
+          </SheetHeader>
 
-        {/* Customer summary — read-only */}
-        <div className="rounded-xl border bg-muted/30 p-3 mb-4 space-y-1">
-          <div className="flex items-center gap-2">
-            <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="text-sm font-semibold">{quote.customerName}</span>
-          </div>
-          {quote.customerAddress && (
-            <div className="flex items-start gap-2">
-              <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
-              <span className="text-xs text-muted-foreground">{quote.customerAddress}</span>
+          {/* Customer summary */}
+          <div className="rounded-xl border bg-muted/30 p-3 mb-4 space-y-1">
+            <div className="flex items-center gap-2">
+              <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <span className="text-sm font-semibold">{quote.customerName}</span>
             </div>
-          )}
-        </div>
+            {quote.customerAddress && (
+              <div className="flex items-start gap-2">
+                <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+                <span className="text-xs text-muted-foreground">{quote.customerAddress}</span>
+              </div>
+            )}
+          </div>
 
-        <div className="space-y-4">
+          <div className="space-y-4">
+            {/* Service picker */}
+            {lineItems.length > 0 ? (
+              <div>
+                <Label className="text-xs mb-2 block">Which service is this day for?</Label>
+                <div className="flex flex-wrap gap-2">
+                  {lineItems.map((li, i) => {
+                    const isSelected = selectedService === li.serviceName
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setSelectedService(li.serviceName)}
+                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                          isSelected
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground'
+                        }`}
+                      >
+                        {isSelected && <CheckCircle2 className="h-3 w-3 shrink-0" />}
+                        {li.serviceName}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <Label className="text-xs mb-1 block">Service</Label>
+                <Input
+                  value={customService}
+                  onChange={e => setCustomService(e.target.value)}
+                  placeholder="Service name"
+                />
+              </div>
+            )}
 
-          {/* ── Service picker (from quote line items) ─────────────────────── */}
-          {lineItems.length > 0 ? (
+            {/* Date */}
             <div>
-              <Label className="text-xs mb-2 block">Which service is this day for?</Label>
-              <div className="flex flex-wrap gap-2">
-                {lineItems.map((li, i) => {
-                  const isSelected = selectedService === li.serviceName
-                  return (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => setSelectedService(li.serviceName)}
-                      className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
-                        isSelected
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground'
-                      }`}
-                    >
-                      {isSelected && <CheckCircle2 className="h-3 w-3 shrink-0" />}
-                      {li.serviceName}
-                    </button>
-                  )
-                })}
+              <Label className="text-xs mb-1 block">Date</Label>
+              <Input
+                type="date"
+                value={date}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={e => setDate(e.target.value)}
+              />
+            </div>
+
+            {/* Time window */}
+            <div>
+              <Label className="text-xs mb-2 block">Arrival Window</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {WINDOWS.map(w => (
+                  <button
+                    key={w.id}
+                    type="button"
+                    onClick={() => setWindow(w.id)}
+                    className={`rounded-xl border py-2.5 px-2 text-center transition-all ${
+                      window === w.id
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border bg-card text-muted-foreground hover:border-primary/40'
+                    }`}
+                  >
+                    <p className="text-xs font-semibold">{w.label}</p>
+                    <p className="text-[10px] mt-0.5 opacity-70">{w.sub}</p>
+                  </button>
+                ))}
               </div>
             </div>
-          ) : (
+
+            {/* Specific time (optional) */}
             <div>
-              <Label className="text-xs mb-1 block">Service</Label>
-              <Input
-                value={customService}
-                onChange={e => setCustomService(e.target.value)}
-                placeholder="Service name"
+              <Label className="text-xs mb-1 block">
+                Specific Time <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+                <Input
+                  type="time"
+                  value={time}
+                  onChange={e => setTime(e.target.value)}
+                  className="flex-1"
+                />
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div>
+              <Label className="text-xs mb-1 block">Notes</Label>
+              <Textarea
+                value={notes}
+                onChange={e => setNotes(e.target.value)}
+                placeholder="Contractor, gate code, special instructions…"
+                rows={2}
               />
             </div>
-          )}
 
-          {/* Date */}
-          <div>
-            <Label className="text-xs mb-1 block">Date</Label>
-            <Input
-              type="date"
-              value={date}
-              min={new Date().toISOString().slice(0, 10)}
-              onChange={e => setDate(e.target.value)}
-            />
+            <Button
+              className="w-full"
+              size="lg"
+              disabled={!date || scheduleMutation.isPending}
+              onClick={() => scheduleMutation.mutate()}
+            >
+              {scheduleMutation.isPending
+                ? 'Scheduling…'
+                : `Schedule ${effectiveService}`}
+            </Button>
+            {!date && (
+              <p className="text-xs text-muted-foreground text-center -mt-2">Pick a date to continue</p>
+            )}
           </div>
+        </SheetContent>
+      </Sheet>
 
-          {/* Time window */}
-          <div>
-            <Label className="text-xs mb-2 block">Arrival Window</Label>
-            <div className="grid grid-cols-3 gap-2">
-              {WINDOWS.map(w => (
-                <button
-                  key={w.id}
-                  type="button"
-                  onClick={() => setWindow(w.id)}
-                  className={`rounded-xl border py-2.5 px-2 text-center transition-all ${
-                    window === w.id
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-card text-muted-foreground hover:border-primary/40'
-                  }`}
-                >
-                  <p className="text-xs font-semibold">{w.label}</p>
-                  <p className="text-[10px] mt-0.5 opacity-70">{w.sub}</p>
-                </button>
-              ))}
+      {/* ── SMS confirmation prompt ──────────────────────────────────────── */}
+      <Dialog open={showSmsPrompt} onOpenChange={v => { if (!v) closeAll() }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-primary" />
+              Send a confirmation text?
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3 py-1">
+            <p className="text-sm text-muted-foreground">
+              Do you want to send an automated text to{' '}
+              <span className="font-semibold text-foreground">{pendingJobInfo?.phone}</span>{' '}
+              to confirm their appointment?
+            </p>
+
+            {/* Message preview */}
+            <div className="rounded-lg bg-muted/60 border p-3 max-h-40 overflow-y-auto">
+              <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed font-mono">
+                {smsPreview}
+              </p>
             </div>
           </div>
 
-          {/* Specific time (optional) */}
-          <div>
-            <Label className="text-xs mb-1 block">
-              Specific Time <span className="text-muted-foreground font-normal">(optional)</span>
-            </Label>
-            <div className="flex items-center gap-2">
-              <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
-              <Input
-                type="time"
-                value={time}
-                onChange={e => setTime(e.target.value)}
-                className="flex-1"
-              />
-            </div>
-          </div>
-
-          {/* Notes */}
-          <div>
-            <Label className="text-xs mb-1 block">Notes</Label>
-            <Textarea
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
-              placeholder="Contractor, gate code, special instructions…"
-              rows={2}
-            />
-          </div>
-
-          <Button
-            className="w-full"
-            size="lg"
-            disabled={!date || scheduleMutation.isPending}
-            onClick={() => scheduleMutation.mutate()}
-          >
-            {scheduleMutation.isPending
-              ? 'Scheduling…'
-              : `Schedule ${effectiveService}`}
-          </Button>
-          {!date && (
-            <p className="text-xs text-muted-foreground text-center -mt-2">Pick a date to continue</p>
-          )}
-        </div>
-      </SheetContent>
-    </Sheet>
+          <DialogFooter className="flex gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={closeAll}
+              disabled={sendSmsMutation.isPending}
+            >
+              No, Skip
+            </Button>
+            <Button
+              onClick={handleSendConfirmation}
+              disabled={sendSmsMutation.isPending}
+            >
+              {sendSmsMutation.isPending ? 'Sending…' : 'Yes, Send It'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
