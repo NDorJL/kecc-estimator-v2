@@ -147,16 +147,26 @@ export const handler: Handler = async (event) => {
         if (body.customerPhone !== undefined) contactSync.phone         = body.customerPhone
         if (body.businessName  !== undefined) contactSync.business_name = body.businessName
         if (Object.keys(contactSync).length > 0) {
-          await supabase.from('contacts')
-            .update(contactSync)
-            .eq('id', data.contact_id)
-            .catch(() => {/* non-fatal */})
+          try {
+            await supabase.from('contacts')
+              .update(contactSync)
+              .eq('id', data.contact_id)
+          } catch (_syncErr) {
+            // non-fatal — never let contact sync crash the quote save response
+          }
         }
       }
 
       // NOTE: lead does NOT advance to 'scheduled' here — that only happens
       // when a job is explicitly created from this quote via POST /jobs.
-      return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToQuote(data)) }
+      let responseBody: string
+      try {
+        responseBody = JSON.stringify(rowToQuote(data))
+      } catch (serializeErr) {
+        console.error('PATCH /quotes serialize error:', serializeErr, JSON.stringify(data))
+        return { statusCode: 500, headers: CORS, body: JSON.stringify({ message: 'Failed to serialize updated quote' }) }
+      }
+      return { statusCode: 200, headers: CORS, body: responseBody }
     }
 
     // SEND quote via SMS — stamps sent_at and fires OpenPhone message

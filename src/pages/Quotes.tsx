@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { queryClient, apiRequest, apiGet } from "@/lib/queryClient";
+import { queryClient, apiRequest, apiGet, apiPatch } from "@/lib/queryClient";
 import { useQuoteContext } from "@/lib/quote-context";
 import { useToast } from "@/hooks/use-toast";
 import type { Quote, LineItem, CompanySettings, SubscriptionService, Contact } from "@/types";
@@ -431,26 +431,28 @@ export function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack:
   const saveEditMutation = useMutation({
     mutationFn: async () => {
       const items = editItems.map(({ _key: _k, ...rest }) => rest);
-      const onetimeTotal = items.filter(i => !i.isSubscription).reduce((s, i) => s + i.lineTotal, 0);
-      const monthlyTotal = items.filter(i => i.isSubscription).reduce((s, i) => s + (i.monthlyAmount ?? i.lineTotal), 0);
+      const onetimeTotal = items.filter(i => !i.isSubscription).reduce((s, i) => s + (Number(i.lineTotal) || 0), 0);
+      const monthlyTotal = items.filter(i => i.isSubscription).reduce((s, i) => s + (Number(i.monthlyAmount ?? i.lineTotal) || 0), 0);
       const total = onetimeTotal + monthlyTotal;
-      const res = await apiRequest('PATCH', `/quotes/${quote.id}`, {
+      // Guard against null/undefined createdAt before slicing
+      const originalDate = quote.createdAt ? quote.createdAt.slice(0, 10) : '';
+      const payload: Record<string, unknown> = {
         customerName: editName.trim(),
         customerAddress: editAddress.trim() || null,
         customerPhone: editPhone.trim() || null,
         customerEmail: editEmail.trim() || null,
         businessName: editBusiness.trim() || null,
-        quoteType: editQuoteType,
+        quoteType: editQuoteType || 'residential_onetime',
         lineItems: items,
         subtotal: total,
         total,
         notes: editNotes.trim() || null,
-        // backdating: include only if user actually changed the date
-        ...(editCreatedAt && editCreatedAt !== quote.createdAt.slice(0, 10)
-          ? { createdAt: new Date(editCreatedAt + 'T12:00:00').toISOString() }
-          : {}),
-      });
-      return res.json() as Promise<Quote>;
+      };
+      // Only include createdAt if the user actually changed the date
+      if (editCreatedAt && originalDate && editCreatedAt !== originalDate) {
+        payload.createdAt = new Date(editCreatedAt + 'T12:00:00').toISOString();
+      }
+      return apiPatch<Quote>(`/quotes/${quote.id}`, payload);
     },
     onSuccess: (updated) => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] });
