@@ -20,6 +20,7 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -492,6 +493,7 @@ function LeadDetailSheet({
     setShowMarkLost(false)
     setLostReasonPreset('')
     setLostReasonCustom('')
+    setShowSendConfirm(false)
   }, [lead?.id])
   const [confirmDeleteQuote, setConfirmDeleteQuote] = useState(false)
   const [confirmDeleteLead, setConfirmDeleteLead] = useState(false)
@@ -577,15 +579,21 @@ function LeadDetailSheet({
     onError: (err: Error) => toast({ title: 'Failed to delete', description: err.message, variant: 'destructive' }),
   })
 
+  const [showSendConfirm, setShowSendConfirm] = useState(false)
+
   // Send quote via SMS
   const sendQuoteMutation = useMutation({
-    mutationFn: () => apiRequest('POST', `/quotes/${effectiveQuote?.id}/send`, {}),
+    mutationFn: (quoteId: string) => apiRequest('POST', `/quotes/${quoteId}/send`, {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      setShowSendConfirm(false)
       toast({ title: 'Quote sent!', description: `SMS delivered to ${phone}` })
     },
-    onError: (err: Error) => toast({ title: 'Failed to send quote', description: err.message, variant: 'destructive' }),
+    onError: (err: Error) => {
+      setShowSendConfirm(false)
+      toast({ title: 'Failed to send quote', description: err.message, variant: 'destructive' })
+    },
   })
 
   // Generate QB invoice
@@ -612,6 +620,7 @@ function LeadDetailSheet({
   const hasInvoice = !!effectiveQuote?.qbInvoiceId
 
   return (
+    <>
     <Sheet open={open} onOpenChange={onClose}>
       <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[90dvh] overflow-y-auto">
 
@@ -772,10 +781,9 @@ function LeadDetailSheet({
                                 <Button
                                   variant="outline" size="sm"
                                   className="flex-1 text-xs text-blue-700 border-blue-300 hover:bg-blue-50"
-                                  disabled={sendQuoteMutation.isPending}
                                   onClick={() => {
                                     setLocalQuote(q)
-                                    sendQuoteMutation.mutate()
+                                    setShowSendConfirm(true)
                                   }}
                                 >
                                   <Send className="h-3 w-3 mr-1" />
@@ -1201,6 +1209,65 @@ function LeadDetailSheet({
         )}
       </SheetContent>
     </Sheet>
+
+    {/* ── Send Quote confirmation dialog ───────────────────────────────── */}
+    {(() => {
+      const q = effectiveQuote
+      if (!q) return null
+      const firstName = q.customerName?.split(' ')[0] ?? 'there'
+      const esignUrl = q.acceptToken
+        ? `${window.location.origin}/.netlify/functions/esign?token=${q.acceptToken}`
+        : null
+      const preview = esignUrl
+        ? `Hi ${firstName}, Knox Exterior Care Co. here! Your quote is ready — follow this link to view. ` +
+          `If you'd like to move forward, simply sign the e-sign at the bottom of the quote, and we'll reach out about getting you on the schedule.\n\n` +
+          `Please reach out to this number with any questions or concerns - thank you for the opportunity to serve!\n\n` +
+          `Automated msg. Reply STOP to opt out.\n\n` +
+          esignUrl
+        : null
+      return (
+        <Dialog open={showSendConfirm} onOpenChange={v => { if (!v) setShowSendConfirm(false) }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Send className="h-4 w-4 text-blue-600" />
+                Send Quote to {firstName}?
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 py-1">
+              <p className="text-sm text-muted-foreground">
+                This will immediately send an SMS to{' '}
+                <span className="font-semibold text-foreground">{q.customerPhone}</span>{' '}
+                with the following message:
+              </p>
+              <div className="rounded-lg bg-muted/60 border p-3 max-h-48 overflow-y-auto">
+                <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed font-mono">
+                  {preview ?? 'No signing link available — re-save the quote to generate one.'}
+                </p>
+              </div>
+              {q.sentAt && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  ⚠ Already sent on {new Date(q.sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}. Sending again delivers a second message.
+                </p>
+              )}
+            </div>
+            <DialogFooter className="flex gap-2 sm:gap-2">
+              <Button variant="outline" onClick={() => setShowSendConfirm(false)} disabled={sendQuoteMutation.isPending}>
+                Cancel
+              </Button>
+              <Button
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                disabled={sendQuoteMutation.isPending || !esignUrl}
+                onClick={() => sendQuoteMutation.mutate(q.id)}
+              >
+                {sendQuoteMutation.isPending ? 'Sending…' : 'Yes, Send It'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )
+    })()}
+    </>
   )
 }
 

@@ -361,6 +361,7 @@ export function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack:
   const [, setLocation] = useLocation();
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  const [showSendConfirm, setShowSendConfirm] = useState(false);
 
   // ── Edit mode state ──────────────────────────────────────────────────────
   const [isEditing, setIsEditing] = useState(false);
@@ -465,27 +466,31 @@ export function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack:
     onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
   });
 
-  const copyEsignLink = async () => {
-    if (!quote.acceptToken) {
-      toast({ title: 'No link available', description: 'This quote has no signing link. Try re-saving it.', variant: 'destructive' });
-      return;
-    }
-    const url = `${window.location.origin}/.netlify/functions/esign?token=${quote.acceptToken}`;
-    const firstName = quote.customerName?.split(' ')[0] ?? 'there';
-    const message =
-      `Hi ${firstName}, Knox Exterior Care Co. here! Your quote is ready — follow this link to view. ` +
+  // Build the preview message shown in the confirmation dialog
+  const quoteEsignUrl = quote.acceptToken
+    ? `${window.location.origin}/.netlify/functions/esign?token=${quote.acceptToken}`
+    : null;
+  const quoteFirstName = quote.customerName?.split(' ')[0] ?? 'there';
+  const quoteSmsPreview = quoteEsignUrl
+    ? `Hi ${quoteFirstName}, Knox Exterior Care Co. here! Your quote is ready — follow this link to view. ` +
       `If you'd like to move forward, simply sign the e-sign at the bottom of the quote, and we'll reach out about getting you on the schedule.\n\n` +
       `Please reach out to this number with any questions or concerns - thank you for the opportunity to serve!\n\n` +
       `Automated msg. Reply STOP to opt out.\n\n` +
-      url;
-    try {
-      await navigator.clipboard.writeText(message);
-      toast({ title: 'Message copied!', description: 'Paste it directly into a text message — the full message and link are ready to send.' });
-    } catch {
-      // Clipboard blocked — show the full message so they can copy manually
-      toast({ title: 'Copy this message and send to your customer', description: message });
-    }
-  };
+      quoteEsignUrl
+    : null;
+
+  const sendQuoteMutation = useMutation({
+    mutationFn: () => apiRequest('POST', `/quotes/${quote.id}/send`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/quotes'] });
+      setShowSendConfirm(false);
+      toast({ title: 'Quote sent!', description: `SMS delivered to ${quote.customerPhone}` });
+    },
+    onError: (err: Error) => {
+      setShowSendConfirm(false);
+      toast({ title: 'Failed to send', description: err.message, variant: 'destructive' });
+    },
+  });
 
   const createSubscriptionFromQuote = async () => {
     const lineItems: LineItem[] = Array.isArray(quote.lineItems) ? quote.lineItems : [];
@@ -676,10 +681,25 @@ export function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack:
             </>
           ) : (
             <>
-              {/* ── Primary: Send Quote link ── */}
+              {/* ── Primary: Send Quote ── */}
               {quote.status !== "accepted" && quote.status !== "declined" ? (
-                <Button size="sm" onClick={copyEsignLink} className="min-h-[44px] bg-green-700 hover:bg-green-800 text-white">
-                  <Send className="h-4 w-4 mr-1.5" />Send Quote
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    if (!quote.customerPhone) {
+                      toast({ title: 'No phone number', description: 'Add a phone number to this quote before sending.', variant: 'destructive' });
+                      return;
+                    }
+                    if (!quote.acceptToken) {
+                      toast({ title: 'No signing link', description: 'Re-save this quote to generate a signing link.', variant: 'destructive' });
+                      return;
+                    }
+                    setShowSendConfirm(true);
+                  }}
+                  className="min-h-[44px] bg-green-700 hover:bg-green-800 text-white"
+                >
+                  <Send className="h-4 w-4 mr-1.5" />
+                  {quote.sentAt ? 'Resend Quote' : 'Send Quote'}
                 </Button>
               ) : quote.signedAt ? (
                 <span className="flex items-center gap-1 text-sm font-medium text-green-600 dark:text-green-400 px-1">
@@ -1036,6 +1056,58 @@ export function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack:
         open={showSchedule}
         onClose={() => setShowSchedule(false)}
       />
+
+      {/* ── Send Quote confirmation dialog ──────────────────────────────── */}
+      <Dialog open={showSendConfirm} onOpenChange={v => { if (!v) setShowSendConfirm(false) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="h-4 w-4 text-green-700" />
+              Send Quote to {quote.customerName?.split(' ')[0]}?
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3 py-1">
+            <p className="text-sm text-muted-foreground">
+              This will immediately send an SMS to{' '}
+              <span className="font-semibold text-foreground">{quote.customerPhone}</span>{' '}
+              with the following message:
+            </p>
+
+            {/* Message preview */}
+            <div className="rounded-lg bg-muted/60 border p-3 max-h-48 overflow-y-auto">
+              <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed font-mono">
+                {quoteSmsPreview}
+              </p>
+            </div>
+
+            {quote.sentAt && (
+              <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                ⚠ This quote was already sent on{' '}
+                {new Date(quote.sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}.
+                Sending again will deliver a second message.
+              </p>
+            )}
+          </div>
+
+          <DialogFooter className="flex gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowSendConfirm(false)}
+              disabled={sendQuoteMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-green-700 hover:bg-green-800 text-white"
+              onClick={() => sendQuoteMutation.mutate()}
+              disabled={sendQuoteMutation.isPending}
+            >
+              {sendQuoteMutation.isPending ? 'Sending…' : 'Yes, Send It'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
