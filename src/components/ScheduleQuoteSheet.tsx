@@ -2,6 +2,7 @@
  * ScheduleQuoteSheet
  *
  * A bottom sheet that lets you book a job directly from a signed quote.
+ * Supports multi-service quotes — each service chip maps to one scheduled day.
  * Appears on both the Quotes page and the Leads pipeline lead-detail sheet.
  * On submit it POSTs /jobs, which automatically advances the linked lead
  * to the "Scheduled" kanban column via the jobs.ts → _leadSync.ts pipeline.
@@ -9,13 +10,13 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiRequest } from '@/lib/queryClient'
-import { Quote } from '@/types'
+import { Quote, LineItem } from '@/types'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { CalendarDays, Clock, MapPin, User } from 'lucide-react'
+import { CalendarDays, Clock, MapPin, User, CheckCircle2 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
 type Window = 'morning' | 'afternoon' | 'anytime'
@@ -36,26 +37,36 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
   const { toast } = useToast()
   const qc = useQueryClient()
 
-  // Default service name from first line item
-  const defaultService =
-    quote.lineItems.length > 0 ? quote.lineItems[0].serviceName : quote.quoteType
+  // All schedulable line items (one-time services and subscriptions both count)
+  const lineItems: LineItem[] = Array.isArray(quote.lineItems) ? quote.lineItems : []
 
+  // Default: first line item, or fallback to quote type label
+  const defaultService =
+    lineItems.length > 0 ? lineItems[0].serviceName : quote.quoteType
+
+  const [selectedService, setSelectedService] = useState<string>(defaultService)
+  const [customService, setCustomService]     = useState('')   // shown only when no line items
   const [date, setDate]       = useState('')
   const [window, setWindow]   = useState<Window>('anytime')
   const [time, setTime]       = useState('')
-  const [service, setService] = useState(defaultService)
   const [notes, setNotes]     = useState('')
 
   function reset() {
-    setDate(''); setWindow('anytime'); setTime('')
-    setService(defaultService); setNotes('')
+    setSelectedService(defaultService)
+    setCustomService('')
+    setDate('')
+    setWindow('anytime')
+    setTime('')
+    setNotes('')
   }
+
+  const effectiveService = lineItems.length > 0 ? selectedService : (customService || defaultService)
 
   const scheduleMutation = useMutation({
     mutationFn: () =>
       apiRequest('POST', '/jobs', {
         jobType:         'one_time',
-        serviceName:     service || defaultService,
+        serviceName:     effectiveService,
         status:          'scheduled',
         scheduledDate:   date || null,
         scheduledWindow: window,
@@ -71,7 +82,13 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['/jobs'] })
       qc.invalidateQueries({ queryKey: ['/leads'] })
-      toast({ title: 'Job scheduled', description: `${quote.customerName} added to the calendar` })
+      const dateLabel = date
+        ? new Date(date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+        : 'TBD'
+      toast({
+        title: 'Job scheduled',
+        description: `${effectiveService} for ${quote.customerName} — ${dateLabel}`,
+      })
       reset()
       onClose()
     },
@@ -81,16 +98,19 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
 
   return (
     <Sheet open={open} onOpenChange={v => { if (!v) { reset(); onClose() } }}>
-      <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[90dvh] overflow-y-auto">
-        <SheetHeader className="mb-5">
+      <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[92dvh] overflow-y-auto">
+        <SheetHeader className="mb-4">
           <SheetTitle className="flex items-center gap-2">
             <CalendarDays className="h-5 w-5 text-primary" />
-            Schedule Job
+            Schedule a Day
           </SheetTitle>
+          <p className="text-xs text-muted-foreground">
+            Each tap schedules one service on one day. Come back to add more days for other services.
+          </p>
         </SheetHeader>
 
         {/* Customer summary — read-only */}
-        <div className="rounded-xl border bg-muted/30 p-3 mb-5 space-y-1">
+        <div className="rounded-xl border bg-muted/30 p-3 mb-4 space-y-1">
           <div className="flex items-center gap-2">
             <User className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <span className="text-sm font-semibold">{quote.customerName}</span>
@@ -104,15 +124,42 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
         </div>
 
         <div className="space-y-4">
-          {/* Service name */}
-          <div>
-            <Label className="text-xs mb-1 block">Service</Label>
-            <Input
-              value={service}
-              onChange={e => setService(e.target.value)}
-              placeholder="Service name"
-            />
-          </div>
+
+          {/* ── Service picker (from quote line items) ─────────────────────── */}
+          {lineItems.length > 0 ? (
+            <div>
+              <Label className="text-xs mb-2 block">Which service is this day for?</Label>
+              <div className="flex flex-wrap gap-2">
+                {lineItems.map((li, i) => {
+                  const isSelected = selectedService === li.serviceName
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setSelectedService(li.serviceName)}
+                      className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                        isSelected
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-border bg-card text-muted-foreground hover:border-primary/50 hover:text-foreground'
+                      }`}
+                    >
+                      {isSelected && <CheckCircle2 className="h-3 w-3 shrink-0" />}
+                      {li.serviceName}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <Label className="text-xs mb-1 block">Service</Label>
+              <Input
+                value={customService}
+                onChange={e => setCustomService(e.target.value)}
+                placeholder="Service name"
+              />
+            </div>
+          )}
 
           {/* Date */}
           <div>
@@ -169,7 +216,7 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
             <Textarea
               value={notes}
               onChange={e => setNotes(e.target.value)}
-              placeholder="Gate code, parking notes, special instructions…"
+              placeholder="Contractor, gate code, special instructions…"
               rows={2}
             />
           </div>
@@ -180,7 +227,9 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
             disabled={!date || scheduleMutation.isPending}
             onClick={() => scheduleMutation.mutate()}
           >
-            {scheduleMutation.isPending ? 'Scheduling…' : 'Schedule Job'}
+            {scheduleMutation.isPending
+              ? 'Scheduling…'
+              : `Schedule ${effectiveService}`}
           </Button>
           {!date && (
             <p className="text-xs text-muted-foreground text-center -mt-2">Pick a date to continue</p>

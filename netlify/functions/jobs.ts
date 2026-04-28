@@ -27,10 +27,15 @@ export const handler: Handler = async (event) => {
   try {
     // LIST
     if (method === 'GET' && !id) {
-      const { data, error } = await supabase
+      const quoteId   = event.queryStringParameters?.quoteId
+      const contactId = event.queryStringParameters?.contactId
+      let query = supabase
         .from('jobs')
         .select('*')
         .order('scheduled_date', { ascending: true, nullsFirst: false })
+      if (quoteId)   query = query.eq('quote_id',   quoteId)
+      if (contactId) query = query.eq('contact_id', contactId)
+      const { data, error } = await query
       if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToJob)) }
     }

@@ -4,7 +4,7 @@ import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import { quoCallUrl, quoTextUrl } from '@/lib/utils'
 import { useQuoteContext } from '@/lib/quote-context'
-import { Lead, Quote, LeadStage, LineItem, Contact } from '@/types'
+import { Lead, Quote, Job, LeadStage, LineItem, Contact } from '@/types'
 import {
   DndContext,
   DragEndEvent,
@@ -32,7 +32,7 @@ import {
   MapPin, Phone, Mail, User, CalendarPlus,
   Trash2, Archive, PhoneCall, MessageSquare, FileSignature,
   Send, Receipt, CheckCircle2, XCircle, RotateCcw, TrendingDown,
-  Users, DollarSign, ChevronRight,
+  Users, DollarSign, ChevronRight, CalendarCheck,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { ScheduleQuoteSheet } from '@/components/ScheduleQuoteSheet'
@@ -464,6 +464,16 @@ function LeadDetailSheet({
   const [estimatedValue, setEstimatedValue] = useState(lead?.estimatedValue?.toString() ?? '')
   const [contractorCost, setContractorCost] = useState(lead?.contractorCost?.toString() ?? '')
   const [showSchedule, setShowSchedule] = useState(false)
+
+  // Fetch existing jobs for this lead's quote so we can show what's already scheduled
+  // Use lead.quoteId (the primary quote) as the stable reference for querying jobs
+  const primaryQuoteId = lead?.quoteId ?? quote?.id
+  const { data: existingJobs = [], refetch: refetchJobs } = useQuery<Job[]>({
+    queryKey: ['/jobs', 'quote', primaryQuoteId],
+    queryFn:  () => apiGet(`/jobs?quoteId=${primaryQuoteId}`),
+    enabled:  !!primaryQuoteId && open,
+  })
+
   // Inline quote editor — when true, renders QuoteDetail inside this sheet
   const [editingQuote, setEditingQuote] = useState(false)
   // Local quote state updated after inline saves (so the sheet reflects edits immediately)
@@ -884,37 +894,70 @@ function LeadDetailSheet({
             </Button>
           )}
 
-          {/* ── Schedule Job (gated on signatures) ───────────────────────── */}
-          {canSchedule && (
-            <Button className="w-full bg-primary" onClick={() => setShowSchedule(true)}>
-              <CalendarPlus className="h-4 w-4 mr-2" />Schedule Job
-            </Button>
-          )}
-
-          {/* ── Waiting for signatures info ───────────────────────────────── */}
-          {effectiveQuote && !canSchedule && (
-            <div className="rounded-lg bg-muted/50 border border-dashed p-3 space-y-1">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Before Scheduling</p>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2 text-xs">
-                  {effectiveQuote.signedAt
-                    ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-                    : <div className="h-3.5 w-3.5 rounded-full border-2 border-muted-foreground/40" />}
-                  <span className={effectiveQuote.signedAt ? 'text-green-700 line-through' : 'text-muted-foreground'}>
-                    Quote signed by customer
-                  </span>
-                </div>
-                {isRecurring && (
-                  <div className="flex items-center gap-2 text-xs">
-                    {lead.agreementSignedAt
-                      ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-                      : <div className="h-3.5 w-3.5 rounded-full border-2 border-muted-foreground/40" />}
-                    <span className={lead.agreementSignedAt ? 'text-green-700 line-through' : 'text-muted-foreground'}>
-                      Service agreement signed
-                    </span>
+          {/* ── Scheduling section ───────────────────────────────────────── */}
+          {effectiveQuote && (
+            <div className="space-y-2">
+              {/* Already-scheduled jobs for this quote */}
+              {existingJobs.length > 0 && (
+                <div className="rounded-xl border bg-muted/20 p-3 space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                    <CalendarCheck className="h-3.5 w-3.5" />
+                    Scheduled Days ({existingJobs.length})
+                  </p>
+                  <div className="space-y-1.5">
+                    {existingJobs
+                      .filter(j => j.status !== 'cancelled')
+                      .map(j => (
+                        <div key={j.id} className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className={`h-2 w-2 rounded-full shrink-0 ${
+                              j.status === 'completed' ? 'bg-green-500' :
+                              j.status === 'in_progress' ? 'bg-yellow-500' : 'bg-primary'
+                            }`} />
+                            <span className="text-xs truncate font-medium">{j.serviceName}</span>
+                          </div>
+                          <span className="text-xs text-muted-foreground shrink-0">
+                            {j.scheduledDate
+                              ? new Date(j.scheduledDate + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+                              : 'No date'}
+                          </span>
+                        </div>
+                      ))}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
+
+              {/* Schedule button — available any time the quote is signed */}
+              {canSchedule ? (
+                <Button className="w-full bg-primary" onClick={() => setShowSchedule(true)}>
+                  <CalendarPlus className="h-4 w-4 mr-2" />
+                  {existingJobs.length > 0 ? 'Schedule Another Day' : 'Schedule Job'}
+                </Button>
+              ) : (
+                <div className="rounded-lg bg-muted/50 border border-dashed p-3 space-y-1">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Before Scheduling</p>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 text-xs">
+                      {effectiveQuote.signedAt
+                        ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                        : <div className="h-3.5 w-3.5 rounded-full border-2 border-muted-foreground/40" />}
+                      <span className={effectiveQuote.signedAt ? 'text-green-700 line-through' : 'text-muted-foreground'}>
+                        Quote signed by customer
+                      </span>
+                    </div>
+                    {isRecurring && (
+                      <div className="flex items-center gap-2 text-xs">
+                        {lead.agreementSignedAt
+                          ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                          : <div className="h-3.5 w-3.5 rounded-full border-2 border-muted-foreground/40" />}
+                        <span className={lead.agreementSignedAt ? 'text-green-700 line-through' : 'text-muted-foreground'}>
+                          Service agreement signed
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
