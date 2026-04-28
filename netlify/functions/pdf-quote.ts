@@ -156,14 +156,63 @@ export const handler: Handler = async (event) => {
       y += doc.heightOfString(quote.notes, { width: pageW }) + 16
     }
 
-    if (y > 660) { doc.addPage(); y = 50 }
-    y = Math.max(y, 650)
-    doc.moveTo(50, y).lineTo(260, y).strokeColor('#888888').lineWidth(0.5).stroke()
-    doc.moveTo(310, y).lineTo(520, y).stroke()
-    y += 6
-    doc.fontSize(8).font('Helvetica').fillColor('#888888')
-    doc.text('Customer Signature', 50, y)
-    doc.text('Date', 310, y)
+    // ── Signature block ──────────────────────────────────────────────────────
+    if (quote.signedAt) {
+      // Signed — draw an electronic signature stamp
+      const stampH = 90
+      if (y + stampH + 20 > 720) { doc.addPage(); y = 50 }
+      else { y += 10 }
+
+      const signedDate = new Date(quote.signedAt)
+      const dateStr = signedDate.toLocaleDateString('en-US', {
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+      })
+      const timeStr = signedDate.toLocaleTimeString('en-US', {
+        hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short',
+      })
+
+      // Green stamp box
+      doc.rect(50, y, 512, stampH).fillColor('#f0fdf4').fill()
+      doc.rect(50, y, 512, stampH).strokeColor('#16a34a').lineWidth(1).stroke()
+
+      // Checkmark badge header
+      doc.fontSize(9).font('Helvetica-Bold').fillColor('#15803d')
+      doc.text('✓  ELECTRONICALLY SIGNED', 62, y + 10)
+
+      // Divider line
+      doc.moveTo(62, y + 22).lineTo(550, y + 22).strokeColor('#bbf7d0').lineWidth(0.5).stroke()
+
+      // Fields
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#166534')
+      doc.text('Signed by:', 62, y + 28)
+      doc.font('Helvetica').fillColor('#15803d')
+      doc.text(quote.customerName, 120, y + 28)
+
+      doc.font('Helvetica-Bold').fillColor('#166534').text('Date & Time:', 62, y + 40)
+      doc.font('Helvetica').fillColor('#15803d').text(`${dateStr} at ${timeStr}`, 120, y + 40)
+
+      if (quote.signedIp) {
+        doc.font('Helvetica-Bold').fillColor('#166534').text('IP Address:', 62, y + 52)
+        doc.font('Helvetica').fillColor('#15803d').text(quote.signedIp, 120, y + 52)
+      }
+
+      // Legal note
+      doc.fontSize(7).font('Helvetica').fillColor('#4ade80')
+      const legalNote = 'This estimate was accepted via electronic signature. The signer\'s IP address, timestamp, and consent are on file as a legally binding acceptance of the scope and pricing above.'
+      doc.text(legalNote, 62, y + 66, { width: 488 })
+
+      y += stampH + 6
+    } else {
+      // Unsigned — show blank signature lines
+      if (y > 660) { doc.addPage(); y = 50 }
+      y = Math.max(y, 650)
+      doc.moveTo(50, y).lineTo(260, y).strokeColor('#888888').lineWidth(0.5).stroke()
+      doc.moveTo(310, y).lineTo(520, y).stroke()
+      y += 6
+      doc.fontSize(8).font('Helvetica').fillColor('#888888')
+      doc.text('Customer Signature', 50, y)
+      doc.text('Date', 310, y)
+    }
 
 
     if (settings.quoteFooter) {
