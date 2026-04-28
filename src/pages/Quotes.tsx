@@ -939,9 +939,6 @@ export function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack:
               <TableRow>
                 <TableHead className="text-black">Service</TableHead>
                 <TableHead className="text-black">Description</TableHead>
-                <TableHead className="text-right text-black">Qty</TableHead>
-                <TableHead className="text-right text-black">Unit Price</TableHead>
-                <TableHead className="text-right text-black">Frequency</TableHead>
                 <TableHead className="text-right text-black">Total</TableHead>
               </TableRow>
             </TableHeader>
@@ -950,9 +947,6 @@ export function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack:
                 <TableRow key={idx}>
                   <TableCell className="font-medium">{item.serviceName}</TableCell>
                   <TableCell className="text-sm text-gray-600">{item.description ?? ""}</TableCell>
-                  <TableCell className="text-right">{item.quantity}</TableCell>
-                  <TableCell className="text-right">{fmt(item.unitPrice)}</TableCell>
-                  <TableCell className="text-right">{item.frequency ?? "One-Time"}</TableCell>
                   <TableCell className="text-right font-semibold">{fmt(item.lineTotal)}{item.isSubscription ? "/mo" : ""}</TableCell>
                 </TableRow>
               ))}
