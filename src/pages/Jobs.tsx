@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import { quoCallUrl } from '@/lib/utils'
-import { Job, Subscription, Contractor, ServiceSchedule } from '@/types'
+import { Job, Subscription, Contractor, ServiceSchedule, Lead, Quote, LineItem } from '@/types'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,10 +17,357 @@ import { useToast } from '@/hooks/use-toast'
 import {
   CalendarDays, MapPin, Phone, Mail, Wrench,
   ChevronRight, Clock, AlertCircle, CheckCircle2, RefreshCw, Calendar,
-  CloudRain, UserCheck, FileText,
+  CloudRain, UserCheck, FileText, Plus, Search, MessageSquare, ArrowLeft,
 } from 'lucide-react'
 
 type RescheduleReason = 'weather' | 'customer_request' | 'other'
+
+// ── Window helpers (shared) ───────────────────────────────────────────────────
+type ScheduleWindow = 'morning' | 'afternoon' | 'anytime'
+
+const SCHEDULE_WINDOWS: { id: ScheduleWindow; label: string; sub: string }[] = [
+  { id: 'morning',   label: 'Morning',   sub: '8 am – 12 pm' },
+  { id: 'afternoon', label: 'Afternoon', sub: '12 pm – 5 pm' },
+  { id: 'anytime',   label: 'Any Time',  sub: 'Flexible'     },
+]
+const WINDOW_LABELS: Record<ScheduleWindow, string> = {
+  morning:   'in the morning (8 am–12 pm)',
+  afternoon: 'in the afternoon (12 pm–5 pm)',
+  anytime:   '',
+}
+
+function buildSmsMessage(opts: {
+  firstName: string; serviceName: string; date: string
+  window: ScheduleWindow; companyName: string
+}) {
+  const { firstName, serviceName, date, window, companyName } = opts
+  const [yr, mo, dy] = date.split('-').map(Number)
+  const d = new Date(yr, mo - 1, dy)
+  const day = d.toLocaleDateString('en-US', { weekday: 'long' })
+  const mon = d.toLocaleDateString('en-US', { month: 'long' })
+  const win = WINDOW_LABELS[window] ? ` ${WINDOW_LABELS[window]}` : ''
+  return (
+    `Hi ${firstName}! Your ${serviceName} with ${companyName} is confirmed for ` +
+    `${day}, ${mon} ${dy}, ${yr}${win}.\n\n` +
+    `If you have any questions or need to make changes, just reply to this message.\n\n` +
+    `Thank you for choosing ${companyName}!\n\nAutomated msg. Reply STOP to opt out.`
+  )
+}
+
+// ── New Job Sheet (search → schedule) ────────────────────────────────────────
+function NewJobSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { toast } = useToast()
+  const qc = useQueryClient()
+
+  const { data: leads = [] } = useQuery<Lead[]>({ queryKey: ['/leads'], queryFn: () => apiGet('/leads'), enabled: open })
+  const { data: quotes = [] } = useQuery<Quote[]>({ queryKey: ['/quotes'], queryFn: () => apiGet('/quotes'), enabled: open })
+
+  // Build a lookup of quote by id
+  const quoteById = useMemo(() => {
+    const m: Record<string, Quote> = {}
+    for (const q of quotes) m[q.id] = q
+    return m
+  }, [quotes])
+
+  // All leads that have a signed quote — any stage, including scheduled
+  const schedulableLeads = useMemo(() =>
+    leads
+      .filter(l => l.stage !== 'lost')
+      .map(l => ({ lead: l, quote: l.quoteId ? quoteById[l.quoteId] : null }))
+      .filter(({ quote }) => quote && !quote.trashedAt),
+  [leads, quoteById])
+
+  // Step 1: search
+  const [search, setSearch] = useState('')
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
+  const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null)
+
+  // Step 2: scheduling form
+  const [service, setService]     = useState('')
+  const [date, setDate]           = useState('')
+  const [win, setWin]             = useState<ScheduleWindow>('anytime')
+  const [time, setTime]           = useState('')
+  const [notes, setNotes]         = useState('')
+
+  // Step 3: SMS prompt
+  const [showSms, setShowSms]         = useState(false)
+  const [smsPending, setSmsPending]   = useState<{ phone: string; msg: string; contactId: string | null } | null>(null)
+
+  const filteredLeads = useMemo(() => {
+    if (!search.trim()) return schedulableLeads
+    const q = search.toLowerCase()
+    return schedulableLeads.filter(({ lead, quote }) =>
+      quote?.customerName?.toLowerCase().includes(q) ||
+      quote?.customerPhone?.includes(q) ||
+      lead.serviceInterest?.toLowerCase().includes(q)
+    )
+  }, [schedulableLeads, search])
+
+  function selectLead(lead: Lead, quote: Quote) {
+    setSelectedLead(lead)
+    setSelectedQuote(quote)
+    const items: LineItem[] = Array.isArray(quote.lineItems) ? quote.lineItems : []
+    setService(items.length > 0 ? items[0].serviceName : quote.quoteType ?? '')
+  }
+
+  function resetAll() {
+    setSearch(''); setSelectedLead(null); setSelectedQuote(null)
+    setService(''); setDate(''); setWin('anytime'); setTime(''); setNotes('')
+    setShowSms(false); setSmsPending(null)
+  }
+
+  const scheduleMutation = useMutation({
+    mutationFn: () => apiRequest('POST', '/jobs', {
+      jobType:         'one_time',
+      serviceName:     service || (selectedQuote?.quoteType ?? ''),
+      status:          'scheduled',
+      scheduledDate:   date || null,
+      scheduledWindow: win,
+      scheduledTime:   time || null,
+      customerName:    selectedQuote?.customerName ?? '',
+      customerAddress: selectedQuote?.customerAddress ?? null,
+      customerPhone:   selectedQuote?.customerPhone ?? null,
+      customerEmail:   selectedQuote?.customerEmail ?? null,
+      contactId:       selectedLead?.contactId ?? selectedQuote?.contactId ?? null,
+      quoteId:         selectedQuote?.id ?? null,
+      notes:           notes || null,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/jobs'] })
+      qc.invalidateQueries({ queryKey: ['/leads'] })
+      const label = date ? new Date(date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'TBD'
+      toast({ title: 'Job scheduled', description: `${service} for ${selectedQuote?.customerName} — ${label}` })
+
+      const phone = selectedQuote?.customerPhone
+      if (phone && date) {
+        const firstName = selectedQuote?.customerName?.split(' ')[0] ?? 'there'
+        const msg = buildSmsMessage({ firstName, serviceName: service, date, window: win, companyName: 'Knox Exterior Care Co.' })
+        setSmsPending({ phone, msg, contactId: selectedLead?.contactId ?? selectedQuote?.contactId ?? null })
+        setShowSms(true)
+      }
+      resetAll()
+      onClose()
+    },
+    onError: (err: Error) => toast({ title: 'Failed to schedule', description: err.message, variant: 'destructive' }),
+  })
+
+  const sendSmsMutation = useMutation({
+    mutationFn: (p: { to: string; message: string; contactId: string | null }) =>
+      apiRequest('POST', '/sms', { action: 'send', to: p.to, message: p.message, contactId: p.contactId }),
+    onSuccess: () => {
+      toast({ title: 'Confirmation sent!', description: `Text delivered to ${smsPending?.phone}` })
+      setShowSms(false); setSmsPending(null)
+    },
+    onError: (err: Error) => {
+      toast({ title: 'SMS failed', description: err.message, variant: 'destructive' })
+      setShowSms(false); setSmsPending(null)
+    },
+  })
+
+  const lineItems: LineItem[] = Array.isArray(selectedQuote?.lineItems) ? selectedQuote!.lineItems : []
+
+  const STAGE_COLORS: Record<string, string> = {
+    new: 'bg-slate-100 text-slate-700', contacted: 'bg-blue-100 text-blue-700',
+    follow_up: 'bg-orange-100 text-orange-700', quoted: 'bg-yellow-100 text-yellow-700',
+    scheduled: 'bg-violet-100 text-violet-700', recurring: 'bg-indigo-100 text-indigo-700',
+    finished_unpaid: 'bg-amber-100 text-amber-700', finished_paid: 'bg-emerald-100 text-emerald-700',
+  }
+
+  return (
+    <>
+      <Sheet open={open} onOpenChange={v => { if (!v) { resetAll(); onClose() } }}>
+        <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[92dvh] overflow-y-auto">
+          <SheetHeader className="mb-4">
+            <SheetTitle className="flex items-center gap-2">
+              {selectedLead ? (
+                <button onClick={() => { setSelectedLead(null); setSelectedQuote(null) }} className="mr-1">
+                  <ArrowLeft className="h-4 w-4 text-muted-foreground" />
+                </button>
+              ) : (
+                <CalendarDays className="h-5 w-5 text-primary" />
+              )}
+              {selectedLead ? `Schedule — ${selectedQuote?.customerName}` : 'New Job'}
+            </SheetTitle>
+          </SheetHeader>
+
+          {!selectedLead ? (
+            /* ── Step 1: Search for a lead ── */
+            <div className="space-y-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder="Search by customer name or phone…"
+                  className="pl-9"
+                  autoFocus
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {filteredLeads.length} lead{filteredLeads.length !== 1 ? 's' : ''} with active quotes
+              </p>
+              <div className="space-y-2 max-h-[55dvh] overflow-y-auto">
+                {filteredLeads.length === 0 ? (
+                  <div className="text-center py-10 text-muted-foreground">
+                    <Search className="h-7 w-7 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm">No matching leads</p>
+                    <p className="text-xs mt-1">Try a different name or phone number</p>
+                  </div>
+                ) : (
+                  filteredLeads.map(({ lead, quote }) => (
+                    <button
+                      key={lead.id}
+                      onClick={() => selectLead(lead, quote!)}
+                      className="w-full rounded-xl border bg-card p-3 text-left hover:bg-muted/40 active:scale-95 transition-all"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold truncate">{quote?.customerName}</p>
+                          {quote?.customerPhone && (
+                            <p className="text-xs text-muted-foreground">{quote.customerPhone}</p>
+                          )}
+                          {quote?.customerAddress && (
+                            <p className="text-xs text-muted-foreground truncate">{quote.customerAddress}</p>
+                          )}
+                        </div>
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${STAGE_COLORS[lead.stage] ?? 'bg-muted text-muted-foreground'}`}>
+                          {lead.stage.replace('_', ' ')}
+                        </span>
+                      </div>
+                      {Array.isArray(quote?.lineItems) && quote!.lineItems.length > 0 && (
+                        <p className="text-xs text-muted-foreground mt-1 truncate">
+                          {quote!.lineItems.map((li: LineItem) => li.serviceName).join(' · ')}
+                        </p>
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : (
+            /* ── Step 2: Scheduling form ── */
+            <div className="space-y-4">
+              {/* Customer info */}
+              <div className="rounded-xl border bg-muted/30 p-3 space-y-1">
+                <p className="text-sm font-semibold">{selectedQuote?.customerName}</p>
+                {selectedQuote?.customerPhone && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Phone className="h-3 w-3" />{selectedQuote.customerPhone}
+                  </p>
+                )}
+                {selectedQuote?.customerAddress && (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <MapPin className="h-3 w-3" />{selectedQuote.customerAddress}
+                  </p>
+                )}
+              </div>
+
+              {/* Service picker */}
+              {lineItems.length > 0 ? (
+                <div>
+                  <Label className="text-xs mb-2 block">Which service is this day for?</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {lineItems.map((li, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setService(li.serviceName)}
+                        className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
+                          service === li.serviceName
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-border bg-card text-muted-foreground hover:border-primary/50'
+                        }`}
+                      >
+                        {service === li.serviceName && <CheckCircle2 className="h-3 w-3 shrink-0" />}
+                        {li.serviceName}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <Label className="text-xs mb-1 block">Service</Label>
+                  <Input value={service} onChange={e => setService(e.target.value)} placeholder="Service name" />
+                </div>
+              )}
+
+              {/* Date */}
+              <div>
+                <Label className="text-xs mb-1 block">Date</Label>
+                <Input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={e => setDate(e.target.value)} />
+              </div>
+
+              {/* Arrival window */}
+              <div>
+                <Label className="text-xs mb-2 block">Arrival Window</Label>
+                <div className="grid grid-cols-3 gap-2">
+                  {SCHEDULE_WINDOWS.map(w => (
+                    <button key={w.id} type="button" onClick={() => setWin(w.id)}
+                      className={`rounded-xl border py-2.5 px-2 text-center transition-all ${
+                        win === w.id ? 'border-primary bg-primary/10 text-primary' : 'border-border bg-card text-muted-foreground hover:border-primary/40'
+                      }`}
+                    >
+                      <p className="text-xs font-semibold">{w.label}</p>
+                      <p className="text-[10px] mt-0.5 opacity-70">{w.sub}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Specific time */}
+              <div>
+                <Label className="text-xs mb-1 block">Specific Time <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                <div className="flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <Input type="time" value={time} onChange={e => setTime(e.target.value)} className="flex-1" />
+                </div>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <Label className="text-xs mb-1 block">Notes</Label>
+                <Textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Gate code, special instructions…" rows={2} />
+              </div>
+
+              <Button className="w-full" size="lg" disabled={!date || !service || scheduleMutation.isPending} onClick={() => scheduleMutation.mutate()}>
+                {scheduleMutation.isPending ? 'Scheduling…' : `Schedule ${service || 'Job'}`}
+              </Button>
+              {!date && <p className="text-xs text-muted-foreground text-center -mt-2">Pick a date to continue</p>}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* SMS confirmation dialog — independent of the sheet */}
+      <Dialog open={showSms} onOpenChange={v => { if (!v) { setShowSms(false); setSmsPending(null) } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-primary" />
+              Send a confirmation text?
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <p className="text-sm text-muted-foreground">
+              Do you want to send an automated text to{' '}
+              <span className="font-semibold text-foreground">{smsPending?.phone}</span>{' '}
+              to confirm their appointment?
+            </p>
+            <div className="rounded-lg bg-muted/60 border p-3 max-h-40 overflow-y-auto">
+              <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed font-mono">{smsPending?.msg}</p>
+            </div>
+          </div>
+          <DialogFooter className="flex gap-2 sm:gap-2">
+            <Button variant="outline" disabled={sendSmsMutation.isPending} onClick={() => { setShowSms(false); setSmsPending(null) }}>No, Skip</Button>
+            <Button disabled={sendSmsMutation.isPending} onClick={() => smsPending && sendSmsMutation.mutate({ to: smsPending.phone, message: smsPending.msg, contactId: smsPending.contactId })}>
+              {sendSmsMutation.isPending ? 'Sending…' : 'Yes, Send It'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -642,6 +990,7 @@ function OneTimeJobCard({ job, onOpen }: { job: Job; onOpen: () => void }) {
 export default function Jobs() {
   const [selectedJob, setSelectedJob] = useState<Job | null>(null)
   const [selectedSub, setSelectedSub] = useState<Subscription | null>(null)
+  const [showNewJob, setShowNewJob] = useState(false)
 
   const { data: jobs = [], isLoading: jobsLoading } = useQuery<Job[]>({
     queryKey: ['/jobs'],
@@ -665,11 +1014,16 @@ export default function Jobs() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 pt-4 pb-2 border-b">
-        <h2 className="text-base font-semibold">Open Jobs</h2>
-        <p className="text-xs text-muted-foreground">
-          {activeSubs.length} subscription{activeSubs.length !== 1 ? 's' : ''} · {oneTimeJobs.length} one-time job{oneTimeJobs.length !== 1 ? 's' : ''}
-        </p>
+      <div className="flex items-center justify-between px-4 pt-4 pb-2 border-b">
+        <div>
+          <h2 className="text-base font-semibold">Open Jobs</h2>
+          <p className="text-xs text-muted-foreground">
+            {activeSubs.length} subscription{activeSubs.length !== 1 ? 's' : ''} · {oneTimeJobs.length} one-time job{oneTimeJobs.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <Button size="sm" onClick={() => setShowNewJob(true)}>
+          <Plus className="h-4 w-4 mr-1" />New Job
+        </Button>
       </div>
 
       <Tabs defaultValue="subscriptions" className="flex-1 flex flex-col overflow-hidden">
@@ -732,6 +1086,10 @@ export default function Jobs() {
         contractors={contractors}
         open={!!selectedSub}
         onClose={() => setSelectedSub(null)}
+      />
+      <NewJobSheet
+        open={showNewJob}
+        onClose={() => setShowNewJob(false)}
       />
     </div>
   )
