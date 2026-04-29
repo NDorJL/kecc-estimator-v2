@@ -85,6 +85,7 @@ function NewJobSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
   // Step 2: scheduling form
   const [service, setService]     = useState('')
   const [date, setDate]           = useState('')
+  const [endDate, setEndDate]     = useState('')
   const [win, setWin]             = useState<ScheduleWindow>('anytime')
   const [time, setTime]           = useState('')
   const [notes, setNotes]         = useState('')
@@ -112,7 +113,7 @@ function NewJobSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
 
   function resetAll() {
     setSearch(''); setSelectedLead(null); setSelectedQuote(null)
-    setService(''); setDate(''); setWin('anytime'); setTime(''); setNotes('')
+    setService(''); setDate(''); setEndDate(''); setWin('anytime'); setTime(''); setNotes('')
     setShowSms(false); setSmsPending(null)
   }
 
@@ -121,8 +122,9 @@ function NewJobSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
       jobType:         'one_time',
       serviceName:     service || (selectedQuote?.quoteType ?? ''),
       status:          'scheduled',
-      scheduledDate:   date || null,
-      scheduledWindow: win,
+      scheduledDate:    date || null,
+      scheduledEndDate: endDate || null,
+      scheduledWindow:  win,
       scheduledTime:   time || null,
       customerName:    selectedQuote?.customerName ?? '',
       customerAddress: selectedQuote?.customerAddress ?? null,
@@ -291,11 +293,20 @@ function NewJobSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
                 </div>
               )}
 
-              {/* Date */}
-              <div>
-                <Label className="text-xs mb-1 block">Date</Label>
-                <Input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={e => setDate(e.target.value)} />
+              {/* Date range */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs mb-1 block">Start Date</Label>
+                  <Input type="date" value={date} min={new Date().toISOString().slice(0, 10)} onChange={e => setDate(e.target.value)} />
+                </div>
+                <div>
+                  <Label className="text-xs mb-1 block">End Date <span className="text-muted-foreground font-normal">(multi-day)</span></Label>
+                  <Input type="date" value={endDate} min={date || new Date().toISOString().slice(0, 10)} onChange={e => setEndDate(e.target.value)} />
+                </div>
               </div>
+              {endDate && date && endDate > date && (
+                <p className="text-xs text-primary -mt-1">📅 {Math.round((new Date(endDate).getTime() - new Date(date).getTime()) / 86400000) + 1}-day job</p>
+              )}
 
               {/* Arrival window */}
               <div>
@@ -407,6 +418,7 @@ function JobDetailSheet({
   const [form, setForm] = useState<{
     status: string
     scheduledDate: string
+    scheduledEndDate: string
     contractorId: string
     notes: string
     internalNotes: string
@@ -419,6 +431,7 @@ function JobDetailSheet({
   }>({
     status: job?.status ?? 'scheduled',
     scheduledDate: job?.scheduledDate ?? '',
+    scheduledEndDate: job?.scheduledEndDate ?? '',
     contractorId: job?.contractorId ?? '',
     notes: job?.notes ?? '',
     internalNotes: job?.internalNotes ?? '',
@@ -442,6 +455,7 @@ function JobDetailSheet({
     setForm({
       status: job.status,
       scheduledDate: newDate,
+      scheduledEndDate: job.scheduledEndDate ?? '',
       contractorId: job.contractorId ?? '',
       notes: job.notes ?? '',
       internalNotes: job.internalNotes ?? '',
@@ -463,6 +477,7 @@ function JobDetailSheet({
     mutationFn: () => apiRequest('PATCH', `/jobs/${job!.id}`, {
       status: form.status,
       scheduledDate: form.scheduledDate || null,
+      scheduledEndDate: form.scheduledEndDate || null,
       contractorId: form.contractorId || null,
       notes: form.notes || null,
       internalNotes: form.internalNotes || null,
@@ -594,7 +609,7 @@ function JobDetailSheet({
               </Select>
             </div>
             <div>
-              <Label className="text-xs">Scheduled Date</Label>
+              <Label className="text-xs">Start Date</Label>
               <Input
                 type="date"
                 className="mt-1"
@@ -602,6 +617,23 @@ function JobDetailSheet({
                 onChange={e => setForm(f => ({ ...f, scheduledDate: e.target.value }))}
               />
             </div>
+          </div>
+
+          {/* End date for multi-day jobs */}
+          <div>
+            <Label className="text-xs">End Date <span className="text-muted-foreground font-normal">(leave blank for single-day)</span></Label>
+            <Input
+              type="date"
+              className="mt-1"
+              value={form.scheduledEndDate}
+              min={form.scheduledDate || undefined}
+              onChange={e => setForm(f => ({ ...f, scheduledEndDate: e.target.value }))}
+            />
+            {form.scheduledEndDate && form.scheduledDate && form.scheduledEndDate > form.scheduledDate && (
+              <p className="text-xs text-primary mt-1">
+                📅 {Math.round((new Date(form.scheduledEndDate).getTime() - new Date(form.scheduledDate).getTime()) / 86400000) + 1}-day job
+              </p>
+            )}
           </div>
 
           {/* Contractor */}

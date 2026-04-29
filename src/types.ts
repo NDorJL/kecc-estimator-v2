@@ -497,7 +497,8 @@ export interface Job {
   jobType: JobType;
   serviceName: string;
   status: JobStatus;
-  scheduledDate: string | null;     // ISO date 'YYYY-MM-DD'
+  scheduledDate: string | null;     // ISO date 'YYYY-MM-DD' — start date
+  scheduledEndDate: string | null;  // ISO date 'YYYY-MM-DD' — last day (null = single day)
   scheduledTime: string | null;     // 'HH:MM' 24-hour, for quote visits
   scheduledWindow: string | null;   // 'morning' | 'afternoon' | 'evening' | 'anytime'
   startTime: string | null;         // ISO timestamptz
@@ -526,6 +527,7 @@ export function rowToJob(r: any): Job {
     serviceName: r.service_name,
     status: r.status ?? 'scheduled',
     scheduledDate: r.scheduled_date ?? null,
+    scheduledEndDate: r.scheduled_end_date ?? null,
     scheduledTime: r.scheduled_time ?? null,
     scheduledWindow: r.scheduled_window ?? null,
     startTime: r.start_time ?? null,

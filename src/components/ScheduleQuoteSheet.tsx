@@ -71,10 +71,11 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
 
   const [selectedService, setSelectedService] = useState<string>(defaultService)
   const [customService, setCustomService]     = useState('')
-  const [date, setDate]       = useState('')
-  const [window, setWindow]   = useState<Window>('anytime')
-  const [time, setTime]       = useState('')
-  const [notes, setNotes]     = useState('')
+  const [date, setDate]         = useState('')
+  const [endDate, setEndDate]   = useState('')
+  const [window, setWindow]     = useState<Window>('anytime')
+  const [time, setTime]         = useState('')
+  const [notes, setNotes]       = useState('')
 
   // SMS confirmation prompt state — shown after a job is created
   const [showSmsPrompt, setShowSmsPrompt]       = useState(false)
@@ -86,6 +87,7 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
     setSelectedService(defaultService)
     setCustomService('')
     setDate('')
+    setEndDate('')
     setWindow('anytime')
     setTime('')
     setNotes('')
@@ -104,8 +106,9 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
         jobType:         'one_time',
         serviceName:     effectiveService,
         status:          'scheduled',
-        scheduledDate:   date || null,
-        scheduledWindow: window,
+        scheduledDate:    date || null,
+        scheduledEndDate: endDate || null,
+        scheduledWindow:  window,
         scheduledTime:   time || null,
         customerName:    quote.customerName,
         customerAddress: quote.customerAddress ?? null,
@@ -257,16 +260,34 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
               </div>
             )}
 
-            {/* Date */}
-            <div>
-              <Label className="text-xs mb-1 block">Date</Label>
-              <Input
-                type="date"
-                value={date}
-                min={new Date().toISOString().slice(0, 10)}
-                onChange={e => setDate(e.target.value)}
-              />
+            {/* Date range */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs mb-1 block">Start Date</Label>
+                <Input
+                  type="date"
+                  value={date}
+                  min={new Date().toISOString().slice(0, 10)}
+                  onChange={e => setDate(e.target.value)}
+                />
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">
+                  End Date <span className="text-muted-foreground font-normal">(if multi-day)</span>
+                </Label>
+                <Input
+                  type="date"
+                  value={endDate}
+                  min={date || new Date().toISOString().slice(0, 10)}
+                  onChange={e => setEndDate(e.target.value)}
+                />
+              </div>
             </div>
+            {endDate && date && endDate > date && (
+              <p className="text-xs text-primary -mt-1">
+                📅 {Math.round((new Date(endDate).getTime() - new Date(date).getTime()) / 86400000) + 1}-day job
+              </p>
+            )}
 
             {/* Time window */}
             <div>
@@ -362,7 +383,7 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
           <DialogFooter className="flex gap-2 sm:gap-2">
             <Button
               variant="outline"
-              onClick={closeAll}
+              onClick={closeSmsPrompt}
               disabled={sendSmsMutation.isPending}
             >
               No, Skip

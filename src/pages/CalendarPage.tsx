@@ -188,21 +188,35 @@ function generateJobEvents(jobs: Job[], year: number, month: number): Map<string
   const map = new Map<string, CalEvent[]>()
   for (const job of jobs) {
     if (!job.scheduledDate || job.status === 'cancelled') continue
-    const d = new Date(job.scheduledDate + 'T12:00:00')
-    if (d.getFullYear() !== year || d.getMonth() !== month) continue
-    const key = job.scheduledDate
-    const arr = map.get(key) ?? []
     const isQuoteVisit = job.jobType === 'quote_visit'
-    arr.push({
-      id: `job-${job.id}`,
-      title: job.customerName ?? 'Unknown',
-      subtitle: isQuoteVisit ? `📋 Quote Visit${job.scheduledTime ? ' · ' + fmtTime12(job.scheduledTime) : ''}` : job.serviceName,
-      type: isQuoteVisit ? 'quote_visit' : 'one_time',
-      color: isQuoteVisit ? 'bg-purple-500' : 'bg-green-500',
-      job,
-      window: job.scheduledWindow,
-    })
-    map.set(key, arr)
+
+    // Build list of dates this job spans (start through end, or just start)
+    const startStr = job.scheduledDate
+    const endStr   = job.scheduledEndDate && job.scheduledEndDate > startStr ? job.scheduledEndDate : startStr
+    const start = new Date(startStr + 'T12:00:00')
+    const end   = new Date(endStr   + 'T12:00:00')
+    const totalDays = Math.round((end.getTime() - start.getTime()) / 86400000) + 1
+
+    for (let dayOffset = 0; dayOffset < totalDays; dayOffset++) {
+      const d = new Date(start)
+      d.setDate(start.getDate() + dayOffset)
+      if (d.getFullYear() !== year || d.getMonth() !== month) continue
+      const key = d.toISOString().slice(0, 10)
+      const arr = map.get(key) ?? []
+      const dayLabel = totalDays > 1 ? ` (Day ${dayOffset + 1}/${totalDays})` : ''
+      arr.push({
+        id: `job-${job.id}-d${dayOffset}`,
+        title: job.customerName ?? 'Unknown',
+        subtitle: isQuoteVisit
+          ? `📋 Quote Visit${job.scheduledTime ? ' · ' + fmtTime12(job.scheduledTime) : ''}`
+          : job.serviceName + dayLabel,
+        type: isQuoteVisit ? 'quote_visit' : 'one_time',
+        color: isQuoteVisit ? 'bg-purple-500' : 'bg-green-500',
+        job,
+        window: job.scheduledWindow,
+      })
+      map.set(key, arr)
+    }
   }
   return map
 }
@@ -1031,12 +1045,14 @@ function AddServiceSheet({
   const [quoteSearch, setQuoteSearch] = useState('')
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
   const [scheduledDate, setScheduledDate] = useState(defaultDate)
+  const [scheduledEndDate, setScheduledEndDate] = useState('')
   const [scheduledWindow, setScheduledWindow] = useState('anytime')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     if (open) {
       setScheduledDate(defaultDate)
+      setScheduledEndDate('')
       setStep('quote')
       setSelectedQuote(null)
       setQuoteSearch('')
@@ -1104,11 +1120,13 @@ function AddServiceSheet({
           serviceName: item.serviceName,
           jobType: 'one_time',
           quoteId: selectedQuote.id,
+          contactId: selectedQuote.contactId ?? null,
           customerName: selectedQuote.customerName,
           customerAddress: selectedQuote.customerAddress,
           customerPhone: selectedQuote.customerPhone,
           customerEmail: selectedQuote.customerEmail,
           scheduledDate,
+          scheduledEndDate: scheduledEndDate || null,
           scheduledWindow,
           status: 'scheduled',
         })
@@ -1206,10 +1224,30 @@ function AddServiceSheet({
               ))}
             </div>
 
-            <div>
-              <Label className="text-xs">Date</Label>
-              <Input type="date" className="mt-1 min-h-[44px]" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Start Date *</Label>
+                <Input type="date" className="mt-1 min-h-[44px]" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
+              </div>
+              <div>
+                <Label className="text-xs">
+                  End Date <span className="text-muted-foreground font-normal">(multi-day)</span>
+                </Label>
+                <Input
+                  type="date"
+                  className="mt-1 min-h-[44px]"
+                  value={scheduledEndDate}
+                  min={scheduledDate || undefined}
+                  onChange={e => setScheduledEndDate(e.target.value)}
+                />
+              </div>
             </div>
+            {scheduledEndDate && scheduledDate && scheduledEndDate > scheduledDate && (
+              <p className="text-xs text-primary -mt-1 flex items-center gap-1">
+                📅 Multi-day job:{' '}
+                {Math.round((new Date(scheduledEndDate).getTime() - new Date(scheduledDate).getTime()) / 86400000) + 1} days
+              </p>
+            )}
             <div>
               <Label className="text-xs">Time Window</Label>
               <Select value={scheduledWindow} onValueChange={setScheduledWindow}>
