@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import { quoCallUrl } from '@/lib/utils'
-import { Job, Subscription, Contractor, Contact, Quote } from '@/types'
+import { Job, Subscription, Contractor, Contact, Quote, Lead } from '@/types'
 import {
   DndContext, DragEndEvent, DragStartEvent, DragOverlay,
   useDraggable, useDroppable, PointerSensor, useSensor, useSensors,
@@ -1050,13 +1050,41 @@ function AddServiceSheet({
     enabled: open,
   })
 
-  const acceptedQuotes = allQuotes.filter(q => q.status === 'accepted')
+  const { data: allLeads = [] } = useQuery<Lead[]>({
+    queryKey: ['/leads'],
+    queryFn: () => apiGet('/leads'),
+    enabled: open,
+  })
+
+  // Build a map from quoteId → lead stage so we can show the stage badge
+  const quoteLeadStage = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const l of allLeads) {
+      if (l.quoteId) m[l.quoteId] = l.stage
+    }
+    return m
+  }, [allLeads])
+
+  // Active lead quote IDs — any non-lost lead with a linked quote
+  const activeLeadQuoteIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const l of allLeads) {
+      if (l.stage !== 'lost' && l.quoteId) ids.add(l.quoteId)
+    }
+    return ids
+  }, [allLeads])
+
+  // Show quotes that are: not trashed AND either linked to an active lead OR accepted
+  const activeQuotes = allQuotes.filter(q =>
+    !q.trashedAt && (activeLeadQuoteIds.has(q.id) || q.status === 'accepted')
+  )
+
   const filteredQuotes = quoteSearch.trim()
-    ? acceptedQuotes.filter(q =>
+    ? activeQuotes.filter(q =>
         q.customerName.toLowerCase().includes(quoteSearch.toLowerCase()) ||
         (q.customerAddress ?? '').toLowerCase().includes(quoteSearch.toLowerCase())
       )
-    : acceptedQuotes
+    : activeQuotes
 
   function toggleItem(id: string) {
     setSelectedItems(prev => {
@@ -1111,13 +1139,13 @@ function AddServiceSheet({
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
               <Input
                 className="pl-9 min-h-[44px]"
-                placeholder="Search accepted quotes…"
+                placeholder="Search leads by name or address…"
                 value={quoteSearch}
                 onChange={e => setQuoteSearch(e.target.value)}
               />
             </div>
             {filteredQuotes.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-8">No accepted quotes found.</p>
+              <p className="text-sm text-muted-foreground text-center py-8">No active leads found.</p>
             ) : (
               <div className="space-y-2">
                 {filteredQuotes.map(q => (
@@ -1126,10 +1154,17 @@ function AddServiceSheet({
                     onClick={() => { setSelectedQuote(q); setStep('services') }}
                     className="w-full text-left rounded-xl border bg-card p-3 hover:border-primary/50 hover:bg-muted/30 transition-colors"
                   >
-                    <p className="font-semibold text-sm">{q.customerName}</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-semibold text-sm">{q.customerName}</p>
+                      {quoteLeadStage[q.id] && (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0 capitalize">
+                          {quoteLeadStage[q.id].replace('_', ' ')}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground">{q.customerAddress ?? 'No address'}</p>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-xs font-medium text-green-700 dark:text-green-400">${q.total.toFixed(0)} total</span>
+                      <span className="text-xs font-medium text-primary">${q.total.toFixed(0)} total</span>
                       <span className="text-xs text-muted-foreground">{q.lineItems.length} item{q.lineItems.length !== 1 ? 's' : ''}</span>
                     </div>
                   </button>
