@@ -91,11 +91,9 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
     setNotes('')
   }
 
-  function closeAll() {
-    reset()
+  function closeSmsPrompt() {
     setShowSmsPrompt(false)
     setPendingJobInfo(null)
-    onClose()
   }
 
   const effectiveService = lineItems.length > 0 ? selectedService : (customService || defaultService)
@@ -129,7 +127,7 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
         description: `${effectiveService} for ${quote.customerName} — ${dateLabel}`,
       })
 
-      // If there's a phone number, offer to send a confirmation text
+      // Close the scheduling sheet first, then optionally offer SMS
       if (quote.customerPhone && date) {
         const firstName = quote.customerName?.split(' ')[0] ?? quote.customerName
         setPendingJobInfo({
@@ -139,12 +137,10 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
           phone: quote.customerPhone,
           name: firstName,
         })
-        reset()
         setShowSmsPrompt(true)
-      } else {
-        reset()
-        onClose()
       }
+      reset()
+      onClose()  // Always close the sheet — SMS dialog is independent
     },
     onError: (err: Error) =>
       toast({ title: 'Failed to schedule', description: err.message, variant: 'destructive' }),
@@ -160,11 +156,11 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
       }),
     onSuccess: () => {
       toast({ title: 'Confirmation sent!', description: `Text delivered to ${pendingJobInfo?.phone}` })
-      closeAll()
+      closeSmsPrompt()
     },
     onError: (err: Error) => {
       toast({ title: 'SMS failed', description: err.message, variant: 'destructive' })
-      closeAll()
+      closeSmsPrompt()
     },
   })
 
@@ -198,7 +194,7 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
 
   return (
     <>
-      <Sheet open={open && !showSmsPrompt} onOpenChange={v => { if (!v) { reset(); onClose() } }}>
+      <Sheet open={open} onOpenChange={v => { if (!v) { reset(); onClose() } }}>
         <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[92dvh] overflow-y-auto">
           <SheetHeader className="mb-4">
             <SheetTitle className="flex items-center gap-2">
@@ -339,7 +335,7 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
       </Sheet>
 
       {/* ── SMS confirmation prompt ──────────────────────────────────────── */}
-      <Dialog open={showSmsPrompt} onOpenChange={v => { if (!v) closeAll() }}>
+      <Dialog open={showSmsPrompt} onOpenChange={v => { if (!v) closeSmsPrompt() }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
