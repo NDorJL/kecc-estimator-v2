@@ -116,13 +116,13 @@ export default function Marketing() {
   // ── Budget ──────────────────────────────────────────────────────────────────
   const { data: budgetData } = useQuery<{ monthlyBudget: number }>({
     queryKey: ['marketing-budget'],
-    queryFn: () => apiGet('/.netlify/functions/marketing-spend?action=budget'),
+    queryFn: () => apiGet('/marketing-spend?action=budget'),
   })
   const monthlyBudget = budgetData?.monthlyBudget ?? 0
 
   const saveBudgetMutation = useMutation({
     mutationFn: (v: number) =>
-      apiRequest('PATCH', '/.netlify/functions/marketing-spend?action=budget', { monthlyBudget: v }),
+      apiRequest('PATCH', '/marketing-spend?action=budget', { monthlyBudget: v }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['marketing-budget'] })
       setEditingBudget(false)
@@ -133,7 +133,7 @@ export default function Marketing() {
   // ── Spend entries for selected month ────────────────────────────────────────
   const { data: spendEntries = [] } = useQuery<SpendEntry[]>({
     queryKey: ['marketing-spend', selectedMonth],
-    queryFn: () => apiGet(`/.netlify/functions/marketing-spend?month=${selectedMonth}`),
+    queryFn: () => apiGet(`/marketing-spend?month=${selectedMonth}`),
   })
 
   // Build a map: channel → amount for fast lookup
@@ -152,7 +152,7 @@ export default function Marketing() {
   // ── Save spend entry ─────────────────────────────────────────────────────────
   const saveSpendMutation = useMutation({
     mutationFn: ({ channel, amount }: { channel: string; amount: number }) =>
-      apiRequest('POST', '/.netlify/functions/marketing-spend', {
+      apiRequest('POST', '/marketing-spend', {
         channel,
         amount,
         month: selectedMonth,
@@ -255,7 +255,7 @@ export default function Marketing() {
     queryKey: ['marketing-spend-history', last6Months[0], last6Months[5]],
     queryFn: async () => {
       const results = await Promise.all(
-        last6Months.map(mo => apiGet<SpendEntry[]>(`/.netlify/functions/marketing-spend?month=${mo}`))
+        last6Months.map(mo => apiGet<SpendEntry[]>(`/marketing-spend?month=${mo}`))
       )
       return results.flat()
     },
