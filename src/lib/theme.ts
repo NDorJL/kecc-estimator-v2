@@ -250,6 +250,7 @@ export const ALL_NAV_ITEMS = [
   { id: 'pricebook',     label: 'Price Book', path: '/pricebook' },
   { id: 'leads',         label: 'Leads',      path: '/leads' },
   { id: 'settings',      label: 'Settings',   path: '/settings' },
+  { id: 'marketing',     label: 'Marketing',  path: '/marketing' },
 ] as const
 
 /** Merge saved nav config with defaults, preserving saved order. */
@@ -284,4 +285,5 @@ export const DEFAULT_NAV: NavItemConfig[] = [
   { id: 'pricebook',     visible: false },
   { id: 'leads',         visible: false },
   { id: 'settings',      visible: true  },
+  { id: 'marketing',     visible: false },
 ]

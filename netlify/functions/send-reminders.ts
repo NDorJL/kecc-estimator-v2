@@ -309,6 +309,75 @@ const handler = schedule('0 14 * * *', async () => {
     }
 
     console.log('[send-reminders] Finished/unpaid sweep done')
+
+    // ── Review request sweep ─────────────────────────────────────────────────
+    // Jobs marked completed yesterday that haven't had a review request sent yet.
+    console.log('[send-reminders] Starting review request sweep')
+
+    const yesterdayStart = new Date()
+    yesterdayStart.setUTCDate(yesterdayStart.getUTCDate() - 1)
+    yesterdayStart.setUTCHours(0, 0, 0, 0)
+    const yesterdayEnd = new Date()
+    yesterdayEnd.setUTCDate(yesterdayEnd.getUTCDate() - 1)
+    yesterdayEnd.setUTCHours(23, 59, 59, 999)
+
+    const { data: reviewJobs, error: reviewErr } = await supabase
+      .from('jobs')
+      .select('id, customer_name, customer_phone, service_name, contact_id')
+      .eq('status', 'completed')
+      .gte('completed_at', yesterdayStart.toISOString())
+      .lte('completed_at', yesterdayEnd.toISOString())
+      .is('review_sent_at', null)
+      .not('customer_phone', 'is', null)
+
+    if (reviewErr) {
+      console.error('[send-reminders] Review sweep query error:', reviewErr.message)
+    } else if (!reviewJobs || reviewJobs.length === 0) {
+      console.log('[send-reminders] No review requests to send today')
+    } else {
+      console.log(`[send-reminders] Sending ${reviewJobs.length} review request(s)`)
+
+      for (const job of reviewJobs) {
+        if (!job.customer_phone || !job.customer_name) continue
+
+        const firstName = job.customer_name.split(' ')[0]
+        const message =
+          `Hi ${firstName}! Thank you for choosing ${companyName}! ` +
+          `We hope your ${job.service_name} exceeded your expectations. ` +
+          `If you have a moment, we'd love to hear about your experience:\n\n` +
+          `https://g.page/r/CYjpuP4I4MbiEBM/review\n\n` +
+          `It means the world to us! — ${companyName}\n` +
+          `Reply STOP to opt out.`
+
+        try {
+          if (apiKey && fromNumber) {
+            await sendOpenPhoneSms(apiKey, fromNumber, job.customer_phone, message)
+          }
+
+          await supabase
+            .from('jobs')
+            .update({ review_sent_at: new Date().toISOString() })
+            .eq('id', job.id)
+
+          if (job.contact_id) {
+            await supabase.from('activities').insert({
+              contact_id: job.contact_id,
+              type:       'sms_out',
+              summary:    `Review request sent to ${job.customer_name}`,
+              metadata:   { jobId: job.id, automated: true },
+            }).catch(() => {})
+          }
+
+          console.log(`[send-reminders] ✓ Review request sent to ${job.customer_name} (job ${job.id})`)
+        } catch (err) {
+          console.error(`[send-reminders] ✗ Review request failed for job ${job.id}:`, err instanceof Error ? err.message : err)
+          // Still stamp to prevent infinite retry on bad numbers
+          await supabase.from('jobs').update({ review_sent_at: new Date().toISOString() }).eq('id', job.id).catch(() => {})
+        }
+      }
+    }
+
+    console.log('[send-reminders] Review request sweep done')
   } catch (err) {
     console.error('[send-reminders] Unexpected error:', err instanceof Error ? err.message : err)
   }

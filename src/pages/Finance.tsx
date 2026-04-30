@@ -2110,23 +2110,81 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
     return <Line {...commonProps} type="monotone" strokeWidth={2} />
   }
 
+  function generateAnalyticsReport() {
+    const rangeLabel = RANGE_OPTIONS.find(o => o.value === range)?.label ?? String(range)
+    const fmtD = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+    const lines: string[] = []
+    lines.push(`KECC ANALYTICS REPORT — Last ${rangeLabel}`)
+    lines.push('='.repeat(50))
+    lines.push(`Generated: ${new Date().toLocaleDateString('en-US', { dateStyle: 'long' })}`)
+    lines.push('')
+    lines.push('── KPI SUMMARY ──────────────────────────────────')
+    lines.push(`Gross Revenue:    ${fmtD(grossRevenue)}`)
+    lines.push(`Total Expenses:   ${fmtD(totalExpenses)}`)
+    lines.push(`Net Profit:       ${fmtD(netProfit)}`)
+    lines.push(`Quote Win Rate:   ${winRate.toFixed(1)}%`)
+    lines.push(`New Leads:        ${leadsInRange.length}`)
+    lines.push(`Jobs Completed:   ${jobsInRange.length}`)
+    lines.push('')
+    lines.push('── QUOTES ───────────────────────────────────────')
+    lines.push(`Sent:     ${sentInRange.length}`)
+    lines.push(`Accepted: ${acceptedInRange.length}`)
+    lines.push(`Declined: ${declinedInRange.length}`)
+    lines.push('')
+    lines.push('── REVENUE BY CATEGORY ──────────────────────────')
+    const revByCat: Record<string, number> = {}
+    for (const t of txsInRange.filter(t => t.type === 'Income')) {
+      revByCat[t.category] = (revByCat[t.category] ?? 0) + Number(t.amount)
+    }
+    for (const [cat, amt] of Object.entries(revByCat).sort((a, b) => b[1] - a[1])) {
+      lines.push(`  ${cat.padEnd(30)} ${fmtD(amt).padStart(10)}`)
+    }
+    lines.push('')
+    lines.push('── EXPENSE BREAKDOWN ────────────────────────────')
+    const expByCat: Record<string, number> = {}
+    for (const t of txsInRange.filter(t => t.type === 'Expense')) {
+      expByCat[t.category] = (expByCat[t.category] ?? 0) + Number(t.amount)
+    }
+    for (const [cat, amt] of Object.entries(expByCat).sort((a, b) => b[1] - a[1])) {
+      lines.push(`  ${cat.padEnd(30)} ${fmtD(amt).padStart(10)}`)
+    }
+
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `kecc-analytics-${rangeLabel.toLowerCase()}-${new Date().toISOString().slice(0,10)}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="p-4 pb-8 space-y-1">
 
       {/* ── Date range bar ── */}
-      <div className="flex gap-1.5 flex-wrap pt-1 pb-2">
-        {RANGE_OPTIONS.map(opt => (
-          <button
-            key={String(opt.value)}
-            onClick={() => setRange(opt.value)}
-            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors
-              ${range === opt.value
-                ? 'bg-primary text-primary-foreground border-primary'
-                : 'bg-transparent text-muted-foreground border-border hover:border-primary hover:text-primary'}`}
-          >
-            {opt.label}
-          </button>
-        ))}
+      <div className="flex items-center justify-between gap-2 pt-1 pb-2">
+        <div className="flex gap-1.5 flex-wrap">
+          {RANGE_OPTIONS.map(opt => (
+            <button
+              key={String(opt.value)}
+              onClick={() => setRange(opt.value)}
+              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors
+                ${range === opt.value
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'bg-transparent text-muted-foreground border-border hover:border-primary hover:text-primary'}`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={generateAnalyticsReport}
+          className="flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border border-border text-muted-foreground hover:border-primary hover:text-primary transition-colors shrink-0"
+          title="Export analytics report"
+        >
+          <Download className="h-3 w-3" />
+          Export
+        </button>
       </div>
 
       {/* ── KPI Strip ── */}

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest, apiGet, apiPatch } from "@/lib/queryClient";
 import { useQuoteContext } from "@/lib/quote-context";
@@ -40,7 +40,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle, Send, CheckCircle2, Clock, Loader2, Pencil, X, CalendarPlus } from "lucide-react";
+import { Plus, Trash2, Eye, Download, ChevronLeft, CalendarCheck, RotateCcw, ChevronDown, ChevronRight, Paperclip, Briefcase, AlertTriangle, Send, CheckCircle2, Clock, Loader2, Pencil, X, CalendarPlus, FileText } from "lucide-react";
 import { ScheduleQuoteSheet } from '@/components/ScheduleQuoteSheet'
 
 function fmt(n: number): string {
@@ -1108,9 +1108,10 @@ export function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack:
 
 function QuotesList({ onViewQuote }: { onViewQuote: (quote: Quote) => void }) {
   const { toast } = useToast();
-  const { cartItems, setIsCreatingQuote } = useQuoteContext();
-  const [trashOpen, setTrashOpen] = useState(false);
-  const [scheduleQuote, setScheduleQuote] = useState<Quote | null>(null);
+  const [, navigate] = useLocation();
+  const [trashOpen, setTrashOpen]                   = useState(false);
+  const [scheduleQuote, setScheduleQuote]           = useState<Quote | null>(null);
+  const [onetimeDeclinedOpen, setOnetimeDeclinedOpen] = useState(false);
 
   const { data: allQuotes = [], isLoading } = useQuery<Quote[]>({
     queryKey: ["/quotes"],
@@ -1144,6 +1145,28 @@ function QuotesList({ onViewQuote }: { onViewQuote: (quote: Quote) => void }) {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/quotes?trashed=true"] }); toast({ title: "Trash emptied" }); },
   });
 
+  // ── Categorize quotes ──────────────────────────────────────────────────────
+  const isSubscriptionQuote = (q: Quote) =>
+    q.quoteType?.toLowerCase().includes('subscription') ||
+    (q.lineItems ?? []).some((li: any) => li.isSubscription)
+
+  const byNewest = (a: Quote, b: Quote) =>
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+
+  const { onetimeActive, onetimeAccepted, onetimeDeclined, subActive, subAccepted } = useMemo(() => {
+    const onetime = activeQuotes.filter(q => !isSubscriptionQuote(q)).sort(byNewest)
+    const subs    = activeQuotes.filter(q => isSubscriptionQuote(q)).sort(byNewest)
+    return {
+      onetimeActive:   onetime.filter(q => q.status === 'draft' || q.status === 'sent'),
+      onetimeAccepted: onetime.filter(q => q.status === 'accepted'),
+      onetimeDeclined: onetime.filter(q => q.status === 'declined' || (q.expiresAt && new Date(q.expiresAt) < new Date() && q.status !== 'accepted')),
+      subActive:       subs.filter(q => q.status === 'draft' || q.status === 'sent'),
+      subAccepted:     subs.filter(q => q.status === 'accepted'),
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeQuotes])
+
+  // ── QuoteCard ──────────────────────────────────────────────────────────────
   const QuoteCard = ({ quote, trashed = false }: { quote: Quote; trashed?: boolean }) => {
     const date = new Date(quote.createdAt);
     const typeLabel = quote.quoteType.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
@@ -1201,21 +1224,128 @@ function QuotesList({ onViewQuote }: { onViewQuote: (quote: Quote) => void }) {
     );
   };
 
-  return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Saved Quotes</h2>
-        {cartItems.length > 0 && (
-          <Button size="sm" onClick={() => setIsCreatingQuote(true)} className="min-h-[44px]">
-            <Plus className="h-4 w-4 mr-1" />New Quote ({cartItems.length} items)
-          </Button>
+  // ── Accordion section helper ────────────────────────────────────────────────
+  function Section({
+    label, quotes: qs, defaultOpen = true, collapsible = false,
+    open, onOpenChange,
+  }: {
+    label: string; quotes: Quote[]; defaultOpen?: boolean; collapsible?: boolean
+    open?: boolean; onOpenChange?: (v: boolean) => void
+  }) {
+    const [localOpen, setLocalOpen] = useState(defaultOpen)
+    const isOpen  = open !== undefined ? open  : localOpen
+    const setOpen = onOpenChange ?? setLocalOpen
+    if (qs.length === 0 && !collapsible) return null
+    return (
+      <div>
+        <button
+          className="w-full flex items-center justify-between py-1.5 px-1 text-left"
+          onClick={() => setOpen(!isOpen)}
+        >
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+            {label}
+            <span className="ml-1.5 font-bold text-foreground">({qs.length})</span>
+          </span>
+          {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+        </button>
+        {isOpen && (
+          <div className="space-y-2 mt-1">
+            {qs.length === 0
+              ? <p className="text-xs text-muted-foreground text-center py-2">No quotes</p>
+              : qs.map(q => <QuoteCard key={q.id} quote={q} />)
+            }
+          </div>
         )}
       </div>
+    )
+  }
+
+  const hasOnetime = onetimeActive.length + onetimeAccepted.length + onetimeDeclined.length > 0
+  const hasSub     = subActive.length + subAccepted.length > 0
+
+  return (
+    <div className="space-y-4">
+      {/* ── New Quote button ───────────────────────────────────────────── */}
+      <Button className="w-full min-h-[44px]" onClick={() => navigate('/calculator')}>
+        <Plus className="h-4 w-4 mr-1.5" />New Quote
+      </Button>
+
       {isLoading && <p className="text-sm text-muted-foreground text-center py-4">Loading...</p>}
-      {!isLoading && activeQuotes.length === 0 && (
-        <Card><CardContent className="py-6 text-center text-sm text-muted-foreground">No quotes yet. Add items to the cart on the Calculator tab, then create a quote.</CardContent></Card>
+
+      {!isLoading && !hasOnetime && !hasSub && (
+        <Card><CardContent className="py-6 text-center text-sm text-muted-foreground">No quotes yet. Tap New Quote to get started.</CardContent></Card>
       )}
-      {activeQuotes.map(quote => <QuoteCard key={quote.id} quote={quote} />)}
+
+      {/* ── One-Time Quotes ────────────────────────────────────────────── */}
+      {!isLoading && hasOnetime && (
+        <div className="rounded-xl border overflow-hidden">
+          <div className="bg-muted/40 px-3 py-2 border-b">
+            <h3 className="text-sm font-bold flex items-center gap-1.5">
+              <FileText className="h-4 w-4 text-primary" />
+              One-Time Quotes
+              <span className="text-xs font-normal text-muted-foreground ml-1">({onetimeActive.length + onetimeAccepted.length + onetimeDeclined.length})</span>
+            </h3>
+          </div>
+          <div className="p-3 space-y-3 divide-y divide-border/50">
+            {onetimeActive.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider pt-1">Active</p>
+                {onetimeActive.map(q => <QuoteCard key={q.id} quote={q} />)}
+              </div>
+            )}
+            {onetimeAccepted.length > 0 && (
+              <div className="space-y-2 pt-3">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Accepted</p>
+                {onetimeAccepted.map(q => <QuoteCard key={q.id} quote={q} />)}
+              </div>
+            )}
+            {onetimeDeclined.length > 0 && (
+              <div className="pt-3">
+                <Collapsible open={onetimeDeclinedOpen} onOpenChange={setOnetimeDeclinedOpen}>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" size="sm" className="w-full flex items-center justify-between text-muted-foreground h-8 px-1 text-[10px] font-bold uppercase tracking-wider">
+                      <span>Declined / Expired ({onetimeDeclined.length})</span>
+                      {onetimeDeclinedOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-2 mt-1">
+                    {onetimeDeclined.map(q => <QuoteCard key={q.id} quote={q} />)}
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Subscription Quotes ────────────────────────────────────────── */}
+      {!isLoading && hasSub && (
+        <div className="rounded-xl border overflow-hidden">
+          <div className="bg-muted/40 px-3 py-2 border-b">
+            <h3 className="text-sm font-bold flex items-center gap-1.5">
+              <CalendarCheck className="h-4 w-4 text-primary" />
+              Subscription Quotes
+              <span className="text-xs font-normal text-muted-foreground ml-1">({subActive.length + subAccepted.length})</span>
+            </h3>
+          </div>
+          <div className="p-3 space-y-3 divide-y divide-border/50">
+            {subActive.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider pt-1">Active</p>
+                {subActive.map(q => <QuoteCard key={q.id} quote={q} />)}
+              </div>
+            )}
+            {subAccepted.length > 0 && (
+              <div className="space-y-2 pt-3">
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Accepted</p>
+                {subAccepted.map(q => <QuoteCard key={q.id} quote={q} />)}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Trash ─────────────────────────────────────────────────────── */}
       {trashedQuotes.length > 0 && (
         <Collapsible open={trashOpen} onOpenChange={setTrashOpen}>
           <CollapsibleTrigger asChild>

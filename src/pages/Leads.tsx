@@ -1448,10 +1448,22 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
             <Select value={form.source} onValueChange={v => setForm(f => ({ ...f, source: v }))}>
               <SelectTrigger className="mt-1"><SelectValue placeholder="How did they find you?" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="referral">Referral</SelectItem>
-                <SelectItem value="website">Website</SelectItem>
-                <SelectItem value="social">Social Media</SelectItem>
-                <SelectItem value="cold_call">Cold Call</SelectItem>
+                <SelectItem value="referral">Word of Mouth / Referral</SelectItem>
+                <SelectItem value="website">Website / SEO</SelectItem>
+                <SelectItem value="google_ads">Google Ads</SelectItem>
+                <SelectItem value="google_lsa">Google LSA</SelectItem>
+                <SelectItem value="facebook_ads">Facebook Ads</SelectItem>
+                <SelectItem value="instagram_ads">Instagram Ads</SelectItem>
+                <SelectItem value="social_organic">Social Media (Organic)</SelectItem>
+                <SelectItem value="mailers">Mailers / Direct Mail</SelectItem>
+                <SelectItem value="yard_signs">Yard Signs</SelectItem>
+                <SelectItem value="door_hangers">Door Hangers</SelectItem>
+                <SelectItem value="nextdoor">Nextdoor</SelectItem>
+                <SelectItem value="thumbtack">Thumbtack</SelectItem>
+                <SelectItem value="yelp_ads">Yelp Ads</SelectItem>
+                <SelectItem value="email_marketing">Email Marketing</SelectItem>
+                <SelectItem value="community">Community Sponsorship</SelectItem>
+                <SelectItem value="cold_call">Cold Call / Outreach</SelectItem>
                 <SelectItem value="inbound_sms">Inbound SMS</SelectItem>
                 <SelectItem value="other">Other</SelectItem>
               </SelectContent>

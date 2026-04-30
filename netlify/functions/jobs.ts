@@ -94,7 +94,11 @@ export const handler: Handler = async (event) => {
       const body = JSON.parse(event.body ?? '{}')
       const patch: Record<string, unknown> = {}
       if ('contractorId'    in body) patch.contractor_id    = body.contractorId ?? null
-      if ('status'          in body) patch.status           = body.status
+      if ('status'          in body) {
+        patch.status = body.status
+        // Stamp completed_at the first time a job is marked completed
+        if (body.status === 'completed') patch.completed_at = new Date().toISOString()
+      }
       if ('scheduledDate'    in body) patch.scheduled_date     = body.scheduledDate ?? null
       if ('scheduledEndDate' in body) patch.scheduled_end_date = body.scheduledEndDate ?? null
       if ('scheduledTime'    in body) patch.scheduled_time     = body.scheduledTime ?? null

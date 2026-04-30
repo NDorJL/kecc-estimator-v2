@@ -506,6 +506,8 @@ export interface Job {
   propertyInfo: Record<string, string>;  // gateCode, dogOnProperty, parkingNotes, etc.
   googleEventId: string | null;
   reminderSentAt: string | null;
+  completedAt: string | null;
+  reviewSentAt: string | null;
   createdAt: string;
 }
 
@@ -535,6 +537,8 @@ export function rowToJob(r: any): Job {
     propertyInfo: r.property_info ?? {},
     googleEventId: r.google_event_id ?? null,
     reminderSentAt: r.reminder_sent_at ?? null,
+    completedAt: r.completed_at ?? null,
+    reviewSentAt: r.review_sent_at ?? null,
     createdAt: r.created_at,
   };
 }

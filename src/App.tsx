@@ -32,6 +32,7 @@ import Subscriptions from '@/pages/Subscriptions'
 import PriceBook from '@/pages/PriceBook'
 import SettingsPage from '@/pages/Settings'
 import Finance from '@/pages/Finance'
+import Marketing from '@/pages/Marketing'
 
 // Map nav id → lucide icon
 const NAV_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -46,6 +47,7 @@ const NAV_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   pricebook:     BookOpen,
   leads:         Megaphone,
   settings:      Settings,
+  marketing:     TrendingUp,
 }
 
 // ── Theme applicator — runs whenever settings change ─────────────────────────
@@ -155,6 +157,7 @@ function AppLayout() {
           <Route path="/pricebook" component={PriceBook} />
           <Route path="/settings" component={SettingsPage} />
           <Route path="/finance" component={Finance} />
+          <Route path="/marketing" component={Marketing} />
           <Route>
             <div className="flex flex-col items-center justify-center h-full p-8 text-center">
               <h2 className="text-2xl font-bold mb-2">Page Not Found</h2>
