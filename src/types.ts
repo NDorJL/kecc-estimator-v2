@@ -222,9 +222,6 @@ export interface Contact {
   source: string | null;
   notes: string | null;
   tags: string[];
-  customFields: Record<string, string>;
-  leadScore: number;
-  referredBy: string | null;
   nextFollowup: string | null;
   createdAt: string;
 }
@@ -390,9 +387,6 @@ export function rowToContact(r: any): Contact {
     source: r.source,
     notes: r.notes,
     tags: Array.isArray(r.tags) ? r.tags : [],
-    customFields: r.custom_fields ?? {},
-    leadScore: r.lead_score ?? 0,
-    referredBy: r.referred_by,
     nextFollowup: r.next_followup,
     createdAt: r.created_at,
   };

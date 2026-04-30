@@ -8,6 +8,7 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiRequest } from '@/lib/queryClient'
+import { buildAppointmentSms } from '@/lib/smsMessages'
 import { Quote, LineItem } from '@/types'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -26,40 +27,10 @@ const WINDOWS: { id: Window; label: string; sub: string }[] = [
   { id: 'anytime',   label: 'Any Time',  sub: 'Flexible'      },
 ]
 
-const WINDOW_LABELS: Record<Window, string> = {
-  morning:   'in the morning (8 am–12 pm)',
-  afternoon: 'in the afternoon (12 pm–5 pm)',
-  anytime:   '',
-}
-
 interface Props {
   quote: Quote
   open: boolean
   onClose: () => void
-}
-
-/** Build the SMS message the customer will receive */
-function buildConfirmationMessage(opts: {
-  firstName: string
-  serviceName: string
-  date: string       // YYYY-MM-DD
-  window: Window
-  companyName: string
-}): string {
-  const { firstName, serviceName, date, window, companyName } = opts
-  const [yr, mo, dy] = date.split('-').map(Number)
-  const dateObj  = new Date(yr, mo - 1, dy)
-  const dayOfWeek = dateObj.toLocaleDateString('en-US', { weekday: 'long' })
-  const monthName = dateObj.toLocaleDateString('en-US', { month: 'long' })
-  const windowStr = WINDOW_LABELS[window] ? ` ${WINDOW_LABELS[window]}` : ''
-
-  return (
-    `Hi ${firstName}! Your ${serviceName} with ${companyName} is confirmed for ` +
-    `${dayOfWeek}, ${monthName} ${dy}, ${yr}${windowStr}.\n\n` +
-    `If you have any questions or need to make changes, just reply to this message.\n\n` +
-    `Thank you for choosing ${companyName}!\n\n` +
-    `Automated msg. Reply STOP to opt out.`
-  )
 }
 
 export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
@@ -170,7 +141,7 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
   function handleSendConfirmation() {
     if (!pendingJobInfo) return
     const companyName = 'Knox Exterior Care Co.'
-    const message = buildConfirmationMessage({
+    const message = buildAppointmentSms({
       firstName:   pendingJobInfo.name,
       serviceName: pendingJobInfo.service,
       date:        pendingJobInfo.date,
@@ -186,7 +157,7 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
 
   // ── SMS confirmation prompt preview ──────────────────────────────────────
   const smsPreview = pendingJobInfo
-    ? buildConfirmationMessage({
+    ? buildAppointmentSms({
         firstName:   pendingJobInfo.name,
         serviceName: pendingJobInfo.service,
         date:        pendingJobInfo.date,

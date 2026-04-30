@@ -11,6 +11,7 @@
 
 import { schedule } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
+import { sendOpenPhoneSms } from './_smsHelper'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -22,22 +23,6 @@ function dateOffset(offsetDays: number): string {
   const d = new Date()
   d.setUTCDate(d.getUTCDate() + offsetDays)
   return d.toISOString().slice(0, 10)
-}
-
-async function sendOpenPhoneSms(apiKey: string, from: string, to: string, content: string): Promise<void> {
-  const baseUrl = (process.env.QUO_BASE_URL ?? 'https://api.openphone.com/v1').replace(/\/$/, '')
-  const res = await fetch(`${baseUrl}/messages`, {
-    method: 'POST',
-    headers: {
-      'Authorization': apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ from, to: [to], content }),
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText)
-    throw new Error(`OpenPhone ${res.status}: ${text}`)
-  }
 }
 
 function buildReminderMessage(opts: {

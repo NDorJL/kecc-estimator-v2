@@ -824,7 +824,7 @@ export default function PriceBook() {
                           createOverride.mutate({ serviceId, field, value })
                         }
                         onDelete={(id, isCustom) => deleteService.mutate({ id, isCustom })}
-                        isCustom={svc.id.startsWith('custom_')}
+                        isCustom={svc.id.startsWith('custom_') || svc.category === 'General Grounds Keeping' || svc.category === 'Custom'}
                       />
                 ))}
               </AccordionContent>

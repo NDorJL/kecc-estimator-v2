@@ -3,19 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { rowToQuote } from '../../src/types'
 import { randomUUID } from 'crypto'
 import { advanceLeadStage } from './_leadSync'
-
-async function sendOpenPhoneSms(apiKey: string, from: string, to: string, content: string): Promise<void> {
-  const baseUrl = (process.env.QUO_BASE_URL ?? 'https://api.openphone.com/v1').replace(/\/$/, '')
-  const res = await fetch(`${baseUrl}/messages`, {
-    method: 'POST',
-    headers: { 'Authorization': apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from, to: [to], content }),
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText)
-    throw new Error(`OpenPhone ${res.status}: ${text}`)
-  }
-}
+import { sendOpenPhoneSms } from './_smsHelper'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -159,14 +147,7 @@ export const handler: Handler = async (event) => {
 
       // NOTE: lead does NOT advance to 'scheduled' here — that only happens
       // when a job is explicitly created from this quote via POST /jobs.
-      let responseBody: string
-      try {
-        responseBody = JSON.stringify(rowToQuote(data))
-      } catch (serializeErr) {
-        console.error('PATCH /quotes serialize error:', serializeErr, JSON.stringify(data))
-        return { statusCode: 500, headers: CORS, body: JSON.stringify({ message: 'Failed to serialize updated quote' }) }
-      }
-      return { statusCode: 200, headers: CORS, body: responseBody }
+      return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToQuote(data)) }
     }
 
     // SEND quote via SMS — stamps sent_at and fires OpenPhone message

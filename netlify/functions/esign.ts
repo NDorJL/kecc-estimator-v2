@@ -2,19 +2,7 @@ import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { randomUUID } from 'crypto'
 import { advanceLeadStage } from './_leadSync'
-
-async function sendSms(apiKey: string, from: string, to: string, content: string): Promise<void> {
-  const baseUrl = (process.env.QUO_BASE_URL ?? 'https://api.openphone.com/v1').replace(/\/$/, '')
-  const res = await fetch(`${baseUrl}/messages`, {
-    method: 'POST',
-    headers: { 'Authorization': apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from, to: [to], content }),
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => res.statusText)
-    throw new Error(`OpenPhone ${res.status}: ${text}`)
-  }
-}
+import { sendOpenPhoneSms } from './_smsHelper'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -858,7 +846,7 @@ export const handler: Handler = async (event) => {
                   `Hi ${firstName}, ${companyName} here! Thank you for signing your quote. ` +
                   `Please review and sign your service agreement here: ${agreeUrl} ` +
                   `Reply STOP to opt out.`
-                await sendSms(apiKey, fromNumber, quoteRow.customer_phone, agreeMsg)
+                await sendOpenPhoneSms(apiKey, fromNumber, quoteRow.customer_phone, agreeMsg)
               }
 
               await supabase.from('activities').insert({

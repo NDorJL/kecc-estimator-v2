@@ -702,6 +702,7 @@ function NewQuoteVisitSheet({
               customerName,
               scheduledDate,
               scheduledTime,
+              contactId: selectedContact?.id ?? null,
             }),
           })
           if (!smsRes.ok) {

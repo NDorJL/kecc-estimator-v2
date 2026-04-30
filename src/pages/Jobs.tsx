@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiRequest } from '@/lib/queryClient'
+import { buildAppointmentSms } from '@/lib/smsMessages'
 import { quoCallUrl } from '@/lib/utils'
 import { Job, Subscription, Contractor, ServiceSchedule, Lead, Quote, LineItem } from '@/types'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -22,7 +23,7 @@ import {
 
 type RescheduleReason = 'weather' | 'customer_request' | 'other'
 
-// ── Window helpers (shared) ───────────────────────────────────────────────────
+// ── Window helpers ────────────────────────────────────────────────────────────
 type ScheduleWindow = 'morning' | 'afternoon' | 'anytime'
 
 const SCHEDULE_WINDOWS: { id: ScheduleWindow; label: string; sub: string }[] = [
@@ -30,29 +31,6 @@ const SCHEDULE_WINDOWS: { id: ScheduleWindow; label: string; sub: string }[] = [
   { id: 'afternoon', label: 'Afternoon', sub: '12 pm – 5 pm' },
   { id: 'anytime',   label: 'Any Time',  sub: 'Flexible'     },
 ]
-const WINDOW_LABELS: Record<ScheduleWindow, string> = {
-  morning:   'in the morning (8 am–12 pm)',
-  afternoon: 'in the afternoon (12 pm–5 pm)',
-  anytime:   '',
-}
-
-function buildSmsMessage(opts: {
-  firstName: string; serviceName: string; date: string
-  window: ScheduleWindow; companyName: string
-}) {
-  const { firstName, serviceName, date, window, companyName } = opts
-  const [yr, mo, dy] = date.split('-').map(Number)
-  const d = new Date(yr, mo - 1, dy)
-  const day = d.toLocaleDateString('en-US', { weekday: 'long' })
-  const mon = d.toLocaleDateString('en-US', { month: 'long' })
-  const win = WINDOW_LABELS[window] ? ` ${WINDOW_LABELS[window]}` : ''
-  return (
-    `Hi ${firstName}! Your ${serviceName} with ${companyName} is confirmed for ` +
-    `${day}, ${mon} ${dy}, ${yr}${win}.\n\n` +
-    `If you have any questions or need to make changes, just reply to this message.\n\n` +
-    `Thank you for choosing ${companyName}!\n\nAutomated msg. Reply STOP to opt out.`
-  )
-}
 
 // ── New Job Sheet (search → schedule) ────────────────────────────────────────
 function NewJobSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -143,7 +121,7 @@ function NewJobSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
       const phone = selectedQuote?.customerPhone
       if (phone && date) {
         const firstName = selectedQuote?.customerName?.split(' ')[0] ?? 'there'
-        const msg = buildSmsMessage({ firstName, serviceName: service, date, window: win, companyName: 'Knox Exterior Care Co.' })
+        const msg = buildAppointmentSms({ firstName, serviceName: service, date, window: win, companyName: 'Knox Exterior Care Co.' })
         setSmsPending({ phone, msg, contactId: selectedLead?.contactId ?? selectedQuote?.contactId ?? null })
         setShowSms(true)
       }
@@ -572,6 +550,36 @@ function JobDetailSheet({
         </SheetHeader>
 
         <div className="space-y-5">
+          {/* Unscheduled banner — shown prominently when no date is set */}
+          {!form.scheduledDate && (
+            <div className="rounded-xl border-2 border-dashed border-amber-400/60 bg-amber-50/40 dark:bg-amber-950/10 p-3">
+              <p className="text-xs font-semibold text-amber-800 dark:text-amber-400 flex items-center gap-1.5 mb-2">
+                <Clock className="h-3.5 w-3.5" />No date set — pick a start date below
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  type="date"
+                  placeholder="Start date"
+                  value={form.scheduledDate}
+                  min={new Date().toISOString().slice(0, 10)}
+                  className="h-9 text-sm border-amber-300"
+                  onChange={e => setForm(f => ({ ...f, scheduledDate: e.target.value }))}
+                />
+                <Input
+                  type="date"
+                  placeholder="End date (optional)"
+                  value={form.scheduledEndDate}
+                  min={form.scheduledDate || new Date().toISOString().slice(0, 10)}
+                  className="h-9 text-sm border-amber-300"
+                  onChange={e => setForm(f => ({ ...f, scheduledEndDate: e.target.value }))}
+                />
+              </div>
+              {form.scheduledDate && (
+                <p className="text-xs text-amber-700 mt-1.5">Tap Save Job to lock in this date.</p>
+              )}
+            </div>
+          )}
+
           {/* Customer info (read-only display) */}
           <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5">
             {job.customerAddress && (
