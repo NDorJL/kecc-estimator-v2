@@ -492,7 +492,7 @@ function buildFullAgreementPage(opts: {
       <div id="successCard" style="display:none;border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0;padding:32px 16px;text-align:center;">
         <div style="font-size:44px;margin-bottom:12px;">✅</div>
         <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#166534;">Thank you, ${esc(customerName)}!</p>
-        <p style="margin:0;font-size:13px;color:#15803d;">Your agreement has been signed. We'll send you a copy for your records.</p>
+        <p style="margin:0;font-size:13px;color:#15803d;">Your agreement has been signed. A link to your signed copy has been sent to your phone.</p>
       </div>
       ${sigScript(token, sigLabel, funcUrl)}`
 
@@ -814,7 +814,34 @@ export const handler: Handler = async (event) => {
           }).catch(() => {/* non-fatal */})
         }
 
-        // ── Recurring quote: auto-generate & SMS a service agreement ─────────
+        // ── Fetch SMS credentials (needed for both confirmation + agreement SMS) ──
+        const { data: settings } = await supabase
+          .from('company_settings').select('quo_api_key, quo_from_number, company_name').limit(1).single()
+        const apiKey      = settings?.quo_api_key     ?? process.env.QUO_API_KEY ?? ''
+        const fromNumber  = settings?.quo_from_number ?? process.env.QUO_FROM_NUMBER ?? ''
+        const companyName = settings?.company_name    ?? 'Knox Exterior Care Co.'
+        const siteUrl     = (process.env.URL ?? '').replace(/\/$/, '')
+        const firstName   = (quoteRow.customer_name ?? 'there').split(' ')[0]
+
+        // ── Confirmation SMS: signed copy link ────────────────────────────────
+        // The esign page already renders a "✅ Signed" receipt view once signed_at is set,
+        // so the same URL serves as a permanent signed copy the customer can bookmark.
+        if (apiKey && fromNumber && quoteRow.customer_phone) {
+          const signedCopyUrl = `${siteUrl}/.netlify/functions/esign?token=${encodeURIComponent(token)}`
+          const confirmMsg =
+            `Hi ${firstName}, your estimate with ${companyName} has been signed — thank you! ` +
+            `You can view your signed copy anytime here: ${signedCopyUrl} ` +
+            `We'll be in touch soon. Reply STOP to opt out.`
+          await sendOpenPhoneSms(apiKey, fromNumber, quoteRow.customer_phone, confirmMsg).catch(() => {})
+          await supabase.from('activities').insert({
+            contact_id: quoteRow.contact_id,
+            type:       'sms_out',
+            summary:    `Signed copy link sent to ${quoteRow.customer_name}`,
+            metadata:   { quoteId: quoteRow.id },
+          }).catch(() => {})
+        }
+
+        // ── Recurring quote: auto-generate & SMS a service agreement ──────────
         const lineItems = Array.isArray(quoteRow.line_items) ? quoteRow.line_items : []
         const hasSubItems = lineItems.some((li: { isSubscription?: boolean }) => li.isSubscription)
 
@@ -831,20 +858,10 @@ export const handler: Handler = async (event) => {
             }).select().single()
 
             if (newAgreement) {
-              // Fetch SMS credentials
-              const { data: settings } = await supabase
-                .from('company_settings').select('quo_api_key, quo_from_number, company_name').limit(1).single()
-              const apiKey     = settings?.quo_api_key     ?? process.env.QUO_API_KEY ?? ''
-              const fromNumber = settings?.quo_from_number ?? process.env.QUO_FROM_NUMBER ?? ''
-              const companyName = settings?.company_name ?? 'Knox Exterior Care Co.'
-
               if (apiKey && fromNumber && quoteRow.customer_phone) {
-                const siteUrl = (process.env.URL ?? '').replace(/\/$/, '')
                 const agreeUrl = `${siteUrl}/.netlify/functions/esign?token=${encodeURIComponent(agreeToken)}`
-                const firstName = (quoteRow.customer_name ?? 'there').split(' ')[0]
                 const agreeMsg =
-                  `Hi ${firstName}, ${companyName} here! Thank you for signing your quote. ` +
-                  `Please review and sign your service agreement here: ${agreeUrl} ` +
+                  `One more step — please review and sign your ${companyName} service agreement here: ${agreeUrl} ` +
                   `Reply STOP to opt out.`
                 await sendOpenPhoneSms(apiKey, fromNumber, quoteRow.customer_phone, agreeMsg)
               }
@@ -911,6 +928,43 @@ export const handler: Handler = async (event) => {
           summary:    `Service agreement signed by ${agreementRow.customer_name} — ready to schedule`,
           metadata:   { agreementId: agreementRow.id, subscriptionId: agreementRow.subscription_id },
         }).catch(() => {/* non-fatal */})
+
+        // ── Confirmation SMS: signed agreement copy link ───────────────────────
+        try {
+          const { data: agreeSettings } = await supabase
+            .from('company_settings').select('quo_api_key, quo_from_number, company_name').limit(1).single()
+          const agreeApiKey     = agreeSettings?.quo_api_key     ?? process.env.QUO_API_KEY ?? ''
+          const agreeFromNumber = agreeSettings?.quo_from_number ?? process.env.QUO_FROM_NUMBER ?? ''
+          const agreeCompany    = agreeSettings?.company_name    ?? 'Knox Exterior Care Co.'
+          const agrSiteUrl      = (process.env.URL ?? '').replace(/\/$/, '')
+
+          // Retrieve phone from contact if not directly on the agreement
+          let customerPhone: string | null = null
+          if (agreementRow.contact_id) {
+            const { data: contactRow } = await supabase
+              .from('contacts').select('phone').eq('id', agreementRow.contact_id).single()
+            customerPhone = contactRow?.phone ?? null
+          }
+
+          if (agreeApiKey && agreeFromNumber && customerPhone) {
+            const signedCopyUrl = `${agrSiteUrl}/.netlify/functions/esign?token=${encodeURIComponent(token)}`
+            const agreFirstName = (agreementRow.customer_name ?? 'there').split(' ')[0]
+            const confirmMsg =
+              `Hi ${agreFirstName}, your service agreement with ${agreeCompany} is signed and on file — thank you! ` +
+              `View your signed agreement anytime here: ${signedCopyUrl} ` +
+              `We'll reach out to get you on the schedule. Reply STOP to opt out.`
+            await sendOpenPhoneSms(agreeApiKey, agreeFromNumber, customerPhone, confirmMsg)
+            await supabase.from('activities').insert({
+              contact_id: agreementRow.contact_id,
+              type:       'sms_out',
+              summary:    `Signed agreement copy link sent to ${agreementRow.customer_name}`,
+              metadata:   { agreementId: agreementRow.id },
+            }).catch(() => {})
+          }
+        } catch (confirmErr) {
+          // Non-fatal — agreement signing already succeeded
+          console.error('[esign] Failed to send agreement confirmation SMS:', confirmErr)
+        }
 
         return { statusCode: 200, headers: JSON_HEADERS, body: JSON.stringify({ success: true }) }
       }
