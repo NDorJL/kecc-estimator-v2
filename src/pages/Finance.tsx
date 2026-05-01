@@ -369,9 +369,15 @@ function detectCsvFormat(headers: string[]): CsvFormat {
   return 'UNKNOWN'
 }
 
-function parseCSVFile(csvText: string, statementType: string): Omit<Transaction, 'id' | 'created_at'>[] {
+interface ParseCSVResult {
+  transactions: Omit<Transaction, 'id' | 'created_at'>[]
+  endingBalance: number | null   // last "Balance" column value in the file
+  statementMonth: string | null  // 'YYYY-MM' of the most recent transaction
+}
+
+function parseCSVFile(csvText: string, statementType: string): ParseCSVResult {
   const lines = csvText.trim().split('\n')
-  if (lines.length < 2) return []
+  if (lines.length < 2) return { transactions: [], endingBalance: null, statementMonth: null }
 
   // Handle quoted CSV properly
   const parseLine = (line: string): string[] => {
@@ -389,6 +395,12 @@ function parseCSVFile(csvText: string, statementType: string): Omit<Transaction,
   const headers = parseLine(lines[0]).map(h => h.replace(/"/g, '').trim())
   const fmt = detectCsvFormat(headers)
   const results: Omit<Transaction, 'id' | 'created_at'>[] = []
+
+  // Detect "Balance" column — TVA and Chase both export a running balance
+  const balanceColIdx = headers.findIndex(h =>
+    /^balance$|^running.?balance$|^ledger.?balance$|^available.?balance$/i.test(h.trim())
+  )
+  let lastBalance: number | null = null
 
   for (let i = 1; i < lines.length; i++) {
     if (!lines[i].trim()) continue
@@ -440,6 +452,13 @@ function parseCSVFile(csvText: string, statementType: string): Omit<Transaction,
     } catch { continue }
     if (!normalDate) continue
 
+    // Track the running balance from the balance column (if present)
+    if (balanceColIdx >= 0) {
+      const rawBal = (vals[balanceColIdx] || '').replace(/"/g, '').replace(/[$,\s]/g, '')
+      const parsed = parseFloat(rawBal)
+      if (!isNaN(parsed)) lastBalance = parsed
+    }
+
     const defaultType = isDebit ? 'Expense' : 'Income'
     const { cat, review, note } = categorize(desc)
     const finalType: 'Income' | 'Expense' = cat
@@ -458,7 +477,12 @@ function parseCSVFile(csvText: string, statementType: string): Omit<Transaction,
       source: 'upload',
     })
   }
-  return results
+
+  // Derive statement month from most recent transaction date
+  const dates = results.map(r => r.date).filter(Boolean).sort()
+  const statementMonth = dates.length > 0 ? dates[dates.length - 1].slice(0, 7) : null
+
+  return { transactions: results, endingBalance: lastBalance, statementMonth }
 }
 
 function dedupe(incoming: Omit<Transaction, 'id' | 'created_at'>[], existing: Transaction[]) {
@@ -1396,11 +1420,19 @@ function parsePDFText(text: string, statementType: string): Omit<Transaction, 'i
 // ═══════════════════════════════════════════════════════════════════════════
 type PreviewRow = Omit<Transaction, 'id' | 'created_at'>
 
+interface DetectedBalance {
+  balance: number
+  statementType: string
+  statementMonth: string  // 'YYYY-MM'
+}
+
 function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]; onRefresh: () => void }) {
   const [statementType, setStatementType] = useState('checking')
   const [preview, setPreview] = useState<PreviewRow[]>([])
   const [importing, setImporting] = useState(false)
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
+  const [detectedBalance, setDetectedBalance] = useState<DetectedBalance | null>(null)
+  const [savingSnapshot, setSavingSnapshot] = useState(false)
   const { toast } = useToast()
 
   // Update a single preview row
@@ -1431,6 +1463,9 @@ function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]
     try {
       let parsed: Omit<Transaction, 'id' | 'created_at'>[] = []
 
+      let csvEndingBalance: number | null = null
+      let csvStatementMonth: string | null = null
+
       if (ext === 'pdf') {
         // Lazy-load pdfjs so it doesn't bloat the initial bundle
         const pdfjsLib = await import('pdfjs-dist')
@@ -1454,7 +1489,17 @@ function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]
       } else {
         // CSV / TXT
         const text = await file.text()
-        parsed = parseCSVFile(text, statementType)
+        const result = parseCSVFile(text, statementType)
+        parsed = result.transactions
+        csvEndingBalance = result.endingBalance
+        csvStatementMonth = result.statementMonth
+      }
+
+      // Store detected balance for post-import auto-fill offer
+      if (csvEndingBalance !== null && csvStatementMonth) {
+        setDetectedBalance({ balance: csvEndingBalance, statementType, statementMonth: csvStatementMonth })
+      } else {
+        setDetectedBalance(null)
       }
 
       const unique = dedupe(parsed, transactions)
@@ -1491,6 +1536,38 @@ function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]
     } finally { setImporting(false) }
   }
 
+  // Map statementType → balance sheet field key
+  const STATEMENT_TO_BS_KEY: Record<string, SnapField> = {
+    checking: 'checking',
+    savings:  'savings',
+    cc:       'chase_ink',
+  }
+
+  async function saveDetectedSnapshot() {
+    if (!detectedBalance) return
+    const { balance, statementType: sType, statementMonth } = detectedBalance
+    const bsKey = STATEMENT_TO_BS_KEY[sType]
+    if (!bsKey) {
+      toast({ title: 'Cannot auto-fill', description: 'No balance sheet field mapped for this statement type.', variant: 'destructive' })
+      return
+    }
+    const [year, month] = statementMonth.split('-').map(Number)
+    setSavingSnapshot(true)
+    try {
+      // POST to snapshots — server does an upsert, so existing fields for this month
+      // are preserved and only the one field we're updating changes.
+      await apiRequest('POST', '/finance?action=snapshots', {
+        month, year,
+        [bsKey]: sType === 'cc' ? Math.abs(balance) : balance,
+      })
+      toast({ title: 'Balance sheet updated', description: `${MONTHS[month - 1]} ${year} ${bsKey === 'chase_ink' ? 'Chase Ink' : bsKey === 'savings' ? 'Savings' : 'Checking'} balance set to ${fmt$d(Math.abs(balance))}` })
+      setDetectedBalance(null)
+      onRefresh()
+    } catch (e) {
+      toast({ title: 'Could not save snapshot', description: String(e), variant: 'destructive' })
+    } finally { setSavingSnapshot(false) }
+  }
+
   const incomeCount  = preview.filter(r => r.type === 'Income').length
   const expenseCount = preview.filter(r => r.type === 'Expense').length
   const uncatCount   = preview.filter(r => !r.category).length
@@ -1503,9 +1580,36 @@ function CsvImportTab({ transactions, onRefresh }: { transactions: Transaction[]
       <div>
         <h2 className="text-lg font-bold">Import Bank Statements</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Upload a CSV export from your bank. Every transaction is shown for review before anything is saved — fix classifications, categories, or remove rows you don't want.
+          Upload a CSV export from your bank. Every transaction are shown for review before anything is saved — fix classifications, categories, or remove rows you don't want.
         </p>
       </div>
+
+      {/* Auto-fill balance sheet offer — shown after import when a balance was detected */}
+      {detectedBalance && preview.length === 0 && (() => {
+        const { balance, statementType: sType, statementMonth } = detectedBalance
+        const [yr, mo] = statementMonth.split('-').map(Number)
+        const accountLabel = sType === 'cc' ? 'Chase Ink balance' : sType === 'savings' ? 'Savings balance' : 'Checking balance'
+        return (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-800 p-4 space-y-2">
+            <p className="text-sm font-semibold text-blue-900 dark:text-blue-200">
+              📊 Ending balance detected from statement
+            </p>
+            <p className="text-sm text-blue-800 dark:text-blue-300">
+              {MONTHS[mo - 1]} {yr} — {accountLabel}: <strong>{fmt$d(Math.abs(balance))}</strong>
+              {sType === 'cc' ? ' (outstanding)' : ''}
+            </p>
+            <p className="text-xs text-blue-700 dark:text-blue-400">
+              Add this to the balance sheet for {MONTHS[mo - 1]} {yr}?
+            </p>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={saveDetectedSnapshot} disabled={savingSnapshot}>
+                {savingSnapshot ? 'Saving…' : 'Add to Balance Sheet'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setDetectedBalance(null)}>Dismiss</Button>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Upload step */}
       {preview.length === 0 && (

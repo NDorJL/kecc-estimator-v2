@@ -228,13 +228,16 @@ function buildQuotePage(opts: {
   const successMessage = isSubscriptionQuote
     ? `Your signature has been received. A service agreement for your recurring plan will be sent to you shortly for a final signature.`
     : `Your signature has been received. We'll be in touch soon to get you on the schedule.`
+  const downloadBtn = `<button onclick="window.print()" class="no-print" style="display:inline-flex;align-items:center;gap:8px;margin-top:16px;padding:12px 24px;background:#fff;color:#166534;border:2px solid #16a34a;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">📄 Download PDF Copy</button>`
+
   const signatureSection = alreadySigned
     ? `<div style="border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0;padding:20px 16px;display:flex;gap:12px;align-items:flex-start;">
         <span style="font-size:24px;line-height:1;">✅</span>
-        <div>
+        <div style="flex:1;">
           <p style="margin:0 0 3px;font-size:14px;font-weight:700;color:#166534;">Signed by ${esc(customerName)}</p>
           ${signedAt ? `<p style="margin:0 0 3px;font-size:12px;color:#15803d;">${new Date(signedAt).toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}</p>` : ''}
-          <p style="margin:0;font-size:11px;color:#16a34a;">Electronic signature on file · Legally binding</p>
+          <p style="margin:0 0 12px;font-size:11px;color:#16a34a;">Electronic signature on file · Legally binding</p>
+          ${downloadBtn}
         </div>
       </div>`
     : `<div id="sigCard">
@@ -255,7 +258,8 @@ function buildQuotePage(opts: {
       <div id="successCard" style="display:none;border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0;padding:32px 16px;text-align:center;">
         <div style="font-size:44px;margin-bottom:12px;">✅</div>
         <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#166534;">Thank you, ${esc(customerName)}!</p>
-        <p style="margin:0;font-size:13px;color:#15803d;">${esc(successMessage)}</p>
+        <p style="margin:0 0 4px;font-size:13px;color:#15803d;">${esc(successMessage)}</p>
+        ${downloadBtn}
       </div>
       ${sigScript(token, '✓  I Accept This Estimate', funcUrl)}`
 
@@ -290,6 +294,13 @@ function buildQuotePage(opts: {
     .desc-col{display:none;}
     @media(min-width:480px){.desc-col{display:table-cell;}}
     .sig-divider{border:none;border-top:2px dashed #e5e7eb;margin:28px 0 20px;}
+    @media print{
+      .no-print{display:none!important;}
+      body{background:#fff;}
+      .wrap{max-width:100%;padding:0;}
+      .doc{box-shadow:none;border-radius:0;}
+      #sigCard{display:none!important;}
+    }
   </style>
 </head>
 <body>
@@ -460,13 +471,16 @@ function buildFullAgreementPage(opts: {
   const funcUrl = `/.netlify/functions/esign?token=${encodeURIComponent(token)}`
   const sigLabel = isResidential ? '✓  I Agree & Sign' : '✓  I Agree & Sign as Authorized Representative'
 
+  const agrDownloadBtn = `<button onclick="window.print()" class="no-print" style="display:inline-flex;align-items:center;gap:8px;margin-top:16px;padding:12px 24px;background:#fff;color:#166534;border:2px solid #16a34a;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">📄 Download PDF Copy</button>`
+
   const signatureSection = alreadySigned
     ? `<div style="border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0;padding:20px 16px;display:flex;gap:12px;align-items:flex-start;">
         <span style="font-size:24px;line-height:1;">✅</span>
-        <div>
+        <div style="flex:1;">
           <p style="margin:0 0 3px;font-size:14px;font-weight:700;color:#166534;">Signed — ${esc(customerName)}</p>
           ${signedAt ? `<p style="margin:0 0 3px;font-size:12px;color:#15803d;">${fmtDateLong(signedAt)}</p>` : ''}
-          <p style="margin:0;font-size:11px;color:#16a34a;">Electronic signature on file · Legally binding</p>
+          <p style="margin:0 0 12px;font-size:11px;color:#16a34a;">Electronic signature on file · Legally binding</p>
+          ${agrDownloadBtn}
         </div>
       </div>`
     : `<div id="sigCard">
@@ -492,7 +506,8 @@ function buildFullAgreementPage(opts: {
       <div id="successCard" style="display:none;border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0;padding:32px 16px;text-align:center;">
         <div style="font-size:44px;margin-bottom:12px;">✅</div>
         <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#166534;">Thank you, ${esc(customerName)}!</p>
-        <p style="margin:0;font-size:13px;color:#15803d;">Your agreement has been signed. A link to your signed copy has been sent to your phone.</p>
+        <p style="margin:0 0 4px;font-size:13px;color:#15803d;">Your agreement has been signed. A link to your signed copy has been sent to your phone.</p>
+        ${agrDownloadBtn}
       </div>
       ${sigScript(token, sigLabel, funcUrl)}`
 
@@ -519,6 +534,13 @@ function buildFullAgreementPage(opts: {
     .check-box{width:16px;height:16px;border:2px solid #d1d5db;border-radius:3px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;}
     .check-box.checked{background:#3d6b35;border-color:#3d6b35;}
     .sig-divider{border:none;border-top:2px dashed #e5e7eb;margin:24px 0 20px;}
+    @media print{
+      .no-print{display:none!important;}
+      body{background:#fff;}
+      .wrap{max-width:100%;padding:0;}
+      .doc{box-shadow:none;border-radius:0;}
+      #sigCard{display:none!important;}
+    }
   </style>
 </head>
 <body>
