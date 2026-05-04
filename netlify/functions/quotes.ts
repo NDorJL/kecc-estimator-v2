@@ -197,12 +197,12 @@ export const handler: Handler = async (event) => {
 
       // Log activity on the contact (non-fatal)
       if (updated.contact_id) {
-        await supabase.from('activities').insert({
+        try { await supabase.from('activities').insert({
           contact_id: updated.contact_id,
           type: 'sms_out',
           summary: `Quote sent via SMS to ${quote.customer_phone}`,
           metadata: { quoteId: id, esignUrl },
-        }).catch(() => {})
+        }) } catch { /* non-fatal */ }
       }
 
       // Return success — frontend invalidates the /quotes cache to pick up sent_at

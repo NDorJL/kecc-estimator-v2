@@ -135,7 +135,7 @@ const handler = schedule('0 14 * * *', async () => {
             type:       'sms_out',
             summary:    `Service reminder sent for ${job.service_name} on ${job.scheduled_date}`,
             metadata:   { jobId: job.id, scheduledDate: job.scheduled_date, to: job.customer_phone },
-          }).catch(() => {})
+          }) } catch { /* non-fatal */ }
         }
 
         console.log(`[send-reminders] ✓ Reminded ${job.customer_name} (job ${job.id})`)
@@ -232,7 +232,7 @@ const handler = schedule('0 14 * * *', async () => {
                 ? `Automated quote follow-up SMS sent to ${name}`
                 : `Lead auto-advanced to Follow-Up (no phone on file)`,
               metadata:   { leadId: lead.id, automated: true },
-            }).catch(() => {})
+            }) } catch { /* non-fatal */ }
           }
         }
       }
@@ -288,12 +288,13 @@ const handler = schedule('0 14 * * *', async () => {
             .catch(e => console.error(`[send-reminders] Stage update failed for lead ${lead.id}:`, (e as Error).message))
 
           // Mark the job as completed
-          await supabase
-            .from('jobs')
-            .update({ status: 'completed' })
-            .eq('id', job.id)
-            .eq('status', 'scheduled')   // only if still 'scheduled', don't override manual changes
-            .catch(() => {})
+          try {
+            await supabase
+              .from('jobs')
+              .update({ status: 'completed' })
+              .eq('id', job.id)
+              .eq('status', 'scheduled')   // only if still 'scheduled', don't override manual changes
+          } catch { /* non-fatal */ }
 
           if (lead.contact_id) {
             await supabase.from('activities').insert({
@@ -301,7 +302,7 @@ const handler = schedule('0 14 * * *', async () => {
               type:       'job_completed',
               summary:    `Job date passed — lead auto-moved to Finished/Unpaid`,
               metadata:   { leadId: lead.id, jobId: job.id, automated: true },
-            }).catch(() => {})
+            }) } catch { /* non-fatal */ }
           }
           console.log(`[send-reminders] ✓ Lead ${lead.id} → finished/unpaid (job ${job.id})`)
         }
@@ -365,14 +366,14 @@ const handler = schedule('0 14 * * *', async () => {
               type:       'sms_out',
               summary:    `Review request sent to ${job.customer_name}`,
               metadata:   { jobId: job.id, automated: true },
-            }).catch(() => {})
+            }) } catch { /* non-fatal */ }
           }
 
           console.log(`[send-reminders] ✓ Review request sent to ${job.customer_name} (job ${job.id})`)
         } catch (err) {
           console.error(`[send-reminders] ✗ Review request failed for job ${job.id}:`, err instanceof Error ? err.message : err)
           // Still stamp to prevent infinite retry on bad numbers
-          await supabase.from('jobs').update({ review_sent_at: new Date().toISOString() }).eq('id', job.id).catch(() => {})
+          try { await supabase.from('jobs').update({ review_sent_at: new Date().toISOString() }).eq('id', job.id) } catch { /* non-fatal */ }
         }
       }
     }

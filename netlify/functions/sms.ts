@@ -97,7 +97,7 @@ export const handler: Handler = async (event) => {
           type: 'sms_out',
           summary: message.slice(0, 100),
           metadata: { to },
-        }).catch(() => {})
+        }) } catch { /* non-fatal */ }
       }
 
       return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true }) }
@@ -144,7 +144,7 @@ export const handler: Handler = async (event) => {
           type: 'sms_out',
           summary: `Quote visit confirmation sent for ${scheduledDate}${scheduledTime ? ' at ' + scheduledTime : ''}`,
           metadata: { to, scheduledDate, scheduledTime },
-        }).catch(() => {})
+        }) } catch { /* non-fatal */ }
       }
 
       return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true, message }) }
@@ -220,7 +220,7 @@ export const handler: Handler = async (event) => {
           type: 'sms_out',
           summary: `Reschedule notification sent — new date: ${newDate}${newWindow ? ' (' + newWindow + ')' : ''}`,
           metadata: { to, oldDate, newDate, newWindow, reasonType, reasonText },
-        }).catch(() => {})
+        }) } catch { /* non-fatal */ }
       }
 
       return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true, message }) }

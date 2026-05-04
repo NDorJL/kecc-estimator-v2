@@ -116,12 +116,12 @@ export const handler: Handler = async (event) => {
 
       // Log activity (non-fatal)
       if (resolvedContactId) {
-        await supabase.from('activities').insert({
+        try { await supabase.from('activities').insert({
           contact_id: resolvedContactId,
           type:       'esign_sent',
           summary:    `Service agreement generated for ${contactName}`,
           metadata:   { agreementId: agreementRow.id, subscriptionId },
-        }).catch(() => {/* non-fatal */})
+        }) } catch { /* non-fatal */ }
       }
 
       const baseUrl = process.env.URL ?? 'http://localhost:8888'

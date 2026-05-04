@@ -336,12 +336,12 @@ export const handler: Handler = async (event) => {
         // Log activity on the contact
         const { data: q } = await supabase.from('quotes').select('contact_id, customer_name').eq('id', documentId).single()
         if (q?.contact_id) {
-          await supabase.from('activities').insert({
+          try { await supabase.from('activities').insert({
             contact_id: q.contact_id,
             type:       'invoice_sent',
             summary:    `QB Invoice #${qbInvoiceId} generated for ${q.customer_name} — awaiting payment`,
             metadata:   { qbInvoiceId, quoteId: documentId },
-          }).catch(() => {})
+          }) } catch { /* non-fatal */ }
         }
       } else {
         await supabase.from('service_agreements').update({ qb_invoice_id: qbInvoiceId }).eq('id', documentId)
@@ -427,12 +427,12 @@ export const handler: Handler = async (event) => {
                 if (lead && lead.stage !== 'finished_paid') {
                   await supabase.from('leads').update({ stage: 'finished_paid' }).eq('id', lead.id)
                   if (quote.contact_id) {
-                    await supabase.from('activities').insert({
+                    try { await supabase.from('activities').insert({
                       contact_id: quote.contact_id,
                       type:       'payment_received',
                       summary:    `Payment received — QB Invoice #${qbInvoiceId} paid`,
                       metadata:   { qbInvoiceId, quoteId: quote.id, leadId: lead.id },
-                    }).catch(() => {})
+                    }) } catch { /* non-fatal */ }
                   }
                   console.log(`[qb webhook] Lead ${lead.id} → finished_paid (invoice ${qbInvoiceId})`)
                 }

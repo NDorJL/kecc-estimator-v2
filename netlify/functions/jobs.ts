@@ -124,12 +124,12 @@ export const handler: Handler = async (event) => {
         const dateLabel = data.scheduled_date
           ? new Date(data.scheduled_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
           : null
-        await supabase.from('activities').insert({
+        try { await supabase.from('activities').insert({
           contact_id: data.contact_id,
           type:       'job_completed',
           summary:    `${data.service_name} completed${dateLabel ? ` on ${dateLabel}` : ''}`,
           metadata:   { jobId: id, serviceName: data.service_name, scheduledDate: data.scheduled_date },
-        }).catch(() => {})
+        }) } catch { /* non-fatal */ }
       }
       return { statusCode: 200, headers: CORS, body: JSON.stringify(job) }
     }
