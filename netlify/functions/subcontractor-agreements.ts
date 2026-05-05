@@ -1,6 +1,7 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
-import PDFDocument from 'pdfkit'
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const PDFDocument = require('pdfkit')
 import { sendOpenPhoneSms } from './_smsHelper'
 import { sendEmail } from './_emailHelper'
 
