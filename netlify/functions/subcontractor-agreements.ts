@@ -846,16 +846,9 @@ export const handler: Handler = async (event) => {
         .eq('id', sca.contractor_id)
         .single()
 
-      // Log activity (fire-and-forget)
-      try {
-        await supabase.from('activities').insert({
-          type: 'note',
-          summary: `Subcontractor Agreement signed by ${printedName}`,
-          metadata: { scaId: sca.id, contractorId: sca.contractor_id, signedAt },
-        })
-      } catch (e) {
-        console.error('Activity log failed:', e)
-      }
+      // Note: contractors are not linked to contacts, so no activities row is written.
+      // The subcontractor_agreements record itself is the audit trail.
+      console.log(`[sca] Signed by ${printedName} (contractor ${sca.contractor_id}) at ${signedAt}`)
 
       // Generate PDF and send to subcontractor
       try {
