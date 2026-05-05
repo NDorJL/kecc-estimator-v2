@@ -1012,14 +1012,15 @@ function OwnerSignatureSection({ settings }: { settings: CompanySettings | null 
   }, [settings?.ownerEmail])
 
   useEffect(() => {
-    if (!showPad) return
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
     const dpr = window.devicePixelRatio || 1
-    const w = canvas.parentElement?.offsetWidth ?? 320
+    const w = (canvas.parentElement?.offsetWidth ?? 0) > 0
+      ? canvas.parentElement!.offsetWidth
+      : 320
     canvas.width = w * dpr
     canvas.height = 160 * dpr
     canvas.style.width = w + 'px'
