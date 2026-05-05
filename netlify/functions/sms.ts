@@ -92,12 +92,12 @@ export const handler: Handler = async (event) => {
 
       // Log activity (non-fatal)
       if (contactId) {
-        await supabase.from('activities').insert({
+        try { await supabase.from('activities').insert({
           contact_id: contactId,
           type: 'sms_out',
           summary: message.slice(0, 100),
           metadata: { to },
-        }) } catch { /* non-fatal */ }
+        }) } catch (_e) { /* non-fatal */ }
       }
 
       return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true }) }
@@ -139,12 +139,12 @@ export const handler: Handler = async (event) => {
 
       // Log activity (non-fatal)
       if (contactId) {
-        await supabase.from('activities').insert({
+        try { await supabase.from('activities').insert({
           contact_id: contactId,
           type: 'sms_out',
           summary: `Quote visit confirmation sent for ${scheduledDate}${scheduledTime ? ' at ' + scheduledTime : ''}`,
           metadata: { to, scheduledDate, scheduledTime },
-        }) } catch { /* non-fatal */ }
+        }) } catch (_e) { /* non-fatal */ }
       }
 
       return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true, message }) }
@@ -215,12 +215,12 @@ export const handler: Handler = async (event) => {
       await sendQuoSms(apiKey, fromNumber, to, message)
 
       if (contactId) {
-        await supabase.from('activities').insert({
+        try { await supabase.from('activities').insert({
           contact_id: contactId,
           type: 'sms_out',
           summary: `Reschedule notification sent — new date: ${newDate}${newWindow ? ' (' + newWindow + ')' : ''}`,
           metadata: { to, oldDate, newDate, newWindow, reasonType, reasonText },
-        }) } catch { /* non-fatal */ }
+        }) } catch (_e) { /* non-fatal */ }
       }
 
       return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true, message }) }

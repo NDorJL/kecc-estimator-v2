@@ -341,7 +341,7 @@ export const handler: Handler = async (event) => {
             type:       'invoice_sent',
             summary:    `QB Invoice #${qbInvoiceId} generated for ${q.customer_name} — awaiting payment`,
             metadata:   { qbInvoiceId, quoteId: documentId },
-          }) } catch { /* non-fatal */ }
+          }) } catch (_e) { /* non-fatal */ }
         }
       } else {
         await supabase.from('service_agreements').update({ qb_invoice_id: qbInvoiceId }).eq('id', documentId)
@@ -392,7 +392,7 @@ export const handler: Handler = async (event) => {
               let accessToken: string
               try {
                 accessToken = await ensureValidToken(webhookSettings)
-              } catch {
+              } catch (_e) {
                 console.error('[qb webhook] Could not refresh QB token — skipping')
                 continue
               }
@@ -432,7 +432,7 @@ export const handler: Handler = async (event) => {
                       type:       'payment_received',
                       summary:    `Payment received — QB Invoice #${qbInvoiceId} paid`,
                       metadata:   { qbInvoiceId, quoteId: quote.id, leadId: lead.id },
-                    }) } catch { /* non-fatal */ }
+                    }) } catch (_e) { /* non-fatal */ }
                   }
                   console.log(`[qb webhook] Lead ${lead.id} → finished_paid (invoice ${qbInvoiceId})`)
                 }

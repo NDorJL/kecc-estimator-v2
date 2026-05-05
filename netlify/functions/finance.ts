@@ -90,7 +90,7 @@ export const handler: Handler = async (event) => {
       if (!expected) return err('FINANCE_PIN not configured', 500)
       if (String(pin) === String(expected)) return ok({ valid: true })
       return ok({ valid: false }, 200)
-    } catch { return err('Invalid request', 400) }
+    } catch (_e) { return err('Invalid request', 400) }
   }
 
   // ── Clear All Data ─────────────────────────────────────────────────────────

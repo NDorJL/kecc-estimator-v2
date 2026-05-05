@@ -103,7 +103,7 @@ document.getElementById('leadForm').addEventListener('submit', async function(e)
     if (!res.ok) throw new Error('Server error');
     document.getElementById('leadForm').style.display = 'none';
     document.getElementById('successMsg').style.display = 'block';
-  } catch {
+  } catch (_e) {
     btn.textContent = 'Request My Free Quote';
     btn.disabled = false;
     errMsg.style.display = 'block';

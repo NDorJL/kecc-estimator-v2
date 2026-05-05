@@ -111,7 +111,7 @@ export const handler: Handler = async (event) => {
       if (body.phone !== undefined)        quoteSync.customer_phone = body.phone
       if (body.businessName !== undefined) quoteSync.business_name  = body.businessName
       if (Object.keys(quoteSync).length > 0) {
-        try { await supabase.from('quotes').update(quoteSync).eq('contact_id', id).is('trashed_at', null) } catch { /* non-fatal */ }
+        try { await supabase.from('quotes').update(quoteSync).eq('contact_id', id).is('trashed_at', null) } catch (_e) { /* non-fatal */ }
       }
 
       // Subscriptions: customer_name, customer_email, customer_phone
@@ -120,7 +120,7 @@ export const handler: Handler = async (event) => {
       if (body.email !== undefined) subSync.customer_email = body.email
       if (body.phone !== undefined) subSync.customer_phone = body.phone
       if (Object.keys(subSync).length > 0) {
-        try { await supabase.from('subscriptions').update(subSync).eq('contact_id', id) } catch { /* non-fatal */ }
+        try { await supabase.from('subscriptions').update(subSync).eq('contact_id', id) } catch (_e) { /* non-fatal */ }
       }
 
       // Jobs: customer_name, customer_email, customer_phone
@@ -129,7 +129,7 @@ export const handler: Handler = async (event) => {
       if (body.email !== undefined) jobSync.customer_email = body.email
       if (body.phone !== undefined) jobSync.customer_phone = body.phone
       if (Object.keys(jobSync).length > 0) {
-        try { await supabase.from('jobs').update(jobSync).eq('contact_id', id) } catch { /* non-fatal */ }
+        try { await supabase.from('jobs').update(jobSync).eq('contact_id', id) } catch (_e) { /* non-fatal */ }
       }
 
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToContact(data)) }

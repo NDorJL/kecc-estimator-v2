@@ -121,7 +121,7 @@ export const handler: Handler = async (event) => {
           type:       'esign_sent',
           summary:    `Service agreement generated for ${contactName}`,
           metadata:   { agreementId: agreementRow.id, subscriptionId },
-        }) } catch { /* non-fatal */ }
+        }) } catch (_e) { /* non-fatal */ }
       }
 
       const baseUrl = process.env.URL ?? 'http://localhost:8888'

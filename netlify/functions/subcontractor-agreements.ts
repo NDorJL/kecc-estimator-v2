@@ -569,7 +569,7 @@ async function generateScaPdf(opts: {
         const imgBuf = Buffer.from(base64, 'base64')
         doc.image(imgBuf, 50, doc.y, { height: 50, fit: [colW, 50] })
         doc.moveDown(3.5)
-      } catch {
+      } catch (_e) {
         doc.fontSize(20).font('Helvetica-Oblique').fillColor('#1e3a5f').text('Nicholas G Dunn', 50)
         doc.moveDown(0.5)
       }
@@ -592,7 +592,7 @@ async function generateScaPdf(opts: {
         const base64 = opts.subSigData.replace(/^data:image\/\w+;base64,/, '')
         const imgBuf = Buffer.from(base64, 'base64')
         doc.image(imgBuf, subColX, sigY + 36, { height: 50, fit: [colW, 50] })
-      } catch {
+      } catch (_e) {
         doc.rect(subColX, sigY + 36, colW, 50).strokeColor('#d1d5db').stroke()
       }
     } else {

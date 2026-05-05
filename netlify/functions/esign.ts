@@ -806,7 +806,7 @@ export const handler: Handler = async (event) => {
       }
 
       let body: { signatureData?: string } = {}
-      try { body = JSON.parse(event.body ?? '{}') } catch { /* ignore */ }
+      try { body = JSON.parse(event.body ?? '{}') } catch (_e) { /* ignore */ }
 
       if (!body.signatureData) {
         return { statusCode: 400, headers: JSON_HEADERS, body: JSON.stringify({ success: false, message: 'signatureData required' }) }
@@ -855,13 +855,13 @@ export const handler: Handler = async (event) => {
             `Hi ${firstName}, your estimate with ${companyName} has been signed — thank you! ` +
             `You can view your signed copy anytime here: ${signedCopyUrl} ` +
             `We'll be in touch soon. Reply STOP to opt out.`
-          try { await sendOpenPhoneSms(apiKey, fromNumber, quoteRow.customer_phone, confirmMsg) } catch { /* non-fatal */ }
+          try { await sendOpenPhoneSms(apiKey, fromNumber, quoteRow.customer_phone, confirmMsg) } catch (_e) { /* non-fatal */ }
           try { await supabase.from('activities').insert({
             contact_id: quoteRow.contact_id,
             type:       'sms_out',
             summary:    `Signed copy link sent to ${quoteRow.customer_name}`,
             metadata:   { quoteId: quoteRow.id },
-          }) } catch { /* non-fatal */ }
+          }) } catch (_e) { /* non-fatal */ }
         }
 
         // ── Recurring quote: auto-generate & SMS a service agreement ──────────
@@ -894,7 +894,7 @@ export const handler: Handler = async (event) => {
                 type:       'esign_sent',
                 summary:    `Service agreement auto-generated and sent for signing`,
                 metadata:   { agreementId: newAgreement.id, quoteId: quoteRow.id },
-              }) } catch { /* non-fatal */ }
+              }) } catch (_e) { /* non-fatal */ }
             }
           } catch (agreeErr) {
             // Non-fatal — quote signing already succeeded
@@ -925,7 +925,7 @@ export const handler: Handler = async (event) => {
               status:       'ACTIVE',
               agreement_id: agreementRow.id,
             }).eq('id', agreementRow.subscription_id)
-          } catch { /* non-fatal */ }
+          } catch (_e) { /* non-fatal */ }
         }
 
         // Stamp agreement_signed_at on the most recent non-lost lead for this contact.
@@ -938,7 +938,7 @@ export const handler: Handler = async (event) => {
               .not('stage', 'eq', 'lost')
               .order('created_at', { ascending: false })
               .limit(1)
-          } catch { /* non-fatal */ }
+          } catch (_e) { /* non-fatal */ }
         }
 
         // Advance lead to "Recurring" when service agreement is signed
@@ -953,7 +953,7 @@ export const handler: Handler = async (event) => {
           type:       'esign_completed',
           summary:    `Service agreement signed by ${agreementRow.customer_name} — ready to schedule`,
           metadata:   { agreementId: agreementRow.id, subscriptionId: agreementRow.subscription_id },
-        }) } catch { /* non-fatal */ }
+        }) } catch (_e) { /* non-fatal */ }
 
         // ── Confirmation SMS: signed agreement copy link ───────────────────────
         try {
@@ -985,7 +985,7 @@ export const handler: Handler = async (event) => {
               type:       'sms_out',
               summary:    `Signed agreement copy link sent to ${agreementRow.customer_name}`,
               metadata:   { agreementId: agreementRow.id },
-            }) } catch { /* non-fatal */ }
+            }) } catch (_e) { /* non-fatal */ }
           }
         } catch (confirmErr) {
           // Non-fatal — agreement signing already succeeded

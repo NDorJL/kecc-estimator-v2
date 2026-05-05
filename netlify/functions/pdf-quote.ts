@@ -54,7 +54,7 @@ export const handler: Handler = async (event) => {
     // Fetch logo buffer if set
     let logoBuffer: Buffer | null = null
     if (settings.logoUrl) {
-      try { logoBuffer = await fetchBuffer(settings.logoUrl) } catch { /* skip */ }
+      try { logoBuffer = await fetchBuffer(settings.logoUrl) } catch (_e) { /* skip */ }
     }
 
     // Build PDF with PDFKit
@@ -69,7 +69,7 @@ export const handler: Handler = async (event) => {
     let y = 50
 
     if (logoBuffer) {
-      try { doc.image(logoBuffer, 410, y, { width: 100, height: 60, fit: [100, 60] }) } catch { /* skip bad image */ }
+      try { doc.image(logoBuffer, 410, y, { width: 100, height: 60, fit: [100, 60] }) } catch (_e) { /* skip bad image */ }
     }
     doc.fontSize(16).font('Helvetica-Bold').text(settings.companyName ?? 'Knox Exterior Care Co.', 50, y, { width: 340 })
     y += 22
@@ -254,7 +254,7 @@ export const handler: Handler = async (event) => {
           const attDoc = await LibPDF.load(attBuf)
           const aPages = await mergedPdf.copyPages(attDoc, attDoc.getPageIndices())
           aPages.forEach(p => mergedPdf.addPage(p))
-        } catch { /* skip bad attachment */ }
+        } catch (_e) { /* skip bad attachment */ }
       }))
 
       const mergedBytes = await mergedPdf.save()
@@ -265,7 +265,7 @@ export const handler: Handler = async (event) => {
         body: Buffer.from(mergedBytes).toString('base64'),
         isBase64Encoded: true,
       }
-    } catch {
+    } catch (_e) {
       // Merge failed — send quote PDF alone
       const filename = `KECC-Estimate-${quote.customerName.replace(/\s+/g, '-')}-${quote.id.slice(0, 8)}.pdf`
       return {

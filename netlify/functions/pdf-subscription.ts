@@ -40,7 +40,7 @@ export const handler: Handler = async (event) => {
 
     let logoBuffer: Buffer | null = null
     if (settings.logoUrl) {
-      try { logoBuffer = await fetchBuffer(settings.logoUrl) } catch { /* skip */ }
+      try { logoBuffer = await fetchBuffer(settings.logoUrl) } catch (_e) { /* skip */ }
     }
 
     const chunks: Buffer[] = []
@@ -54,7 +54,7 @@ export const handler: Handler = async (event) => {
     let y = 50
 
     if (logoBuffer) {
-      try { doc.image(logoBuffer, 410, y, { width: 100, height: 60, fit: [100, 60] }) } catch { /* skip */ }
+      try { doc.image(logoBuffer, 410, y, { width: 100, height: 60, fit: [100, 60] }) } catch (_e) { /* skip */ }
     }
     doc.fontSize(16).font('Helvetica-Bold').text(settings.companyName ?? 'Knox Exterior Care Co.', 50, y, { width: 340 })
     y += 22

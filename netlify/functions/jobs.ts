@@ -129,7 +129,7 @@ export const handler: Handler = async (event) => {
           type:       'job_completed',
           summary:    `${data.service_name} completed${dateLabel ? ` on ${dateLabel}` : ''}`,
           metadata:   { jobId: id, serviceName: data.service_name, scheduledDate: data.scheduled_date },
-        }) } catch { /* non-fatal */ }
+        }) } catch (_e) { /* non-fatal */ }
       }
       return { statusCode: 200, headers: CORS, body: JSON.stringify(job) }
     }

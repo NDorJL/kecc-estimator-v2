@@ -147,7 +147,7 @@ export const handler: Handler = async (event) => {
           const cal = await calRes.json() as { id: string }
           calendarId = cal.id
         }
-      } catch {
+      } catch (_e) {
         // non-fatal — fall back to 'primary'
       }
 

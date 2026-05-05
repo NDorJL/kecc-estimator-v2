@@ -96,7 +96,7 @@ export const handler: Handler = async (event) => {
     // UPDATE quote
     if (method === 'PATCH' && id && !action) {
       let body: Record<string, unknown>
-      try { body = JSON.parse(event.body ?? '{}') } catch { return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'Invalid JSON body' }) } }
+      try { body = JSON.parse(event.body ?? '{}') } catch (_e) { return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'Invalid JSON body' }) } }
       const update: Record<string, unknown> = {}
       if (body.customerName !== undefined) update.customer_name = body.customerName
       if (body.customerAddress !== undefined) update.customer_address = body.customerAddress
@@ -202,7 +202,7 @@ export const handler: Handler = async (event) => {
           type: 'sms_out',
           summary: `Quote sent via SMS to ${quote.customer_phone}`,
           metadata: { quoteId: id, esignUrl },
-        }) } catch { /* non-fatal */ }
+        }) } catch (_e) { /* non-fatal */ }
       }
 
       // Return success — frontend invalidates the /quotes cache to pick up sent_at
