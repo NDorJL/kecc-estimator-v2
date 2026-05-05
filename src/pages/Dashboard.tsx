@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/lib/queryClient'
-import type { Quote, Subscription, CompanySettings, Lead, Job } from '@/types'
+import type { Quote, Subscription, CompanySettings, Lead, Job, SubcontractorAgreement } from '@/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -146,6 +146,11 @@ export default function Dashboard() {
     queryFn: () => apiGet('/jobs'),
   })
 
+  const { data: scas = [] } = useQuery<SubcontractorAgreement[]>({
+    queryKey: ['/subcontractor-agreements'],
+    queryFn: () => apiGet('/subcontractor-agreements?action=list'),
+  })
+
   const loading = quotesLoading || subsLoading
 
   const fmt = (n: number) =>
@@ -208,6 +213,7 @@ export default function Dashboard() {
     const ls   = leads   ?? []
     const js   = jobs    ?? []
     const ss   = subs    ?? []
+    const scaList = scas ?? []
 
     // 1. Recently signed quotes (last 7 days)
     const sevenDaysAgo = new Date(now - 7 * DAY)
@@ -363,7 +369,22 @@ export default function Dashboard() {
       }
     }
 
-    // 10. Today's events (header notification)
+    // 10. Recently signed SCAs (last 7 days)
+    const sevenDaysAgoSca = new Date(now - 7 * DAY)
+    for (const sca of scaList) {
+      if (sca.status === 'signed' && sca.signedAt && new Date(sca.signedAt) >= sevenDaysAgoSca) {
+        result.push({
+          id: `sca-signed-${sca.id}`,
+          emoji: '📝',
+          title: `${sca.contractorName} signed their SCA`,
+          subtitle: new Date(sca.signedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+          colorClass: 'border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400',
+          path: '/contacts',
+        })
+      }
+    }
+
+    // 11. Today's events (header notification)
     if (todaysJobs.length > 0) {
       result.unshift({
         id: `today-events-${todayStr}`,
@@ -377,7 +398,7 @@ export default function Dashboard() {
 
     return result
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quotes, leads, jobs, subs, todayStr])
+  }, [quotes, leads, jobs, subs, scas, todayStr])
 
   const visible = notifications.filter(n => !dismissed.has(n.id))
 

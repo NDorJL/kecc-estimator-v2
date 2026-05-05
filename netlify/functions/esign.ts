@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { randomUUID } from 'crypto'
 import { advanceLeadStage } from './_leadSync'
 import { sendOpenPhoneSms } from './_smsHelper'
+import { sendEmail } from './_emailHelper'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,

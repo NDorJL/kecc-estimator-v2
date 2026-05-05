@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import { quoCallUrl } from '@/lib/utils'
-import { Contact, Contractor, ContractorDoc } from '@/types'
+import { Contact, Contractor, ContractorDoc, SubcontractorAgreement } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -14,7 +14,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Search, Plus, Phone, Mail, Building2, User, HardHat, DollarSign, Pencil, Trash2, Upload, FileText, X, ExternalLink } from 'lucide-react'
+import { Search, Plus, Phone, Mail, Building2, User, HardHat, DollarSign, Pencil, Trash2, Upload, FileText, X, ExternalLink, Download, Copy, Send, ClipboardList } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
 type FilterType = 'all' | 'residential' | 'commercial' | 'contractors'
@@ -201,7 +201,7 @@ const SPECIALTIES = [
   'Other',
 ]
 
-function ContractorCard({ contractor, onEdit, onDelete }: { contractor: Contractor; onEdit: (c: Contractor) => void; onDelete: (id: string) => void }) {
+function ContractorCard({ contractor, sca, scas, onEdit, onDelete }: { contractor: Contractor; sca?: SubcontractorAgreement; scas: SubcontractorAgreement[]; onEdit: (c: Contractor) => void; onDelete: (id: string) => void }) {
   const threshold1099 = contractor.is1099 && contractor.ratePerJob !== null && contractor.ratePerJob >= 600
   return (
     <div className="w-full rounded-xl border bg-card p-3 text-left">
@@ -216,6 +216,16 @@ function ContractorCard({ contractor, onEdit, onDelete }: { contractor: Contract
             )}
             {contractor.specialty && (
               <Badge variant="secondary" className="text-xs shrink-0">{contractor.specialty}</Badge>
+            )}
+            {sca?.status === 'signed' && (
+              <span className="text-xs font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-full px-2 py-0.5 shrink-0">
+                ✓ SCA Signed
+              </span>
+            )}
+            {sca?.status === 'pending_signature' && (
+              <span className="text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-full px-2 py-0.5 shrink-0">
+                Awaiting Signature
+              </span>
             )}
           </div>
           {contractor.company && (
@@ -263,9 +273,9 @@ function ContractorCard({ contractor, onEdit, onDelete }: { contractor: Contract
 }
 
 function ContractorSheet({
-  open, onClose, contractor,
+  open, onClose, contractor, scas = [],
 }: {
-  open: boolean; onClose: () => void; contractor?: Contractor | null
+  open: boolean; onClose: () => void; contractor?: Contractor | null; scas?: SubcontractorAgreement[]
 }) {
   const [form, setForm] = useState<ContractorForm>(EMPTY_CONTRACTOR_FORM)
   const queryClient = useQueryClient()
@@ -382,6 +392,11 @@ function ContractorSheet({
           {/* Documents — only visible when editing an existing contractor */}
           {isEdit && contractor && (
             <ContractorDocsSection contractor={contractor} />
+          )}
+
+          {/* Subcontractor Agreement — only visible when editing */}
+          {isEdit && contractor && (
+            <ContractorScaSection contractor={contractor} scas={scas} />
           )}
         </div>
       </SheetContent>
@@ -518,9 +533,226 @@ function ContractorDocsSection({ contractor }: { contractor: Contractor }) {
   )
 }
 
+// ── SCA Section in Contractor Detail ─────────────────────────────────────────
+
+function ContractorScaSection({ contractor, scas }: { contractor: Contractor; scas: SubcontractorAgreement[] }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const [generating, setGenerating] = useState(false)
+
+  const sca = scas.find(s => s.contractorId === contractor.id && s.status !== 'void') ?? null
+
+  const SITE_URL = window.location.origin
+
+  async function handleGenerate() {
+    setGenerating(true)
+    try {
+      const res = await fetch('/.netlify/functions/subcontractor-agreements?action=create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contractorId: contractor.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message ?? 'Failed to generate SCA')
+      queryClient.invalidateQueries({ queryKey: ['/subcontractor-agreements'] })
+      const via = data.sentVia === 'email' ? 'email' : data.sentVia === 'sms' ? 'SMS' : '(no email or SMS — copy link manually)'
+      toast({ title: `Agreement sent via ${via}` })
+    } catch (err) {
+      toast({ title: 'Error', description: String(err), variant: 'destructive' })
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function handleResend() {
+    if (!sca) return
+    setGenerating(true)
+    try {
+      // Void the old one, create a new one
+      await fetch(`/.netlify/functions/subcontractor-agreements?action=void&id=${sca.id}`, { method: 'POST' })
+      const res = await fetch('/.netlify/functions/subcontractor-agreements?action=create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contractorId: contractor.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message ?? 'Failed to resend')
+      queryClient.invalidateQueries({ queryKey: ['/subcontractor-agreements'] })
+      toast({ title: 'Agreement resent' })
+    } catch (err) {
+      toast({ title: 'Error', description: String(err), variant: 'destructive' })
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  function handleCopyLink() {
+    if (!sca) return
+    const link = `${SITE_URL}/.netlify/functions/subcontractor-agreements?token=${sca.acceptToken}`
+    navigator.clipboard.writeText(link).then(() => {
+      toast({ title: 'Link copied to clipboard' })
+    }).catch(() => {
+      toast({ title: 'Copy failed — link: ' + link })
+    })
+  }
+
+  function handleDownloadPdf() {
+    if (!sca) return
+    window.open(`/.netlify/functions/subcontractor-agreements?action=pdf&id=${sca.id}`, '_blank')
+  }
+
+  return (
+    <div className="border-t pt-4 mt-2">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1">
+        <ClipboardList className="h-3.5 w-3.5" /> Subcontractor Agreement
+      </p>
+
+      {!sca && (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">No SCA on file.</p>
+          <Button size="sm" className="w-full min-h-[40px]" disabled={generating} onClick={handleGenerate}>
+            {generating ? 'Generating…' : 'Generate & Send Agreement'}
+          </Button>
+        </div>
+      )}
+
+      {sca && sca.status === 'pending_signature' && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-full px-2 py-0.5">
+              Awaiting Signature
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">Sent {new Date(sca.createdAt).toLocaleDateString()}</p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="flex-1 min-h-[36px]" onClick={handleCopyLink}>
+              <Copy className="h-3.5 w-3.5 mr-1" /> Copy Link
+            </Button>
+            <Button size="sm" variant="outline" className="flex-1 min-h-[36px]" disabled={generating} onClick={handleResend}>
+              <Send className="h-3.5 w-3.5 mr-1" /> Resend
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {sca && sca.status === 'signed' && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-full px-2 py-0.5">
+              ✓ SCA Signed
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Signed {sca.signedAt ? new Date(sca.signedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
+          </p>
+          <Button size="sm" variant="outline" className="w-full min-h-[36px]" onClick={handleDownloadPdf}>
+            <Download className="h-3.5 w-3.5 mr-1" /> Download Signed PDF
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Generate SCA Dialog ───────────────────────────────────────────────────────
+
+function GenerateScaDialog({
+  open,
+  onClose,
+  contractors,
+  scas,
+}: {
+  open: boolean
+  onClose: () => void
+  contractors: Contractor[]
+  scas: SubcontractorAgreement[]
+}) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const [selectedId, setSelectedId] = useState<string>('')
+  const [sending, setSending] = useState(false)
+
+  // Filter to contractors without an active/pending SCA
+  const existingContractorIds = new Set(
+    scas.filter(s => s.status !== 'void').map(s => s.contractorId)
+  )
+  const eligible = contractors.filter(c => !existingContractorIds.has(c.id))
+
+  useEffect(() => {
+    if (open) setSelectedId(eligible[0]?.id ?? '')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  async function handleGenerate() {
+    if (!selectedId) return
+    setSending(true)
+    try {
+      const res = await fetch('/.netlify/functions/subcontractor-agreements?action=create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contractorId: selectedId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message ?? 'Failed')
+      queryClient.invalidateQueries({ queryKey: ['/subcontractor-agreements'] })
+      const name = contractors.find(c => c.id === selectedId)?.name ?? 'contractor'
+      const via = data.sentVia === 'email' ? 'email' : data.sentVia === 'sms' ? 'SMS' : 'link (no email/SMS on file)'
+      toast({ title: `Agreement sent to ${name} via ${via}` })
+      onClose()
+    } catch (err) {
+      toast({ title: 'Error', description: String(err), variant: 'destructive' })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Generate Subcontractor Agreement</DialogTitle>
+        </DialogHeader>
+        {eligible.length === 0 ? (
+          <p className="text-sm text-muted-foreground">All contractors already have an active or pending SCA.</p>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Select Contractor</label>
+              <Select value={selectedId} onValueChange={setSelectedId}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="Choose contractor…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {eligible.map(c => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}{c.company ? ` — ${c.company}` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              The agreement will be sent via email if the contractor has one, otherwise via SMS.
+            </p>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          {eligible.length > 0 && (
+            <Button disabled={!selectedId || sending} onClick={handleGenerate}>
+              {sending ? 'Sending…' : 'Generate & Send'}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function ContractorsList({ search }: { search: string }) {
   const [editContractor, setEditContractor] = useState<Contractor | null>(null)
   const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [showGenerateSca, setShowGenerateSca] = useState(false)
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -531,6 +763,11 @@ function ContractorsList({ search }: { search: string }) {
       if (search) params.set('search', search)
       return apiGet(`/contractors?${params.toString()}`)
     },
+  })
+
+  const { data: scas = [] } = useQuery<SubcontractorAgreement[]>({
+    queryKey: ['/subcontractor-agreements'],
+    queryFn: () => apiGet('/subcontractor-agreements?action=list'),
   })
 
   const deleteMutation = useMutation({
@@ -550,29 +787,58 @@ function ContractorsList({ search }: { search: string }) {
   )
 
   if (!contractors?.length) return (
-    <div className="flex flex-col items-center justify-center h-48 text-center">
-      <HardHat className="h-8 w-8 text-muted-foreground mb-2" />
-      <p className="text-muted-foreground text-sm">
-        {search ? 'No contractors match your search.' : 'No contractors yet. Add your first one.'}
-      </p>
-    </div>
+    <>
+      <Button className="w-full mb-3" onClick={() => setShowGenerateSca(true)}>
+        <ClipboardList className="h-4 w-4 mr-2" /> Generate Subcontractor Agreement
+      </Button>
+      <div className="flex flex-col items-center justify-center h-48 text-center">
+        <HardHat className="h-8 w-8 text-muted-foreground mb-2" />
+        <p className="text-muted-foreground text-sm">
+          {search ? 'No contractors match your search.' : 'No contractors yet. Add your first one.'}
+        </p>
+      </div>
+      <GenerateScaDialog
+        open={showGenerateSca}
+        onClose={() => setShowGenerateSca(false)}
+        contractors={contractors ?? []}
+        scas={scas}
+      />
+    </>
   )
 
   return (
     <div className="space-y-2">
-      {contractors.map(c => (
-        <ContractorCard
-          key={c.id}
-          contractor={c}
-          onEdit={setEditContractor}
-          onDelete={setDeleteId}
-        />
-      ))}
+      {/* Generate SCA button */}
+      <Button className="w-full" variant="outline" onClick={() => setShowGenerateSca(true)}>
+        <ClipboardList className="h-4 w-4 mr-2" /> Generate Subcontractor Agreement
+      </Button>
+
+      {contractors.map(c => {
+        const sca = scas.find(s => s.contractorId === c.id && s.status !== 'void')
+        return (
+          <ContractorCard
+            key={c.id}
+            contractor={c}
+            sca={sca}
+            scas={scas}
+            onEdit={setEditContractor}
+            onDelete={setDeleteId}
+          />
+        )
+      })}
 
       <ContractorSheet
         open={!!editContractor}
         onClose={() => setEditContractor(null)}
         contractor={editContractor}
+        scas={scas}
+      />
+
+      <GenerateScaDialog
+        open={showGenerateSca}
+        onClose={() => setShowGenerateSca(false)}
+        contractors={contractors}
+        scas={scas}
       />
 
       <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>

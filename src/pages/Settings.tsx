@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useToast } from '@/hooks/use-toast'
-import { Save, Loader2, Upload, X, ImageIcon, Paperclip, FileText, Trash2, Plus, Link2, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react'
+import { Save, Loader2, Upload, X, ImageIcon, Paperclip, FileText, Trash2, Plus, Link2, CheckCircle2, AlertCircle, RefreshCw, PenLine } from 'lucide-react'
 import { applyTheme, clearTheme, THEME_PRESETS, ALL_NAV_ITEMS, DEFAULT_NAV, mergeNavItems, type ThemeConfig, type NavItemConfig } from '@/lib/theme'
 
 const settingsFormSchema = z.object({
@@ -997,6 +997,238 @@ function GoogleCalSection({ settings }: { settings: CompanySettings | null }) {
   )
 }
 
+/* ── Owner Signature Section ──────────────────────────────────────────── */
+function OwnerSignatureSection({ settings }: { settings: CompanySettings | null }) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [hasSig, setHasSig] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [showPad, setShowPad] = useState(false)
+  const [ownerEmail, setOwnerEmail] = useState(settings?.ownerEmail ?? '')
+
+  useEffect(() => {
+    setOwnerEmail(settings?.ownerEmail ?? '')
+  }, [settings?.ownerEmail])
+
+  useEffect(() => {
+    if (!showPad) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const dpr = window.devicePixelRatio || 1
+    const w = canvas.parentElement?.offsetWidth ?? 320
+    canvas.width = w * dpr
+    canvas.height = 160 * dpr
+    canvas.style.width = w + 'px'
+    canvas.style.height = '160px'
+    ctx.scale(dpr, dpr)
+    ctx.strokeStyle = '#111827'
+    ctx.lineWidth = 2.5
+    ctx.lineCap = 'round'
+    ctx.lineJoin = 'round'
+
+    let drawing = false
+    const dprRef = dpr
+
+    function getPos(e: MouseEvent | TouchEvent) {
+      const r = canvas!.getBoundingClientRect()
+      const src = 'touches' in e ? e.touches[0] : e
+      return { x: src.clientX - r.left, y: src.clientY - r.top }
+    }
+
+    function onDown(e: MouseEvent | TouchEvent) {
+      drawing = true
+      const p = getPos(e)
+      ctx!.beginPath()
+      ctx!.moveTo(p.x, p.y)
+    }
+    function onMove(e: MouseEvent | TouchEvent) {
+      if (!drawing) return
+      if ('touches' in e) e.preventDefault()
+      const p = getPos(e)
+      ctx!.lineTo(p.x, p.y)
+      ctx!.stroke()
+      setHasSig(true)
+    }
+    function onUp() { drawing = false }
+
+    canvas.addEventListener('mousedown', onDown)
+    canvas.addEventListener('mousemove', onMove)
+    canvas.addEventListener('mouseup', onUp)
+    canvas.addEventListener('mouseleave', onUp)
+    canvas.addEventListener('touchstart', onDown, { passive: false })
+    canvas.addEventListener('touchmove', onMove, { passive: false })
+    canvas.addEventListener('touchend', onUp)
+
+    return () => {
+      canvas.removeEventListener('mousedown', onDown)
+      canvas.removeEventListener('mousemove', onMove)
+      canvas.removeEventListener('mouseup', onUp)
+      canvas.removeEventListener('mouseleave', onUp)
+      canvas.removeEventListener('touchstart', onDown)
+      canvas.removeEventListener('touchmove', onMove)
+      canvas.removeEventListener('touchend', onUp)
+      void dprRef
+    }
+  }, [showPad])
+
+  function clearCanvas() {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    const dpr = window.devicePixelRatio || 1
+    ctx?.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr)
+    setHasSig(false)
+  }
+
+  async function handleSaveSignature() {
+    const canvas = canvasRef.current
+    if (!canvas || !hasSig) return
+    setSaving(true)
+    try {
+      const dataUrl = canvas.toDataURL('image/png')
+      await fetch('/.netlify/functions/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerSignatureData: dataUrl }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['/settings'] })
+      setShowPad(false)
+      toast({ title: 'Signature saved' })
+    } catch {
+      toast({ title: 'Save failed', variant: 'destructive' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleSaveEmail() {
+    setSaving(true)
+    try {
+      await fetch('/.netlify/functions/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerEmail: ownerEmail || null }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['/settings'] })
+      toast({ title: 'Owner email saved' })
+    } catch {
+      toast({ title: 'Save failed', variant: 'destructive' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleRemoveSignature() {
+    setSaving(true)
+    try {
+      await fetch('/.netlify/functions/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerSignatureData: null }),
+      })
+      queryClient.invalidateQueries({ queryKey: ['/settings'] })
+      toast({ title: 'Signature removed' })
+    } catch {
+      toast({ title: 'Remove failed', variant: 'destructive' })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <PenLine className="h-4 w-4" />
+          Owner Signature (for Subcontractor Agreements)
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">
+          This signature is embedded in every Subcontractor Agreement as the KECC owner signature.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Existing signature preview */}
+        {settings?.ownerSignatureData && !showPad && (
+          <div className="space-y-2">
+            <label className="text-xs font-medium">Current Signature</label>
+            <div className="relative inline-block border rounded-md p-2 bg-muted/30">
+              <img
+                src={settings.ownerSignatureData}
+                alt="Owner signature"
+                className="max-h-16 max-w-[220px] object-contain"
+              />
+              <Button
+                size="icon"
+                variant="destructive"
+                className="absolute -top-2 -right-2 h-5 w-5 rounded-full"
+                onClick={handleRemoveSignature}
+                disabled={saving}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+            <div>
+              <Button variant="outline" size="sm" className="min-h-[36px]" onClick={() => setShowPad(true)}>
+                Replace Signature
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Canvas signature pad */}
+        {(!settings?.ownerSignatureData || showPad) && (
+          <div className="space-y-3">
+            <label className="text-xs font-medium">
+              {settings?.ownerSignatureData ? 'Draw new signature' : 'Draw your signature'}
+            </label>
+            <div className="border rounded-lg overflow-hidden bg-white">
+              <canvas
+                ref={canvasRef}
+                style={{ display: 'block', touchAction: 'none', cursor: 'crosshair' }}
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="flex-1 min-h-[40px]" onClick={clearCanvas}>
+                Clear
+              </Button>
+              {showPad && (
+                <Button variant="outline" size="sm" className="min-h-[40px]" onClick={() => setShowPad(false)}>
+                  Cancel
+                </Button>
+              )}
+              <Button size="sm" className="flex-1 min-h-[40px]" disabled={!hasSig || saving} onClick={handleSaveSignature}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4 mr-1" />}
+                Save Signature
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Owner email */}
+        <div className="pt-2 border-t space-y-2">
+          <label className="text-xs font-medium">Owner Email (notifications when SCAs are signed)</label>
+          <div className="flex gap-2">
+            <Input
+              type="email"
+              placeholder="owner@example.com"
+              value={ownerEmail}
+              onChange={e => setOwnerEmail(e.target.value)}
+              className="flex-1 min-h-[40px]"
+            />
+            <Button size="sm" variant="outline" className="min-h-[40px] shrink-0" onClick={handleSaveEmail} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 /* ── Main Settings Page ───────────────────────────────────────────────── */
 export default function SettingsPage() {
   const queryClient = useQueryClient()
@@ -1210,6 +1442,9 @@ export default function SettingsPage() {
 
       {/* QuickBooks */}
       <QuickBooksSection settings={settings ?? null} />
+
+      {/* Owner Signature */}
+      <OwnerSignatureSection settings={settings ?? null} />
 
       {/* SMS / Quo */}
       <SmsSection settings={settings ?? null} />

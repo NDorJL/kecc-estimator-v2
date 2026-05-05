@@ -125,6 +125,8 @@ export interface CompanySettings {
   navConfig: { items?: Array<{ id: string; visible: boolean }> };
   googleCalId: string | null;
   googleCalExpiresAt: string | null;
+  ownerSignatureData: string | null;
+  ownerEmail: string | null;
 }
 
 export interface QuoteAttachment {
@@ -357,6 +359,8 @@ export function rowToSettings(r: any): CompanySettings {
     googleCalConnected: !!r.google_cal_refresh_token,
     googleCalId: r.google_cal_id ?? null,
     googleCalExpiresAt: r.google_cal_token_expires_at ?? null,
+    ownerSignatureData: r.owner_signature_data ?? null,
+    ownerEmail: r.owner_email ?? null,
   };
 }
 
@@ -539,6 +543,36 @@ export function rowToJob(r: any): Job {
     reminderSentAt: r.reminder_sent_at ?? null,
     completedAt: r.completed_at ?? null,
     reviewSentAt: r.review_sent_at ?? null,
+    createdAt: r.created_at,
+  };
+}
+
+// ── Subcontractor Agreement Types ──────────────────────────────────────
+export type ScaStatus = 'pending_signature' | 'signed' | 'void';
+
+export interface SubcontractorAgreement {
+  id: string;
+  contractorId: string;
+  contractorName: string;
+  entityType: string | null;
+  effectiveDate: string;
+  status: ScaStatus;
+  acceptToken: string;
+  signedAt: string | null;
+  createdAt: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function rowToSca(r: any): SubcontractorAgreement {
+  return {
+    id: r.id,
+    contractorId: r.contractor_id,
+    contractorName: r.contractor_name,
+    entityType: r.entity_type ?? null,
+    effectiveDate: r.effective_date,
+    status: r.status,
+    acceptToken: r.accept_token,
+    signedAt: r.signed_at ?? null,
     createdAt: r.created_at,
   };
 }
