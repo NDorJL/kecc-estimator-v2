@@ -40,7 +40,9 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
   const lineItems: LineItem[] = Array.isArray(quote.lineItems) ? quote.lineItems : []
   const defaultService = lineItems.length > 0 ? lineItems[0].serviceName : quote.quoteType
 
-  const [selectedService, setSelectedService] = useState<string>(defaultService)
+  // Use index-based selection so two services with the same name are
+  // treated as distinct items — only one chip is ever active at a time.
+  const [selectedIdx, setSelectedIdx]         = useState<number>(0)
   const [customService, setCustomService]     = useState('')
   const [date, setDate]         = useState('')
   const [endDate, setEndDate]   = useState('')
@@ -55,7 +57,7 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
   } | null>(null)
 
   function reset() {
-    setSelectedService(defaultService)
+    setSelectedIdx(0)
     setCustomService('')
     setDate('')
     setEndDate('')
@@ -69,7 +71,9 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
     setPendingJobInfo(null)
   }
 
-  const effectiveService = lineItems.length > 0 ? selectedService : (customService || defaultService)
+  const effectiveService = lineItems.length > 0
+    ? (lineItems[selectedIdx]?.serviceName ?? defaultService)
+    : (customService || defaultService)
 
   const scheduleMutation = useMutation({
     mutationFn: () =>
@@ -201,12 +205,12 @@ export function ScheduleQuoteSheet({ quote, open, onClose }: Props) {
                 <Label className="text-xs mb-2 block">Which service is this day for?</Label>
                 <div className="flex flex-wrap gap-2">
                   {lineItems.map((li, i) => {
-                    const isSelected = selectedService === li.serviceName
+                    const isSelected = selectedIdx === i
                     return (
                       <button
                         key={i}
                         type="button"
-                        onClick={() => setSelectedService(li.serviceName)}
+                        onClick={() => setSelectedIdx(i)}
                         className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all ${
                           isSelected
                             ? 'border-primary bg-primary text-primary-foreground'
