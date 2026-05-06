@@ -925,6 +925,18 @@ function GoogleCalSection({ settings }: { settings: CompanySettings | null }) {
     onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
   })
 
+  const bulkSyncMutation = useMutation({
+    mutationFn: () =>
+      fetch('/.netlify/functions/google-cal?action=bulk-sync', { method: 'POST' }).then(r => r.json()),
+    onSuccess: (data: { synced: number; total: number; failed: number }) => {
+      toast({
+        title: `Sync complete — ${data.synced} of ${data.total} jobs pushed to Google Calendar`,
+        description: data.failed > 0 ? `${data.failed} failed (check Netlify logs)` : undefined,
+      })
+    },
+    onError: (err: Error) => toast({ title: 'Sync failed', description: err.message, variant: 'destructive' }),
+  })
+
   const connected = gcStatus?.connected ?? settings?.googleCalConnected ?? false
 
   return (
@@ -965,6 +977,17 @@ function GoogleCalSection({ settings }: { settings: CompanySettings | null }) {
                 <p className="text-xs text-muted-foreground">
                   Jobs and quote visits are automatically pushed to Google Calendar when created or updated in the CRM. This is a one-way sync — changes made directly in Google Calendar are not reflected here.
                 </p>
+                <Button
+                  variant="outline"
+                  className="w-full min-h-[44px]"
+                  disabled={bulkSyncMutation.isPending}
+                  onClick={() => bulkSyncMutation.mutate()}
+                >
+                  {bulkSyncMutation.isPending
+                    ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    : <RefreshCw className="h-4 w-4 mr-2" />}
+                  {bulkSyncMutation.isPending ? 'Syncing…' : 'Sync All Jobs to Google Calendar'}
+                </Button>
                 <Button
                   variant="outline"
                   className="w-full min-h-[44px] text-destructive border-destructive/30 hover:bg-destructive/10"

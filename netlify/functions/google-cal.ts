@@ -10,6 +10,7 @@
 
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
+import { syncJobToGoogle } from './_google'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -176,6 +177,51 @@ export const handler: Handler = async (event) => {
         statusCode: 302,
         headers: { Location: '/#/settings?google_connected=1' },
         body: '',
+      }
+    }
+
+    // ── POST bulk-sync — push all un-synced scheduled jobs to Google ─────────
+    if (method === 'POST' && action === 'bulk-sync') {
+      // Fetch all non-cancelled, non-completed jobs that don't yet have a Google event ID
+      const { data: jobs, error: jobsErr } = await supabase
+        .from('jobs')
+        .select('id, job_type, service_name, scheduled_date, scheduled_time, scheduled_window, customer_name, customer_address, notes, status, google_event_id')
+        .not('status', 'in', '("cancelled","completed")')
+        .order('scheduled_date', { ascending: true })
+
+      if (jobsErr) throw jobsErr
+
+      const allJobs = jobs ?? []
+      let synced = 0
+      let skipped = 0
+      let failed = 0
+
+      for (const job of allJobs) {
+        try {
+          const result = await syncJobToGoogle({
+            id:              job.id,
+            jobType:         job.job_type,
+            serviceName:     job.service_name,
+            scheduledDate:   job.scheduled_date,
+            scheduledTime:   job.scheduled_time,
+            scheduledWindow: job.scheduled_window,
+            customerName:    job.customer_name,
+            customerAddress: job.customer_address,
+            notes:           job.notes,
+            status:          job.status,
+            googleEventId:   job.google_event_id ?? null,
+          })
+          if (result) synced++
+          else skipped++  // null = not connected or no-op
+        } catch (_e) {
+          failed++
+        }
+      }
+
+      return {
+        statusCode: 200,
+        headers: CORS,
+        body: JSON.stringify({ success: true, total: allJobs.length, synced, skipped, failed }),
       }
     }
 
