@@ -1292,13 +1292,15 @@ function frequencyToDays(freq: string): number | null {
   return null
 }
 
-// Generate 12 months of occurrences from startDate at intervalDays spacing
-function generateYearOccurrences(startDate: string, intervalDays: number): string[] {
+// Generate occurrences indefinitely from startDate at intervalDays spacing.
+// Cap at MAX_OCCURRENCES — for bi-weekly this covers ~19 years, monthly ~41 years.
+// When a subscription is cancelled, the future jobs should be cancelled/deleted then.
+const MAX_OCCURRENCES = 500
+
+function generateIndefiniteOccurrences(startDate: string, intervalDays: number): string[] {
   const dates: string[] = []
-  const end = new Date(startDate + 'T12:00:00')
-  end.setFullYear(end.getFullYear() + 1)  // exactly 12 months forward
   let cur = new Date(startDate + 'T12:00:00')
-  while (cur <= end && dates.length < 400) {
+  while (dates.length < MAX_OCCURRENCES) {
     dates.push(cur.toISOString().slice(0, 10))
     cur = new Date(cur.getTime() + intervalDays * 24 * 60 * 60 * 1000)
   }
@@ -1356,25 +1358,17 @@ function AddSubVisitSheet({
 
   const selectedServices = selectedSub?.services.filter(s => selectedServiceIds.has(s.id)) ?? []
 
-  // Auto-generate 12 months of dates for each selected service based on its frequency
+  // Generate indefinite occurrences for each selected service from the first date
   const schedulePreview = useMemo(() => {
     if (!scheduledDate || selectedServices.length === 0) return []
     return selectedServices.map(svc => {
       const days = frequencyToDays(svc.frequency)
-      const dates = days ? generateYearOccurrences(scheduledDate, days) : [scheduledDate]
+      const dates = days ? generateIndefiniteOccurrences(scheduledDate, days) : [scheduledDate]
       return { svc, dates, days }
     })
   }, [selectedServices, scheduledDate])
 
   const totalJobCount = schedulePreview.reduce((n, p) => n + p.dates.length, 0)
-
-  // End date label for display (12 months from first visit)
-  const throughDate = useMemo(() => {
-    if (!scheduledDate) return ''
-    const d = new Date(scheduledDate + 'T12:00:00')
-    d.setFullYear(d.getFullYear() + 1)
-    return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-  }, [scheduledDate])
 
   async function handleAdd() {
     if (!selectedSub || selectedServiceIds.size === 0 || !scheduledDate) return
@@ -1407,7 +1401,7 @@ function AddSubVisitSheet({
 
       toast({
         title: `${totalJobCount} visits scheduled`,
-        description: `${selectedServices.length} service${selectedServices.length !== 1 ? 's' : ''} through ${throughDate}`,
+        description: `${selectedServices.length} service${selectedServices.length !== 1 ? 's' : ''} — recurring indefinitely`,
       })
       onCreated()
       onClose()
@@ -1500,7 +1494,7 @@ function AddSubVisitSheet({
               {schedulePreview.length > 0 && scheduledDate && (
                 <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 space-y-2">
                   <p className="text-xs font-semibold text-primary">
-                    📅 {totalJobCount} visits auto-generated through {throughDate}
+                    📅 Recurring indefinitely — {totalJobCount} visits scheduled
                   </p>
                   {schedulePreview.map(({ svc, dates, days }) => {
                     const preview5 = dates.slice(0, 5)
