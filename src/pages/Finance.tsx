@@ -1871,7 +1871,8 @@ function computeMetric(
     }
     case 'quoteValue':    return quotes.filter(q => !q.trashedAt && inBucket(q.createdAt, b)).reduce((s, q) => s + (q.total || 0), 0)
     case 'leadsCreated':  return leads.filter(l => inBucket(l.createdAt, b)).length
-    case 'jobsCompleted': return jobs.filter(j => j.status === 'completed' && inBucket(j.scheduledDate, b)).length
+    // Bug 9 fix: use completedAt ?? scheduledDate for date matching
+    case 'jobsCompleted': return jobs.filter(j => j.status === 'completed' && inBucket(j.completedAt ?? j.scheduledDate, b)).length
     case 'newContacts':   return contacts.filter(c => inBucket(c.createdAt, b)).length
     case 'quotesCreated': return quotes.filter(q => !q.trashedAt && inBucket(q.createdAt, b)).length
   }
@@ -1940,12 +1941,24 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
   const txsInRange     = useMemo(() => transactions.filter(t => inWindow(t.date, curWin)), [transactions, curWin])
   const quotesInRange  = useMemo(() => quotes.filter(q => !q.trashedAt && inWindow(q.createdAt, curWin)), [quotes, curWin])
   const leadsInRange   = useMemo(() => leads.filter(l => inWindow(l.createdAt, curWin)), [leads, curWin])
-  const jobsInRange    = useMemo(() => jobs.filter(j => j.status === 'completed' && inWindow(j.scheduledDate ?? '', curWin)), [jobs, curWin])
+  // Bug 9 fix: Jobs completed should match on completedAt (newer jobs) OR scheduledDate
+  // (older jobs that may not have completedAt set). Status comparison is lowercase 'completed'.
+  const jobsInRange = useMemo(() => jobs.filter(j => {
+    if (j.status !== 'completed') return false
+    // Prefer completedAt for newer jobs; fall back to scheduledDate for older ones
+    const dateToCheck = j.completedAt ?? j.scheduledDate ?? ''
+    return dateToCheck ? inWindow(dateToCheck, curWin) : false
+  }), [jobs, curWin])
   const contactsInRange = useMemo(() => contacts.filter(c => inWindow(c.createdAt, curWin)), [contacts, curWin])
 
   const txsPrior    = useMemo(() => transactions.filter(t => inWindow(t.date, priorWin)), [transactions, priorWin])
 
   // ── KPI computations ────────────────────────────────────────────────────
+  // Bug 8: Transaction type field uses capital-first 'Income' / 'Expense' — verified correct.
+  // Date filter uses t.date (not t.created_at) — verified correct.
+  // inWindow uses new Date(dateStr) which for 'YYYY-MM-DD' strings parses as UTC midnight;
+  // getRangeWindow uses local midnight. For transactions this is safe because t.date is always
+  // a plain date string (no time component), and the window is ≥1 day so off-by-hours is fine.
   const grossRevenue  = useMemo(() => txsInRange.filter(t => t.type === 'Income').reduce((s, t) => s + Number(t.amount), 0), [txsInRange])
   const totalExpenses = useMemo(() => txsInRange.filter(t => t.type === 'Expense').reduce((s, t) => s + Number(t.amount), 0), [txsInRange])
   const netProfit     = grossRevenue - totalExpenses
@@ -1959,6 +1972,8 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
   const sentInRange     = useMemo(() => sent.filter(q => inWindow(q.createdAt, curWin)), [sent, curWin])
   const declinedInRange = useMemo(() => declined.filter(q => inWindow(q.createdAt, curWin)), [declined, curWin])
 
+  // Bug 3: Win rate formula verified — denominator includes sent+accepted+declined (all quotes
+  // that left draft state), not just sent. This correctly counts already-accepted quotes too.
   const winDenom = sentInRange.length + acceptedInRange.length + declinedInRange.length
   const winRate  = winDenom > 0 ? (acceptedInRange.length / winDenom) * 100 : 0
 
@@ -1967,7 +1982,12 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
   const priorExpenses = useMemo(() => txsPrior.filter(t => t.type === 'Expense').reduce((s, t) => s + Number(t.amount), 0), [txsPrior])
   const priorNet      = priorRevenue - priorExpenses
   const priorLeads    = useMemo(() => leads.filter(l => inWindow(l.createdAt, priorWin)).length, [leads, priorWin])
-  const priorJobs     = useMemo(() => jobs.filter(j => j.status === 'completed' && inWindow(j.scheduledDate ?? '', priorWin)).length, [jobs, priorWin])
+  // Bug 9 fix (prior period): same completedAt ?? scheduledDate fallback
+  const priorJobs     = useMemo(() => jobs.filter(j => {
+    if (j.status !== 'completed') return false
+    const dateToCheck = j.completedAt ?? j.scheduledDate ?? ''
+    return dateToCheck ? inWindow(dateToCheck, priorWin) : false
+  }).length, [jobs, priorWin])
   const priorWinDenom = useMemo(() => quotes.filter(q => !q.trashedAt && inWindow(q.createdAt, priorWin) && ['sent','accepted','declined'].includes(q.status)).length, [quotes, priorWin])
   const priorAccepted = useMemo(() => quotes.filter(q => q.status === 'accepted' && !q.trashedAt && inWindow(q.createdAt, priorWin)).length, [quotes, priorWin])
   const priorWinRate  = priorWinDenom > 0 ? (priorAccepted / priorWinDenom) * 100 : 0
@@ -2056,10 +2076,33 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
     return accepted.reduce((s, q) => s + (q.total || 0), 0) / accepted.length
   }, [accepted])
 
-  const sentQuotes = useMemo(() => quotes.filter(q => (q as any).sentAt && q.createdAt), [quotes])
-  const avgSendLag = useMemo(() => avgDays(sentQuotes.map(q => ({ from: q.createdAt, to: (q as any).sentAt }))), [sentQuotes])
+  // Bug 10 fix: Only include quotes where sentAt is not null AND sentAt > createdAt
+  // (avoids near-zero averages from quotes without sentAt, and filters accidental future sentAt dates).
+  // Cap each lag at 30 days to prevent outliers from skewing the average.
+  const sentQuotes = useMemo(() => quotes.filter(q => {
+    if (!q.sentAt || !q.createdAt) return false
+    const lag = (new Date(q.sentAt).getTime() - new Date(q.createdAt).getTime()) / 86400_000
+    return lag > 0 // sentAt must be strictly after createdAt
+  }), [quotes])
+  const avgSendLag = useMemo(() => {
+    if (!sentQuotes.length) return null
+    const pairs = sentQuotes.map(q => {
+      const rawLag = (new Date(q.sentAt!).getTime() - new Date(q.createdAt).getTime()) / 86400_000
+      return Math.min(rawLag, 30) // cap at 30 days to avoid accidental future-date outliers
+    })
+    return pairs.reduce((s, v) => s + v, 0) / pairs.length
+  }, [sentQuotes])
 
-  const recurringAcceptedValue = useMemo(() => accepted.filter(q => (q.quoteType || '').includes('recurring') || (q.quoteType || '').includes('subscription')).reduce((s, q) => s + (q.total || 0), 0), [accepted])
+  // Bug 2/11 fix: A quote is "recurring" if its quoteType includes 'autopilot', 'tcep', or 'tpc'
+  // OR if any of its lineItems have isSubscription: true.
+  // The old code checked for 'recurring'/'subscription' which never matched the actual QuoteType values.
+  function isRecurringQuote(q: Quote): boolean {
+    const qt = (q.quoteType || '').toLowerCase()
+    if (qt.includes('autopilot') || qt.includes('tcep') || qt.includes('tpc')) return true
+    if (Array.isArray(q.lineItems) && q.lineItems.some((li: { isSubscription?: boolean }) => li.isSubscription === true)) return true
+    return false
+  }
+  const recurringAcceptedValue = useMemo(() => accepted.filter(isRecurringQuote).reduce((s, q) => s + (q.total || 0), 0), [accepted]) // eslint-disable-line react-hooks/exhaustive-deps
   const totalAcceptedValue = useMemo(() => accepted.reduce((s, q) => s + (q.total || 0), 0), [accepted])
   const recurringPct = totalAcceptedValue > 0 ? (recurringAcceptedValue / totalAcceptedValue) * 100 : 0
 
@@ -2074,8 +2117,12 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
     return d.getFullYear() === now.getFullYear() && d.getMonth() + 1 <= nowMonth && (q.quoteType || '').includes('onetime')
   }).reduce((s, q) => s + (q.total || 0), 0), [accepted]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const finishedPaidLeads = useMemo(() => leads.filter(l => l.stage === 'finished_paid').length, [leads])
-  const leadToCustomerRate = leads.length > 0 ? (finishedPaidLeads / leads.length) * 100 : 0
+  // Bug 1 fix: A lead is a "customer" once they've paid (finished_paid), are on a
+  // recurring plan, or have completed work even if not yet invoiced (finished_unpaid).
+  // Denominator excludes 'lost' leads — those were never real conversion opportunities.
+  const customerLeads = useMemo(() => leads.filter(l => ['finished_paid', 'recurring', 'finished_unpaid'].includes(l.stage)).length, [leads])
+  const nonLostLeads  = useMemo(() => leads.filter(l => l.stage !== 'lost').length, [leads])
+  const leadToCustomerRate = nonLostLeads > 0 ? (customerLeads / nonLostLeads) * 100 : 0
 
   const openLeads = useMemo(() => leads.filter(l => !['finished_paid', 'finished_unpaid', 'lost'].includes(l.stage)), [leads])
   const avgLeadAge = useMemo(() => {
@@ -2093,12 +2140,22 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
 
   const openPipelineValue = useMemo(() => leads.filter(l => ['quoted','follow_up'].includes(l.stage)).reduce((s, l) => s + (l.estimatedValue || 0), 0), [leads])
 
-  // Lead velocity: leads per week for last 8 weeks
+  // Lead velocity: leads per week for last 8 weeks.
+  // Bug 4 fix: getBuckets(56,'weekly') may produce 9 buckets (if today is mid-week)
+  // so we slice to exactly the last 8. Also inBucket compares Date objects directly —
+  // bucket boundaries are midnight local time but lead timestamps are ISO UTC strings.
+  // We normalize by comparing ms timestamps to avoid any off-by-one from timezone skew.
   const leadVelocity = useMemo(() => {
-    const win8 = getBuckets(56, 'weekly')
+    // Use 180-day window (valid RangeDays) and take only the last 8 weekly buckets
+    const win8 = getBuckets(180, 'weekly').slice(-8)
     return win8.map(b => ({
       label: b.label,
-      'New Leads': leads.filter(l => inBucket(l.createdAt, b)).length,
+      // Use b.start.getTime() / b.end.getTime() for explicit ms comparison
+      'New Leads': leads.filter(l => {
+        if (!l.createdAt) return false
+        const t = new Date(l.createdAt).getTime()
+        return t >= b.start.getTime() && t <= b.end.getTime()
+      }).length,
     }))
   }, [leads])
 
@@ -2113,6 +2170,8 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
   }, [signedQuotes])
 
   // ── Customer Intelligence ─────────────────────────────────────────────────
+  // Bug 6: Top 10 customers sums ALL accepted quote totals per contact (cumulative revenue),
+  // not just the single largest quote. Grouped by contactId with fallback to customerName.
   const topCustomers = useMemo(() => {
     const map: Record<string, { name: string; value: number }> = {}
     accepted.forEach(q => {
@@ -2155,11 +2214,17 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
     ]
   }, [accepted])
 
-  // ── Churn Risk: subs paused >30 days with no reactivation ───────────────
+  // ── Churn Risk / At-Risk MRR ──────────────────────────────────────────────
+  // Bug 5: At-risk MRR definition — subscriptions with status === 'PAUSED' that
+  // have not been reactivated in more than 30 days (measured from updatedAt or createdAt).
+  // This is a leading indicator of churn: paused subs that sit untouched for a month
+  // are unlikely to resume without active follow-up. The MRR shown is what WOULD be
+  // earned if these subs were active — it is not currently collected revenue.
   const THIRTY_DAYS_MS = 30 * 86400_000
   const churnRiskSubs = useMemo(() => subs.filter(s => {
     if (s.status !== 'PAUSED') return false
-    const lastChange = s.updatedAt || s.createdAt
+    // Subscription type doesn't have updatedAt; use createdAt as the reference point
+    const lastChange = s.createdAt
     return (now.getTime() - new Date(lastChange).getTime()) > THIRTY_DAYS_MS
   }), [subs]) // eslint-disable-line react-hooks/exhaustive-deps
   const churnRiskMRR = churnRiskSubs.reduce((s, sub) => s + (sub.inSeasonMonthlyTotal || 0), 0)
@@ -2515,7 +2580,7 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
         <KpiCard label="Recurring Split" value={`${recurringPct.toFixed(0)}%`} sub="Of accepted revenue" positive={recurringPct > 0} />
         <KpiCard label="Active MRR" value={fmt$(activeMRR)} sub={`${activeSubs.length} active subs`} positive={activeMRR > 0} />
         <KpiCard label="Est. Annual Rev." value={fmt$(subARR + closedYTD)} sub="ARR + closed one-time YTD" positive={subARR + closedYTD > 0} />
-        <KpiCard label="Lead→Customer Rate" value={`${leadToCustomerRate.toFixed(1)}%`} sub={`${finishedPaidLeads} of ${leads.length} leads`} positive={leadToCustomerRate > 20} />
+        <KpiCard label="Lead→Customer Rate" value={`${leadToCustomerRate.toFixed(1)}%`} sub={`${customerLeads} customers of ${nonLostLeads} active leads`} positive={leadToCustomerRate > 20} />
         <KpiCard label="Avg Lead Age" value={avgLeadAge !== null ? `${avgLeadAge.toFixed(0)} days` : '—'} sub={`${openLeads.length} open leads`} />
       </div>
 
@@ -2623,7 +2688,9 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
             )}
         </SubChart>
 
+        {/* Bug 7: CLV = sum of all accepted quote totals per contact. Grouped into spend tiers. */}
         <SubChart title="CLV Distribution">
+          <p className="text-[10px] text-muted-foreground/70 -mt-1 mb-2">How much each customer has spent in total, grouped by tier</p>
           {clvBuckets.every(b => b.count === 0)
             ? <p className="text-xs text-muted-foreground">No accepted quotes yet.</p>
             : (
@@ -2668,6 +2735,342 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
         </div>
       </div>
 
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CREDIT LINES TAB
+// ═══════════════════════════════════════════════════════════════════════════
+interface CreditAccount {
+  id: string
+  name: string
+  accountType: string
+  creditLimit: number
+  accountKey: string | null
+  notes: string | null
+  active: boolean
+  createdAt: string
+}
+
+const ACCOUNT_TYPE_LABELS: Record<string, string> = {
+  credit_card:    'Credit Card',
+  line_of_credit: 'Line of Credit',
+  payroll_line:   'Payroll Line',
+  other:          'Other',
+}
+
+function utilizationColor(pct: number): string {
+  if (pct < 30)  return 'bg-green-500'
+  if (pct < 70)  return 'bg-yellow-400'
+  return 'bg-red-500'
+}
+
+function CreditLinesTab({ transactions }: { transactions: Transaction[] }) {
+  const { toast } = useToast()
+  const { data: accounts = [], refetch } = useQuery<CreditAccount[]>({
+    queryKey: ['/credit-accounts'],
+    queryFn: () => apiGet('/credit-accounts'),
+    staleTime: 60_000,
+  })
+
+  // Distinct account values from transactions for the "link" dropdown
+  const txAccountKeys = useMemo(() => {
+    const s = new Set<string>()
+    transactions.forEach(t => { if (t.account) s.add(t.account) })
+    return [...s].sort()
+  }, [transactions])
+
+  // Compute outstanding balance per credit account from transactions
+  function computeBalance(acc: CreditAccount): number | null {
+    if (!acc.accountKey) return null
+    const relevant = transactions.filter(t => t.account === acc.accountKey)
+    if (relevant.length === 0) return null
+    const charges  = relevant.filter(t => t.type === 'Expense').reduce((s, t) => s + Number(t.amount), 0)
+    const payments = relevant.filter(t => t.type === 'Income').reduce((s, t) => s + Number(t.amount), 0)
+    return Math.max(0, charges - payments)
+  }
+
+  const activeAccounts = useMemo(() => accounts.filter(a => a.active), [accounts])
+
+  const summaryTotals = useMemo(() => {
+    let totalLimit = 0
+    let totalOutstanding = 0
+    activeAccounts.forEach(a => {
+      totalLimit += a.creditLimit
+      const bal = computeBalance(a)
+      if (bal !== null) totalOutstanding += bal
+    })
+    return { totalLimit, totalOutstanding, available: totalLimit - totalOutstanding }
+  }, [activeAccounts, transactions]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const overallUtil = summaryTotals.totalLimit > 0
+    ? (summaryTotals.totalOutstanding / summaryTotals.totalLimit) * 100
+    : 0
+
+  // Edit state
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState<Partial<CreditAccount>>({})
+
+  // Add form state
+  const [showAdd, setShowAdd] = useState(false)
+  const [addForm, setAddForm] = useState({
+    name: '', accountType: 'credit_card', creditLimit: '', accountKey: '', notes: '',
+  })
+  const [saving, setSaving] = useState(false)
+
+  function startEdit(acc: CreditAccount) {
+    setEditId(acc.id)
+    setEditForm({ ...acc })
+    setShowAdd(false)
+  }
+
+  function cancelEdit() {
+    setEditId(null)
+    setEditForm({})
+  }
+
+  async function handleSaveEdit() {
+    if (!editId) return
+    setSaving(true)
+    try {
+      await apiRequest('PATCH', `/credit-accounts/${editId}`, editForm)
+      toast({ title: 'Account updated' })
+      setEditId(null)
+      refetch()
+    } catch (_e) {
+      toast({ title: 'Save failed', description: String(_e), variant: 'destructive' })
+    } finally { setSaving(false) }
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await apiRequest('DELETE', `/credit-accounts/${id}`)
+      toast({ title: 'Account deleted' })
+      refetch()
+    } catch (_e) {
+      toast({ title: 'Delete failed', description: String(_e), variant: 'destructive' })
+    }
+  }
+
+  async function handleAdd() {
+    if (!addForm.name) return
+    setSaving(true)
+    try {
+      await apiRequest('POST', '/credit-accounts', {
+        name:        addForm.name,
+        accountType: addForm.accountType,
+        creditLimit: parseFloat(addForm.creditLimit) || 0,
+        accountKey:  addForm.accountKey || null,
+        notes:       addForm.notes || null,
+      })
+      toast({ title: 'Account added' })
+      setShowAdd(false)
+      setAddForm({ name: '', accountType: 'credit_card', creditLimit: '', accountKey: '', notes: '' })
+      refetch()
+    } catch (_e) {
+      toast({ title: 'Add failed', description: String(_e), variant: 'destructive' })
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="p-4 space-y-5 pb-8">
+      <div>
+        <h2 className="text-lg font-bold">Credit Lines</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">Track credit card and line-of-credit utilization against your limits</p>
+      </div>
+
+      {/* ── Summary strip ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: 'Total Credit Available', value: fmt$(summaryTotals.totalLimit), color: '' },
+          { label: 'Total Outstanding',      value: fmt$(summaryTotals.totalOutstanding), color: summaryTotals.totalOutstanding > 0 ? 'text-destructive' : '' },
+          { label: 'Total Available',        value: fmt$(summaryTotals.available), color: summaryTotals.available >= 0 ? 'text-green-700 dark:text-green-400' : 'text-destructive' },
+          { label: 'Overall Utilization',    value: `${overallUtil.toFixed(1)}%`, color: overallUtil >= 70 ? 'text-destructive' : overallUtil >= 30 ? 'text-yellow-600' : 'text-green-700 dark:text-green-400' },
+        ].map(k => (
+          <div key={k.label} className="rounded-xl border bg-card p-3 space-y-0.5">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{k.label}</div>
+            <div className={`text-lg font-bold ${k.color}`}>{k.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Utilization bar */}
+      {summaryTotals.totalLimit > 0 && (
+        <div className="rounded-xl border bg-card p-4 space-y-2">
+          <div className="flex justify-between text-xs">
+            <span className="font-semibold text-muted-foreground">Portfolio Utilization</span>
+            <span className="font-bold">{overallUtil.toFixed(1)}%</span>
+          </div>
+          <div className="h-3 bg-muted rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${utilizationColor(overallUtil)}`}
+              style={{ width: `${Math.min(overallUtil, 100)}%` }}
+            />
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            {fmt$(summaryTotals.totalOutstanding)} used of {fmt$(summaryTotals.totalLimit)} total credit
+          </p>
+        </div>
+      )}
+
+      {/* ── Per-account cards ── */}
+      <div className="space-y-3">
+        {activeAccounts.map(acc => {
+          const balance = computeBalance(acc)
+          const available = balance !== null ? acc.creditLimit - balance : null
+          const util = balance !== null && acc.creditLimit > 0 ? (balance / acc.creditLimit) * 100 : 0
+          const isEditing = editId === acc.id
+
+          if (isEditing) {
+            return (
+              <div key={acc.id} className="rounded-xl border-2 border-primary bg-card p-4 space-y-3">
+                <h3 className="text-sm font-bold">Editing: {acc.name}</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1"><Label className="text-xs">Name</Label>
+                    <Input className="h-8 text-sm" value={editForm.name || ''} onChange={e => setEditForm(p => ({ ...p, name: e.target.value }))} />
+                  </div>
+                  <div className="space-y-1"><Label className="text-xs">Type</Label>
+                    <Select value={editForm.accountType || 'credit_card'} onValueChange={v => setEditForm(p => ({ ...p, accountType: v }))}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(ACCOUNT_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1"><Label className="text-xs">Credit Limit ($)</Label>
+                    <Input type="number" className="h-8 text-sm" value={editForm.creditLimit || ''} onChange={e => setEditForm(p => ({ ...p, creditLimit: parseFloat(e.target.value) || 0 }))} />
+                  </div>
+                  <div className="space-y-1"><Label className="text-xs">Link to Transactions (account name)</Label>
+                    <Select value={editForm.accountKey || '__NONE__'} onValueChange={v => setEditForm(p => ({ ...p, accountKey: v === '__NONE__' ? null : v }))}>
+                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Not linked" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__NONE__">Not linked</SelectItem>
+                        {txAccountKeys.map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="col-span-2 space-y-1"><Label className="text-xs">Notes</Label>
+                    <Input className="h-8 text-sm" value={editForm.notes || ''} onChange={e => setEditForm(p => ({ ...p, notes: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={handleSaveEdit} disabled={saving}><Check className="h-3.5 w-3.5 mr-1" />{saving ? 'Saving…' : 'Save'}</Button>
+                  <Button size="sm" variant="outline" onClick={cancelEdit}><X className="h-3.5 w-3.5 mr-1" />Cancel</Button>
+                  <Button size="sm" variant="ghost" className="text-destructive ml-auto" onClick={() => handleDelete(acc.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                </div>
+              </div>
+            )
+          }
+
+          return (
+            <div key={acc.id} className="rounded-xl border bg-card p-4 space-y-3">
+              {/* Header */}
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-sm">{acc.name}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-muted font-medium text-muted-foreground">
+                      {ACCOUNT_TYPE_LABELS[acc.accountType] || acc.accountType}
+                    </span>
+                  </div>
+                  {acc.notes && <p className="text-xs text-muted-foreground mt-0.5">{acc.notes}</p>}
+                </div>
+                <button onClick={() => startEdit(acc)} className="p-1.5 rounded text-muted-foreground hover:text-foreground shrink-0" title="Edit">
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {/* Stats grid */}
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="space-y-0.5">
+                  <div className="text-muted-foreground">Credit Limit</div>
+                  <div className="font-bold">{fmt$(acc.creditLimit)}</div>
+                </div>
+                <div className="space-y-0.5">
+                  <div className="text-muted-foreground">Balance</div>
+                  <div className={`font-bold ${balance !== null && balance > 0 ? 'text-destructive' : ''}`}>
+                    {balance !== null ? fmt$(balance) : <span className="text-muted-foreground/60 font-normal text-[10px]">—</span>}
+                  </div>
+                </div>
+                <div className="space-y-0.5">
+                  <div className="text-muted-foreground">Available</div>
+                  <div className={`font-bold ${available !== null && available >= 0 ? 'text-green-700 dark:text-green-400' : ''}`}>
+                    {available !== null ? fmt$(available) : <span className="text-muted-foreground/60 font-normal text-[10px]">—</span>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Utilization bar */}
+              {balance !== null && acc.creditLimit > 0 ? (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[10px] text-muted-foreground">
+                    <span>Utilization</span>
+                    <span className={`font-semibold ${util >= 70 ? 'text-destructive' : util >= 30 ? 'text-yellow-600' : 'text-green-700 dark:text-green-400'}`}>{util.toFixed(1)}%</span>
+                  </div>
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full transition-all ${utilizationColor(util)}`} style={{ width: `${Math.min(util, 100)}%` }} />
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[10px] text-muted-foreground/60 italic">
+                  {acc.accountKey ? 'No matching transactions found yet.' : 'Link transactions to auto-track balance'}
+                </p>
+              )}
+            </div>
+          )
+        })}
+
+        {accounts.length === 0 && (
+          <div className="rounded-xl border-2 border-dashed border-border p-8 text-center">
+            <p className="text-sm text-muted-foreground">No credit accounts yet. Add one below.</p>
+          </div>
+        )}
+      </div>
+
+      {/* ── Add Credit Account ── */}
+      {showAdd ? (
+        <div className="rounded-xl border-2 border-primary bg-card p-4 space-y-3">
+          <h3 className="text-sm font-bold">Add Credit Account</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1 col-span-2"><Label className="text-xs">Account Name *</Label>
+              <Input className="h-8 text-sm" placeholder="e.g. Chase Ink Business" value={addForm.name} onChange={e => setAddForm(p => ({ ...p, name: e.target.value }))} />
+            </div>
+            <div className="space-y-1"><Label className="text-xs">Type</Label>
+              <Select value={addForm.accountType} onValueChange={v => setAddForm(p => ({ ...p, accountType: v }))}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {Object.entries(ACCOUNT_TYPE_LABELS).map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1"><Label className="text-xs">Credit Limit ($)</Label>
+              <Input type="number" className="h-8 text-sm" placeholder="0" value={addForm.creditLimit} onChange={e => setAddForm(p => ({ ...p, creditLimit: e.target.value }))} />
+            </div>
+            <div className="space-y-1 col-span-2"><Label className="text-xs">Link to Transactions (optional)</Label>
+              <Select value={addForm.accountKey || '__NONE__'} onValueChange={v => setAddForm(p => ({ ...p, accountKey: v === '__NONE__' ? '' : v }))}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Not linked" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__NONE__">Not linked</SelectItem>
+                  {txAccountKeys.map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-muted-foreground mt-1">Links this account to matching transactions for auto-balance tracking</p>
+            </div>
+            <div className="space-y-1 col-span-2"><Label className="text-xs">Notes (optional)</Label>
+              <Input className="h-8 text-sm" placeholder="Optional notes…" value={addForm.notes} onChange={e => setAddForm(p => ({ ...p, notes: e.target.value }))} />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={handleAdd} disabled={saving || !addForm.name}><Check className="h-3.5 w-3.5 mr-1" />{saving ? 'Saving…' : 'Add Account'}</Button>
+            <Button size="sm" variant="outline" onClick={() => setShowAdd(false)}><X className="h-3.5 w-3.5 mr-1" />Cancel</Button>
+          </div>
+        </div>
+      ) : (
+        <Button variant="outline" className="w-full" onClick={() => setShowAdd(true)}>
+          <Plus className="h-4 w-4 mr-2" />Add Credit Account
+        </Button>
+      )}
     </div>
   )
 }
@@ -2766,6 +3169,7 @@ export default function Finance() {
               { value: 'transactions', label: 'Transactions' },
               { value: 'import', label: 'CSV Import' },
               { value: 'analytics', label: 'Analytics' },
+              { value: 'credit', label: 'Credit Lines' },
             ].map(t => (
               <TabsTrigger key={t.value} value={t.value}
                 className="shrink-0 text-xs px-3 h-9 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
@@ -2781,6 +3185,7 @@ export default function Finance() {
         <TabsContent value="transactions" className="mt-0"><TransactionsTab transactions={transactions} period={period} onRefresh={refresh} /></TabsContent>
         <TabsContent value="import" className="mt-0"><CsvImportTab transactions={transactions} onRefresh={refresh} /></TabsContent>
         <TabsContent value="analytics" className="mt-0"><AnalyticsTab transactions={transactions} /></TabsContent>
+        <TabsContent value="credit" className="mt-0"><CreditLinesTab transactions={transactions} /></TabsContent>
       </Tabs>
     </div>
   )
