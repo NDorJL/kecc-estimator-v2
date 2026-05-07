@@ -1044,7 +1044,7 @@ function AddServiceSheet({
   const [step, setStep] = useState<'quote' | 'services'>('quote')
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null)
   const [quoteSearch, setQuoteSearch] = useState('')
-  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
+  const [selectedItems, setSelectedItems] = useState<Set<number>>(new Set())
   const [scheduledDate, setScheduledDate] = useState(defaultDate)
   const [scheduledEndDate, setScheduledEndDate] = useState('')
   const [scheduledWindow, setScheduledWindow] = useState('anytime')
@@ -1057,7 +1057,7 @@ function AddServiceSheet({
       setStep('quote')
       setSelectedQuote(null)
       setQuoteSearch('')
-      setSelectedItems(new Set())
+      setSelectedItems(new Set<number>())
     }
   }, [open, defaultDate])
 
@@ -1103,10 +1103,10 @@ function AddServiceSheet({
       )
     : activeQuotes
 
-  function toggleItem(id: string) {
+  function toggleItem(idx: number) {
     setSelectedItems(prev => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id); else next.add(id)
+      if (next.has(idx)) next.delete(idx); else next.add(idx)
       return next
     })
   }
@@ -1115,7 +1115,7 @@ function AddServiceSheet({
     if (!selectedQuote || selectedItems.size === 0) return
     setSaving(true)
     try {
-      const items = selectedQuote.lineItems.filter(li => selectedItems.has(li.serviceId))
+      const items = selectedQuote.lineItems.filter((_, i) => selectedItems.has(i))
       await Promise.all(items.map(item =>
         apiRequest('POST', '/jobs', {
           serviceName: item.serviceName,
@@ -1204,18 +1204,18 @@ function AddServiceSheet({
             </div>
 
             <div className="space-y-2">
-              {selectedQuote?.lineItems.map(item => (
+              {selectedQuote?.lineItems.map((item, idx) => (
                 <button
-                  key={item.serviceId}
-                  onClick={() => toggleItem(item.serviceId)}
+                  key={idx}
+                  onClick={() => toggleItem(idx)}
                   className={`w-full text-left rounded-xl border p-3 transition-colors flex items-center gap-3 ${
-                    selectedItems.has(item.serviceId) ? 'border-primary bg-primary/5' : 'bg-card hover:bg-muted/30'
+                    selectedItems.has(idx) ? 'border-primary bg-primary/5' : 'bg-card hover:bg-muted/30'
                   }`}
                 >
                   <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${
-                    selectedItems.has(item.serviceId) ? 'border-primary bg-primary' : 'border-muted-foreground'
+                    selectedItems.has(idx) ? 'border-primary bg-primary' : 'border-muted-foreground'
                   }`}>
-                    {selectedItems.has(item.serviceId) && <div className="w-2 h-2 bg-primary-foreground rounded-sm" />}
+                    {selectedItems.has(idx) && <div className="w-2 h-2 bg-primary-foreground rounded-sm" />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{item.serviceName}</p>
