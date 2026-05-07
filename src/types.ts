@@ -137,6 +137,7 @@ export interface QuoteAttachment {
   filePath: string;
   enabled: boolean;
   attachMode: 'always' | 'manual';
+  attachTo: 'quote' | 'agreement' | 'both';
   sortOrder: number;
   createdAt: string;
 }
@@ -379,6 +380,7 @@ export function rowToAttachment(r: any): QuoteAttachment {
     filePath: r.file_path,
     enabled: r.enabled,
     attachMode: r.attach_mode,
+    attachTo: r.attach_to ?? 'quote',
     sortOrder: r.sort_order,
     createdAt: r.created_at,
   };

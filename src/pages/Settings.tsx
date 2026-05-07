@@ -267,46 +267,52 @@ function QuoteAttachmentsSection() {
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Attach PDFs (warranties, agreements, service guides) to quote exports. Up to 5 slots.
-        "Always" attachments auto-merge; "Manual" ones are selectable at export time.
+        Upload PDFs to include as links when sending quotes or service agreements via SMS.
+        Set "Send with" to control which message type each PDF appears in. Enabled PDFs show as optional checkboxes in the send dialog.
       </p>
 
       {isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
 
       <div className="space-y-2">
         {attachments.map((att) => (
-          <div key={att.id} className="flex items-center gap-2 border rounded-lg px-3 py-2">
-            <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{att.name}</p>
-              <p className="text-xs text-muted-foreground truncate">{att.fileName}</p>
+          <div key={att.id} className="border rounded-lg px-3 py-2 space-y-2">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{att.name}</p>
+                <p className="text-xs text-muted-foreground truncate">{att.fileName}</p>
+              </div>
+              <Switch
+                checked={att.enabled}
+                onCheckedChange={(v) => updateMutation.mutate({ id: att.id, updates: { enabled: v } })}
+              />
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 text-destructive"
+                onClick={() => deleteMutation.mutate(att.id)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
             </div>
-            <Switch
-              checked={att.enabled}
-              onCheckedChange={(v) => updateMutation.mutate({ id: att.id, updates: { enabled: v } })}
-            />
-            <Select
-              value={att.attachMode}
-              onValueChange={(v) =>
-                updateMutation.mutate({ id: att.id, updates: { attachMode: v as 'always' | 'manual' } })
-              }
-            >
-              <SelectTrigger className="h-8 w-[90px] text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="always">Always</SelectItem>
-                <SelectItem value="manual">Manual</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8 text-destructive"
-              onClick={() => deleteMutation.mutate(att.id)}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+            <div className="flex items-center gap-2 pl-6">
+              <span className="text-xs text-muted-foreground">Send with:</span>
+              <Select
+                value={att.attachTo}
+                onValueChange={(v) =>
+                  updateMutation.mutate({ id: att.id, updates: { attachTo: v as 'quote' | 'agreement' | 'both' } })
+                }
+              >
+                <SelectTrigger className="h-7 w-[140px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="quote">Quote only</SelectItem>
+                  <SelectItem value="agreement">Agreement only</SelectItem>
+                  <SelectItem value="both">Quote + Agreement</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         ))}
 

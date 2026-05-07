@@ -1,9 +1,34 @@
 /**
- * _smsHelper.ts — shared OpenPhone SMS sender
- *
- * Single source of truth for sending SMS via the OpenPhone API.
- * Import this instead of defining sendOpenPhoneSms locally in each function.
+ * _smsHelper.ts — shared OpenPhone SMS sender + attachment helpers
  */
+
+import { createClient } from '@supabase/supabase-js'
+
+/**
+ * Generate 7-day signed URLs for a list of attachment file paths.
+ * Returns an array of { name, url } objects for including in SMS messages.
+ */
+export async function getAttachmentLinks(
+  filePaths: string[],
+): Promise<Array<{ name: string; url: string }>> {
+  if (filePaths.length === 0) return []
+  const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+  const results: Array<{ name: string; url: string }> = []
+  for (const path of filePaths) {
+    try {
+      const { data } = await supabase.storage
+        .from('attachments')
+        .createSignedUrl(path, 60 * 60 * 24 * 7) // 7 days
+      if (data?.signedUrl) {
+        results.push({ name: path, url: data.signedUrl })
+      }
+    } catch (_e) { /* skip failed individual attachment */ }
+  }
+  return results
+}
 
 export async function sendOpenPhoneSms(
   apiKey: string,

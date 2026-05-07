@@ -53,10 +53,9 @@ export const handler: Handler = async (event) => {
     // POST: save attachment metadata after direct upload
     if (method === 'POST' && !id && !action) {
       const body = JSON.parse(event.body ?? '{}')
-      const { name, fileName, filePath, attachMode } = body
+      const { name, fileName, filePath, attachMode, attachTo } = body
       if (!name || !fileName || !filePath) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'name, fileName, filePath required' }) }
 
-      // Get public URL (for private bucket this will be used to generate signed URLs at PDF time)
       const fileUrl = `${process.env.SUPABASE_URL}/storage/v1/object/attachments/${filePath}`
 
       const { count } = await supabase.from('quote_attachments').select('*', { count: 'exact', head: true })
@@ -67,6 +66,7 @@ export const handler: Handler = async (event) => {
         file_path: filePath,
         enabled: true,
         attach_mode: attachMode ?? 'manual',
+        attach_to: attachTo ?? 'quote',
         sort_order: count ?? 0,
       }).select().single()
       if (error) throw error
@@ -80,6 +80,7 @@ export const handler: Handler = async (event) => {
       if (body.name !== undefined) update.name = body.name
       if (body.enabled !== undefined) update.enabled = body.enabled
       if (body.attachMode !== undefined) update.attach_mode = body.attachMode
+      if (body.attachTo !== undefined) update.attach_to = body.attachTo
       if (body.sortOrder !== undefined) update.sort_order = body.sortOrder
       const { data, error } = await supabase.from('quote_attachments').update(update).eq('id', id).select().single()
       if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Attachment not found' }) }

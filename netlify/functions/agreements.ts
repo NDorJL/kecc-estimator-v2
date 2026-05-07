@@ -2,7 +2,7 @@ import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { rowToServiceAgreement } from '../../src/types'
 import { randomUUID } from 'crypto'
-import { sendOpenPhoneSms } from './_smsHelper'
+import { sendOpenPhoneSms, getAttachmentLinks } from './_smsHelper'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -220,7 +220,7 @@ export const handler: Handler = async (event) => {
     // signing link to the customer. Used by the "Send Agreement" button.
     if (method === 'POST' && !id && action === 'generate-and-send') {
       const body = JSON.parse(event.body ?? '{}')
-      const { quoteId, leadId } = body as { quoteId?: string; leadId?: string }
+      const { quoteId, leadId, attachmentIds = [] } = body as { quoteId?: string; leadId?: string; attachmentIds?: string[] }
 
       if (!quoteId) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'quoteId required' }) }
 
@@ -281,11 +281,28 @@ export const handler: Handler = async (event) => {
       const apiKey     = settings?.quo_api_key     ?? process.env.QUO_API_KEY ?? ''
       const fromNumber = settings?.quo_from_number ?? process.env.QUO_FROM_NUMBER ?? ''
 
-      // Send via SMS (primary) or note that email-only isn't wired yet
+      // Generate signed PDF links for selected attachments
+      let pdfLinkSuffix = ''
+      if (Array.isArray(attachmentIds) && attachmentIds.length > 0) {
+        try {
+          const { data: atts } = await supabase
+            .from('quote_attachments')
+            .select('id, name, file_path')
+            .in('id', attachmentIds)
+            .eq('enabled', true)
+          const links = await getAttachmentLinks((atts ?? []).map(a => a.file_path))
+          if (links.length > 0) {
+            const attNames = (atts ?? []).reduce((m: Record<string, string>, a) => { m[a.file_path] = a.name; return m }, {})
+            pdfLinkSuffix = '\n\n' + links.map(l => `📄 ${attNames[l.name] ?? 'PDF'}: ${l.url}`).join('\n')
+          }
+        } catch (_e) { /* non-fatal */ }
+      }
+
+      // Send via SMS
       if (apiKey && fromNumber && customerPhone) {
         await sendOpenPhoneSms(
           apiKey, fromNumber, customerPhone,
-          `Hi ${firstName}, Knox Exterior Care Co. here! Your service agreement is ready to review and sign:\n\n${signUrl}\n\nReply STOP to opt out.`
+          `Hi ${firstName}, Knox Exterior Care Co. here! Your service agreement is ready to review and sign:\n\n${signUrl}\n\nReply STOP to opt out.` + pdfLinkSuffix
         )
       }
 

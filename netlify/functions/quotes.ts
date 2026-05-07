@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { rowToQuote } from '../../src/types'
 import { randomUUID } from 'crypto'
 import { advanceLeadStage } from './_leadSync'
-import { sendOpenPhoneSms } from './_smsHelper'
+import { sendOpenPhoneSms, getAttachmentLinks } from './_smsHelper'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -178,9 +178,12 @@ export const handler: Handler = async (event) => {
       const esignUrl = `${siteUrl}/.netlify/functions/esign?token=${encodeURIComponent(quote.accept_token)}`
       const firstName = (quote.customer_name ?? 'there').split(' ')[0]
 
-      // includeAgreement: if true AND this is a recurring quote, generate SA and send both links
-      const body2 = JSON.parse(event.body ?? '{}') as { includeAgreement?: boolean }
+      const body2 = JSON.parse(event.body ?? '{}') as {
+        includeAgreement?: boolean
+        attachmentIds?: string[]   // IDs of quote_attachments to include as PDF links in SMS
+      }
       const includeAgreement = !!body2.includeAgreement
+      const attachmentIds: string[] = Array.isArray(body2.attachmentIds) ? body2.attachmentIds : []
 
       const lineItems = Array.isArray(quote.line_items) ? quote.line_items as Array<{ isSubscription?: boolean }> : []
       const qt = (quote.quote_type ?? '').toLowerCase()
@@ -219,13 +222,31 @@ export const handler: Handler = async (event) => {
         }
       }
 
-      const message = agreementUrl
+      // Generate signed PDF links for selected attachments
+      let pdfLinkSuffix = ''
+      if (attachmentIds.length > 0) {
+        try {
+          const { data: atts } = await supabase
+            .from('quote_attachments')
+            .select('id, name, file_path')
+            .in('id', attachmentIds)
+            .eq('enabled', true)
+          const links = await getAttachmentLinks((atts ?? []).map(a => a.file_path))
+          if (links.length > 0) {
+            const attNames = (atts ?? []).reduce((m: Record<string, string>, a) => { m[a.file_path] = a.name; return m }, {})
+            pdfLinkSuffix = '\n\n' + links.map(l => `📄 ${attNames[l.name] ?? 'PDF'}: ${l.url}`).join('\n')
+          }
+        } catch (_e) { /* non-fatal — send without attachments */ }
+      }
+
+      const message = (agreementUrl
         ? `Hi ${firstName}, Knox Exterior Care Co. here! Your quote and service agreement are ready to review and sign:\n\nEstimate: ${esignUrl}\n\nService Agreement: ${agreementUrl}\n\nPlease sign both to get started. Reply STOP to opt out.`
         : `Hi ${firstName}, Knox Exterior Care Co. here! Your quote is ready — follow this link to view. ` +
           `If you'd like to move forward, simply sign the e-sign at the bottom of the quote, and we'll reach out about getting you on the schedule.\n\n` +
           `Please reach out to this number with any questions or concerns - thank you for the opportunity to serve!\n\n` +
           `Automated msg. Reply STOP to opt out.\n\n` +
           esignUrl
+      ) + pdfLinkSuffix
 
       await sendOpenPhoneSms(apiKey, fromNumber, quote.customer_phone, message)
 

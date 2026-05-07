@@ -4,7 +4,7 @@ import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import { quoCallUrl, quoTextUrl } from '@/lib/utils'
 import { useQuoteContext } from '@/lib/quote-context'
-import { Lead, Quote, Job, LeadStage, LineItem, Contact } from '@/types'
+import { Lead, Quote, Job, LeadStage, LineItem, Contact, QuoteAttachment } from '@/types'
 import {
   DndContext,
   DragEndEvent,
@@ -580,13 +580,20 @@ function LeadDetailSheet({
   })
 
   const [showSendConfirm, setShowSendConfirm] = useState(false)
-  // 'quote' | 'agreement' | 'both'
   const [sendMode, setSendMode] = useState<'quote' | 'agreement' | 'both'>('quote')
+  const [selectedAttachmentIds, setSelectedAttachmentIds] = useState<Set<string>>(new Set())
 
-  // Send quote (with optional SA)
+  // Load attachments for PDF toggles in the send dialog
+  const { data: allAttachments = [] } = useQuery<QuoteAttachment[]>({
+    queryKey: ['/attachments'],
+    queryFn: () => apiGet('/attachments'),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // Send quote (with optional SA and PDF links)
   const sendQuoteMutation = useMutation({
-    mutationFn: ({ quoteId, includeAgreement }: { quoteId: string; includeAgreement: boolean }) =>
-      apiRequest('POST', `/quotes/${quoteId}/send`, { includeAgreement }),
+    mutationFn: ({ quoteId, includeAgreement, attachmentIds }: { quoteId: string; includeAgreement: boolean; attachmentIds: string[] }) =>
+      apiRequest('POST', `/quotes/${quoteId}/send`, { includeAgreement, attachmentIds }),
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
@@ -599,10 +606,10 @@ function LeadDetailSheet({
     },
   })
 
-  // Send service agreement only
+  // Send service agreement only (with optional PDF links)
   const sendAgreementMutation = useMutation({
-    mutationFn: ({ quoteId, leadId }: { quoteId: string; leadId: string | null }) =>
-      apiRequest('POST', `/agreements?action=generate-and-send`, { quoteId, leadId }),
+    mutationFn: ({ quoteId, leadId, attachmentIds }: { quoteId: string; leadId: string | null; attachmentIds: string[] }) =>
+      apiRequest('POST', `/agreements?action=generate-and-send`, { quoteId, leadId, attachmentIds }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
       setShowSendConfirm(false)
@@ -1277,17 +1284,36 @@ function LeadDetailSheet({
 
       const isBusy = sendQuoteMutation.isPending || sendAgreementMutation.isPending
 
+      // Filter attachments relevant to this send mode
+      const relevantAttachments = allAttachments.filter(a => {
+        if (!a.enabled) return false
+        if (sendMode === 'quote') return a.attachTo === 'quote' || a.attachTo === 'both'
+        if (sendMode === 'agreement') return a.attachTo === 'agreement' || a.attachTo === 'both'
+        return true  // 'both' send: show all enabled
+      })
+
+      function toggleAttachment(id: string) {
+        setSelectedAttachmentIds(prev => {
+          const next = new Set(prev)
+          if (next.has(id)) next.delete(id); else next.add(id)
+          return next
+        })
+      }
+
       function handleSend() {
         if (!q) return
+        const attachmentIds = Array.from(selectedAttachmentIds)
         if (sendMode === 'agreement') {
-          sendAgreementMutation.mutate({ quoteId: q.id, leadId: lead?.id ?? null })
+          sendAgreementMutation.mutate({ quoteId: q.id, leadId: lead?.id ?? null, attachmentIds })
         } else {
-          sendQuoteMutation.mutate({ quoteId: q.id, includeAgreement: sendMode === 'both' })
+          sendQuoteMutation.mutate({ quoteId: q.id, includeAgreement: sendMode === 'both', attachmentIds })
         }
       }
 
       return (
-        <Dialog open={showSendConfirm} onOpenChange={v => { if (!v) setShowSendConfirm(false) }}>
+        <Dialog open={showSendConfirm} onOpenChange={v => {
+          if (!v) { setShowSendConfirm(false); setSelectedAttachmentIds(new Set()) }
+        }}>
           <DialogContent className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
@@ -1299,11 +1325,38 @@ function LeadDetailSheet({
               <p className="text-sm text-muted-foreground">
                 SMS to <span className="font-semibold text-foreground">{q.customerPhone}</span>:
               </p>
-              <div className="rounded-lg bg-muted/60 border p-3 max-h-48 overflow-y-auto">
+              <div className="rounded-lg bg-muted/60 border p-3 max-h-36 overflow-y-auto">
                 <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed font-mono">
                   {previewMap[sendMode]}
                 </p>
               </div>
+
+              {/* PDF attachment toggles */}
+              {relevantAttachments.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Also include PDF links</p>
+                  {relevantAttachments.map(att => (
+                    <button
+                      key={att.id}
+                      type="button"
+                      onClick={() => toggleAttachment(att.id)}
+                      className={`w-full flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                        selectedAttachmentIds.has(att.id)
+                          ? 'border-primary bg-primary/5 text-foreground'
+                          : 'border-border bg-card text-muted-foreground hover:bg-muted/30'
+                      }`}
+                    >
+                      <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${
+                        selectedAttachmentIds.has(att.id) ? 'border-primary bg-primary' : 'border-muted-foreground'
+                      }`}>
+                        {selectedAttachmentIds.has(att.id) && <div className="w-2 h-2 bg-white rounded-sm" />}
+                      </div>
+                      <span className="truncate">📄 {att.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {q.sentAt && sendMode !== 'agreement' && (
                 <p className="text-xs text-amber-600 dark:text-amber-400">
                   ⚠ Quote already sent on {new Date(q.sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}. This sends a new message.
@@ -1311,7 +1364,7 @@ function LeadDetailSheet({
               )}
             </div>
             <DialogFooter className="flex gap-2 sm:gap-2">
-              <Button variant="outline" onClick={() => setShowSendConfirm(false)} disabled={isBusy}>
+              <Button variant="outline" onClick={() => { setShowSendConfirm(false); setSelectedAttachmentIds(new Set()) }} disabled={isBusy}>
                 Cancel
               </Button>
               <Button
