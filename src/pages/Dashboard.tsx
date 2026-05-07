@@ -176,33 +176,22 @@ export default function Dashboard() {
   )
 
   // ── KPI calculations ─────────────────────────────────────────────────────────
-  const activeSubs = (subs ?? []).filter(s => s.status === 'ACTIVE')
-  const subMrr = activeSubs.reduce((sum, s) => sum + s.inSeasonMonthlyTotal, 0)
+  // MRR = sum of estimatedValue for every lead in the Recurring column.
+  // Single source of truth: the kanban, not the subscriptions table.
+  // This prevents double-counting when a lead has both a subscription record
+  // AND an estimatedValue in the pipeline.
+  const recurringLeads = useMemo(() =>
+    (leads ?? []).filter(l => l.stage === 'recurring'),
+  [leads])
 
-  // Also include recurring-stage leads whose estimatedValue isn't already
-  // represented by an active subscription for that contact. This covers:
-  // - Leads manually dragged to Recurring before the auto-subscription feature
-  // - Any edge case where subscription creation failed
-  const activeSubContactIds = useMemo(() =>
-    new Set(activeSubs.map(s => (s as any).contactId).filter(Boolean)),
-  [activeSubs])
+  const mrr = useMemo(() =>
+    recurringLeads.reduce((sum, l) => sum + (l.estimatedValue ?? 0), 0),
+  [recurringLeads])
 
-  const pipelineRecurringMrr = useMemo(() =>
-    (leads ?? [])
-      .filter(l =>
-        l.stage === 'recurring' &&
-        l.contactId &&
-        !activeSubContactIds.has(l.contactId) &&
-        (l.estimatedValue ?? 0) > 0
-      )
-      .reduce((sum, l) => sum + (l.estimatedValue ?? 0), 0),
-  [leads, activeSubContactIds])
-
-  const mrr = subMrr + pipelineRecurringMrr
+  const activeSubsCount = recurringLeads.length   // "active" = in Recurring column
 
   const openQuotes = (quotes ?? []).filter(q => q.status === 'draft' || q.status === 'sent')
   const openQuotesValue = openQuotes.reduce((sum, q) => sum + q.total, 0)
-  const activeSubsCount = activeSubs.length
 
   // ── Dynamic quick nav ────────────────────────────────────────────────────────
   // Show pages that are NOT visible in the nav bar (except dashboard itself)
@@ -579,11 +568,11 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 gap-3">
         <KpiCard
           title="Monthly Recurring"
-          value={loading ? '—' : fmt(mrr)}
-          sub="active subscriptions"
+          value={leadsLoading ? '—' : fmt(mrr)}
+          sub="from recurring pipeline"
           icon={TrendingUp}
-          loading={loading}
-          onClick={() => navigate('/finance')}
+          loading={leadsLoading}
+          onClick={() => navigate('/leads')}
         />
         <KpiCard
           title="Open Quotes"
@@ -594,9 +583,9 @@ export default function Dashboard() {
           onClick={() => navigate('/quotes')}
         />
         <KpiCard
-          title="Active Subscriptions"
-          value={loading ? '—' : String(activeSubsCount)}
-          sub="in season"
+          title="Recurring Clients"
+          value={leadsLoading ? '—' : String(activeSubsCount)}
+          sub="in recurring pipeline"
           icon={CalendarCheck}
           loading={loading}
           onClick={() => navigate('/subscriptions')}
