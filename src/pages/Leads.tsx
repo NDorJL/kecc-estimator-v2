@@ -29,7 +29,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Plus, Clock, GripVertical, FileText, ArrowRight,
+  Plus, Clock, GripVertical, FileText, ScrollText, ArrowRight,
   MapPin, Phone, Mail, User, CalendarPlus,
   Trash2, Archive, PhoneCall, MessageSquare, FileSignature,
   Send, Receipt, CheckCircle2, XCircle, RotateCcw, TrendingDown,
@@ -106,7 +106,7 @@ function LeadCard({
       <div className="flex items-start justify-between gap-1">
         <p className="text-sm font-semibold leading-snug">{displayName}</p>
         {showAgreementBadge && (
-          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0 mt-0.5" title="Agreement signed" />
+          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0 mt-0.5" aria-label="Agreement signed" />
         )}
       </div>
       {subline && (
@@ -580,25 +580,43 @@ function LeadDetailSheet({
   })
 
   const [showSendConfirm, setShowSendConfirm] = useState(false)
+  // 'quote' | 'agreement' | 'both'
+  const [sendMode, setSendMode] = useState<'quote' | 'agreement' | 'both'>('quote')
 
-  // Send quote via SMS
+  // Send quote (with optional SA)
   const sendQuoteMutation = useMutation({
-    mutationFn: (quoteId: string) => apiRequest('POST', `/quotes/${quoteId}/send`, {}),
-    onSuccess: () => {
+    mutationFn: ({ quoteId, includeAgreement }: { quoteId: string; includeAgreement: boolean }) =>
+      apiRequest('POST', `/quotes/${quoteId}/send`, { includeAgreement }),
+    onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
       setShowSendConfirm(false)
-      toast({ title: 'Quote sent!', description: `SMS delivered to ${phone}` })
+      toast({ title: vars.includeAgreement ? 'Quote + Agreement sent!' : 'Quote sent!', description: `SMS delivered to ${phone}` })
     },
     onError: (err: Error) => {
       setShowSendConfirm(false)
-      toast({ title: 'Failed to send quote', description: err.message, variant: 'destructive' })
+      toast({ title: 'Failed to send', description: err.message, variant: 'destructive' })
+    },
+  })
+
+  // Send service agreement only
+  const sendAgreementMutation = useMutation({
+    mutationFn: ({ quoteId, leadId }: { quoteId: string; leadId: string | null }) =>
+      apiRequest('POST', `/agreements?action=generate-and-send`, { quoteId, leadId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      setShowSendConfirm(false)
+      toast({ title: 'Service agreement sent!', description: `SMS delivered to ${phone}` })
+    },
+    onError: (err: Error) => {
+      setShowSendConfirm(false)
+      toast({ title: 'Failed to send agreement', description: err.message, variant: 'destructive' })
     },
   })
 
   // Generate QB invoice
   const generateInvoiceMutation = useMutation({
-    mutationFn: () => apiRequest('POST', `/qb?action=invoice`, { quoteId: effectiveQuote?.id }),
+    mutationFn: () => apiRequest('POST', `/qb?action=invoice`, { quoteId: effectiveQuote?.id }).then(r => r.json()) as Promise<{ qbInvoiceId: string }>,
     onSuccess: (data: { qbInvoiceId: string }) => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
@@ -777,19 +795,45 @@ function LeadDetailSheet({
                                   {setPrimaryMutation.isPending ? 'Setting…' : 'Set as Primary'}
                                 </Button>
                               )}
-                              {q.customerPhone && (
-                                <Button
-                                  variant="outline" size="sm"
-                                  className="flex-1 text-xs text-blue-700 border-blue-300 hover:bg-blue-50"
-                                  onClick={() => {
-                                    setLocalQuote(q)
-                                    setShowSendConfirm(true)
-                                  }}
-                                >
-                                  <Send className="h-3 w-3 mr-1" />
-                                  {q.sentAt ? 'Resend' : 'Send SMS'}
-                                </Button>
-                              )}
+                              {q.customerPhone && (() => {
+                                const qIsRecurring = isRecurringQuote(q)
+                                return qIsRecurring ? (
+                                  // Recurring: three options
+                                  <div className="flex gap-1 flex-1">
+                                    <Button
+                                      variant="outline" size="sm"
+                                      className="flex-1 text-xs text-blue-700 border-blue-300 hover:bg-blue-50 px-1.5"
+                                      onClick={() => { setLocalQuote(q); setSendMode('quote'); setShowSendConfirm(true) }}
+                                    >
+                                      <FileText className="h-3 w-3 mr-1 shrink-0" />Quote
+                                    </Button>
+                                    <Button
+                                      variant="outline" size="sm"
+                                      className="flex-1 text-xs text-violet-700 border-violet-300 hover:bg-violet-50 px-1.5"
+                                      onClick={() => { setLocalQuote(q); setSendMode('agreement'); setShowSendConfirm(true) }}
+                                    >
+                                      <ScrollText className="h-3 w-3 mr-1 shrink-0" />Agreement
+                                    </Button>
+                                    <Button
+                                      variant="outline" size="sm"
+                                      className="flex-1 text-xs text-green-700 border-green-300 hover:bg-green-50 px-1.5"
+                                      onClick={() => { setLocalQuote(q); setSendMode('both'); setShowSendConfirm(true) }}
+                                    >
+                                      <Send className="h-3 w-3 mr-1 shrink-0" />Both
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  // One-time: just send quote
+                                  <Button
+                                    variant="outline" size="sm"
+                                    className="flex-1 text-xs text-blue-700 border-blue-300 hover:bg-blue-50"
+                                    onClick={() => { setLocalQuote(q); setSendMode('quote'); setShowSendConfirm(true) }}
+                                  >
+                                    <Send className="h-3 w-3 mr-1" />
+                                    {q.sentAt ? 'Resend' : 'Send SMS'}
+                                  </Button>
+                                )
+                              })()}
                             </div>
                           </div>
                         )}
@@ -1210,57 +1254,72 @@ function LeadDetailSheet({
       </SheetContent>
     </Sheet>
 
-    {/* ── Send Quote confirmation dialog ───────────────────────────────── */}
+    {/* ── Send confirmation dialog ──────────────────────────────────────── */}
     {(() => {
       const q = effectiveQuote
       if (!q) return null
       const firstName = q.customerName?.split(' ')[0] ?? 'there'
-      const esignUrl = q.acceptToken
-        ? `${window.location.origin}/.netlify/functions/esign?token=${q.acceptToken}`
-        : null
-      const preview = esignUrl
-        ? `Hi ${firstName}, Knox Exterior Care Co. here! Your quote is ready — follow this link to view. ` +
-          `If you'd like to move forward, simply sign the e-sign at the bottom of the quote, and we'll reach out about getting you on the schedule.\n\n` +
-          `Please reach out to this number with any questions or concerns - thank you for the opportunity to serve!\n\n` +
-          `Automated msg. Reply STOP to opt out.\n\n` +
-          esignUrl
-        : null
+      const origin = window.location.origin
+      const esignUrl = q.acceptToken ? `${origin}/.netlify/functions/esign?token=${q.acceptToken}` : null
+
+      const titleMap = { quote: 'Send Quote', agreement: 'Send Service Agreement', both: 'Send Quote + Agreement' }
+      const iconMap  = { quote: <Send className="h-4 w-4 text-blue-600" />, agreement: <ScrollText className="h-4 w-4 text-violet-600" />, both: <Send className="h-4 w-4 text-green-600" /> }
+
+      const previewMap: Record<string, string> = {
+        quote: esignUrl
+          ? `Hi ${firstName}, Knox Exterior Care Co. here! Your quote is ready — follow this link to view. If you'd like to move forward, simply sign the e-sign at the bottom of the quote, and we'll reach out about getting you on the schedule.\n\nPlease reach out to this number with any questions or concerns - thank you for the opportunity to serve!\n\nAutomated msg. Reply STOP to opt out.\n\n${esignUrl}`
+          : '(No signing link — re-save the quote)',
+        agreement: `Hi ${firstName}, Knox Exterior Care Co. here! Your service agreement is ready to review and sign:\n\n[Agreement link generated at send time]\n\nReply STOP to opt out.`,
+        both: esignUrl
+          ? `Hi ${firstName}, Knox Exterior Care Co. here! Your quote and service agreement are ready to review and sign:\n\nEstimate: ${esignUrl}\n\nService Agreement: [generated at send time]\n\nPlease sign both to get started. Reply STOP to opt out.`
+          : '(No signing link — re-save the quote)',
+      }
+
+      const isBusy = sendQuoteMutation.isPending || sendAgreementMutation.isPending
+
+      function handleSend() {
+        if (!q) return
+        if (sendMode === 'agreement') {
+          sendAgreementMutation.mutate({ quoteId: q.id, leadId: lead?.id ?? null })
+        } else {
+          sendQuoteMutation.mutate({ quoteId: q.id, includeAgreement: sendMode === 'both' })
+        }
+      }
+
       return (
         <Dialog open={showSendConfirm} onOpenChange={v => { if (!v) setShowSendConfirm(false) }}>
           <DialogContent className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <Send className="h-4 w-4 text-blue-600" />
-                Send Quote to {firstName}?
+                {iconMap[sendMode]}
+                {titleMap[sendMode]} to {firstName}?
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-3 py-1">
               <p className="text-sm text-muted-foreground">
-                This will immediately send an SMS to{' '}
-                <span className="font-semibold text-foreground">{q.customerPhone}</span>{' '}
-                with the following message:
+                SMS to <span className="font-semibold text-foreground">{q.customerPhone}</span>:
               </p>
               <div className="rounded-lg bg-muted/60 border p-3 max-h-48 overflow-y-auto">
                 <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed font-mono">
-                  {preview ?? 'No signing link available — re-save the quote to generate one.'}
+                  {previewMap[sendMode]}
                 </p>
               </div>
-              {q.sentAt && (
+              {q.sentAt && sendMode !== 'agreement' && (
                 <p className="text-xs text-amber-600 dark:text-amber-400">
-                  ⚠ Already sent on {new Date(q.sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}. Sending again delivers a second message.
+                  ⚠ Quote already sent on {new Date(q.sentAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}. This sends a new message.
                 </p>
               )}
             </div>
             <DialogFooter className="flex gap-2 sm:gap-2">
-              <Button variant="outline" onClick={() => setShowSendConfirm(false)} disabled={sendQuoteMutation.isPending}>
+              <Button variant="outline" onClick={() => setShowSendConfirm(false)} disabled={isBusy}>
                 Cancel
               </Button>
               <Button
-                className="bg-blue-600 hover:bg-blue-700 text-white"
-                disabled={sendQuoteMutation.isPending || !esignUrl}
-                onClick={() => sendQuoteMutation.mutate(q.id)}
+                className={sendMode === 'agreement' ? 'bg-violet-600 hover:bg-violet-700 text-white' : sendMode === 'both' ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-blue-600 hover:bg-blue-700 text-white'}
+                disabled={isBusy || (sendMode !== 'agreement' && !esignUrl)}
+                onClick={handleSend}
               >
-                {sendQuoteMutation.isPending ? 'Sending…' : 'Yes, Send It'}
+                {isBusy ? 'Sending…' : 'Yes, Send It'}
               </Button>
             </DialogFooter>
           </DialogContent>

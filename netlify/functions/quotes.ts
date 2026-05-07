@@ -178,58 +178,44 @@ export const handler: Handler = async (event) => {
       const esignUrl = `${siteUrl}/.netlify/functions/esign?token=${encodeURIComponent(quote.accept_token)}`
       const firstName = (quote.customer_name ?? 'there').split(' ')[0]
 
-      // Detect recurring: check quote_type string OR any subscription line items
+      // includeAgreement: if true AND this is a recurring quote, generate SA and send both links
+      const body2 = JSON.parse(event.body ?? '{}') as { includeAgreement?: boolean }
+      const includeAgreement = !!body2.includeAgreement
+
       const lineItems = Array.isArray(quote.line_items) ? quote.line_items as Array<{ isSubscription?: boolean }> : []
       const qt = (quote.quote_type ?? '').toLowerCase()
       const isRecurring =
         qt.includes('autopilot') || qt.includes('tcep') || qt.includes('tpc') ||
         lineItems.some(li => li.isSubscription)
 
-      // If recurring, generate service agreement inline (no HTTP self-call — avoids URL env issues)
+      // Generate service agreement inline when requested (avoids HTTP self-call issues)
       let agreementUrl: string | null = null
-      if (isRecurring) {
+      if (includeAgreement && isRecurring) {
         try {
-          // Fetch lead notes
           const leadId = quote.lead_id ?? null
           let leadNotes: string | null = null
           if (leadId) {
             const { data: lead } = await supabase.from('leads').select('notes').eq('id', leadId).single()
             leadNotes = lead?.notes ?? null
           }
-
-          // Void any existing pending/draft agreements for this quote
-          await supabase
-            .from('service_agreements')
+          await supabase.from('service_agreements')
             .update({ status: 'void', updated_at: new Date().toISOString() })
-            .eq('quote_id', id)
-            .in('status', ['draft', 'pending_signature'])
+            .eq('quote_id', id).in('status', ['draft', 'pending_signature'])
 
           const agreeToken = randomUUID()
-          const { data: agreementRow } = await supabase
-            .from('service_agreements')
-            .insert({
-              contact_id:       quote.contact_id ?? null,
-              quote_id:         id,
-              lead_id:          leadId,
-              customer_name:    quote.customer_name ?? '',
-              customer_address: quote.customer_address ?? null,
-              customer_email:   quote.customer_email ?? null,
-              customer_phone:   quote.customer_phone ?? null,
-              quote_type:       quote.quote_type ?? null,
-              lead_notes:       leadNotes,
-              status:           'pending_signature',
-              accept_token:     agreeToken,
-            })
-            .select()
-            .single()
+          const { data: agreementRow } = await supabase.from('service_agreements').insert({
+            contact_id: quote.contact_id ?? null, quote_id: id, lead_id: leadId,
+            customer_name: quote.customer_name ?? '', customer_address: quote.customer_address ?? null,
+            customer_email: quote.customer_email ?? null, customer_phone: quote.customer_phone ?? null,
+            quote_type: quote.quote_type ?? null, lead_notes: leadNotes,
+            status: 'pending_signature', accept_token: agreeToken,
+          }).select().single()
 
           if (agreementRow) {
             agreementUrl = `${siteUrl}/.netlify/functions/esign?token=${encodeURIComponent(agreeToken)}`
-            console.log(`[quotes/send] Generated service agreement ${agreementRow.id} for quote ${id}`)
           }
         } catch (agreeErr) {
-          console.error('[quotes/send] Failed to generate service agreement:', agreeErr)
-          // non-fatal — still send the quote without the SA link
+          console.error('[quotes/send] Failed to generate SA:', agreeErr)
         }
       }
 

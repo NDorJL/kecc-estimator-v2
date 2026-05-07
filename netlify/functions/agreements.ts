@@ -2,6 +2,7 @@ import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { rowToServiceAgreement } from '../../src/types'
 import { randomUUID } from 'crypto'
+import { sendOpenPhoneSms } from './_smsHelper'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -211,6 +212,97 @@ export const handler: Handler = async (event) => {
         statusCode: 201,
         headers: CORS,
         body: JSON.stringify({ agreement: rowToServiceAgreement(agreementRow), signUrl, token }),
+      }
+    }
+
+    // ── POST ?action=generate-and-send — SA only, sent via SMS/email ─────────
+    // Generates a service agreement from a quote+lead and immediately sends the
+    // signing link to the customer. Used by the "Send Agreement" button.
+    if (method === 'POST' && !id && action === 'generate-and-send') {
+      const body = JSON.parse(event.body ?? '{}')
+      const { quoteId, leadId } = body as { quoteId?: string; leadId?: string }
+
+      if (!quoteId) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'quoteId required' }) }
+
+      const { data: quote } = await supabase.from('quotes').select('*').eq('id', quoteId).single()
+      if (!quote) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Quote not found' }) }
+
+      // Get lead notes
+      let leadNotes: string | null = null
+      const resolvedLeadId = leadId ?? quote.lead_id ?? null
+      if (resolvedLeadId) {
+        const { data: lead } = await supabase.from('leads').select('notes').eq('id', resolvedLeadId).single()
+        leadNotes = lead?.notes ?? null
+      }
+
+      // Resolve contact phone/email
+      const contactId = quote.contact_id ?? null
+      let customerPhone = quote.customer_phone ?? null
+      let customerEmail = quote.customer_email ?? null
+      if (contactId && (!customerPhone || !customerEmail)) {
+        const { data: contact } = await supabase.from('contacts').select('phone, email').eq('id', contactId).single()
+        customerPhone = customerPhone ?? contact?.phone ?? null
+        customerEmail = customerEmail ?? contact?.email ?? null
+      }
+
+      if (!customerPhone && !customerEmail) {
+        return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'No phone or email on this quote — add contact info first' }) }
+      }
+
+      // Void any existing pending/draft agreements for this quote
+      await supabase.from('service_agreements')
+        .update({ status: 'void', updated_at: new Date().toISOString() })
+        .eq('quote_id', quoteId).in('status', ['draft', 'pending_signature'])
+
+      const token = randomUUID()
+      const { data: agreementRow, error: insertErr } = await supabase.from('service_agreements').insert({
+        contact_id:       contactId,
+        quote_id:         quoteId,
+        lead_id:          resolvedLeadId,
+        customer_name:    quote.customer_name ?? '',
+        customer_address: quote.customer_address ?? null,
+        customer_email:   customerEmail,
+        customer_phone:   customerPhone,
+        quote_type:       quote.quote_type ?? null,
+        lead_notes:       leadNotes,
+        status:           'pending_signature',
+        accept_token:     token,
+      }).select().single()
+
+      if (insertErr || !agreementRow) throw insertErr ?? new Error('Failed to create agreement')
+
+      const siteUrl = (process.env.URL ?? '').replace(/\/$/, '')
+      const signUrl = `${siteUrl}/.netlify/functions/esign?token=${encodeURIComponent(token)}`
+      const firstName = (quote.customer_name ?? 'there').split(' ')[0]
+
+      // Fetch SMS credentials
+      const { data: settings } = await supabase
+        .from('company_settings').select('quo_api_key, quo_from_number').limit(1).single()
+      const apiKey     = settings?.quo_api_key     ?? process.env.QUO_API_KEY ?? ''
+      const fromNumber = settings?.quo_from_number ?? process.env.QUO_FROM_NUMBER ?? ''
+
+      // Send via SMS (primary) or note that email-only isn't wired yet
+      if (apiKey && fromNumber && customerPhone) {
+        await sendOpenPhoneSms(
+          apiKey, fromNumber, customerPhone,
+          `Hi ${firstName}, Knox Exterior Care Co. here! Your service agreement is ready to review and sign:\n\n${signUrl}\n\nReply STOP to opt out.`
+        )
+      }
+
+      // Log activity
+      if (contactId) {
+        try { await supabase.from('activities').insert({
+          contact_id: contactId,
+          type:       'esign_sent',
+          summary:    `Service agreement sent to ${quote.customer_name}`,
+          metadata:   { agreementId: agreementRow.id, quoteId },
+        }) } catch (_e) { /* non-fatal */ }
+      }
+
+      return {
+        statusCode: 201,
+        headers: CORS,
+        body: JSON.stringify({ agreement: rowToServiceAgreement(agreementRow), signUrl }),
       }
     }
 
