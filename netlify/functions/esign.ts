@@ -191,12 +191,22 @@ function buildQuotePage(opts: {
   const grandTotal   = onetimeTotal + monthlyTotal
 
   // Columns: Service | Description | Total  (Qty and Unit Price hidden from customer)
-  const itemRows = lineItems.map(li => `
+  const itemRows = lineItems.map(li => {
+    const freqLabel = li.frequency && li.frequency !== 'One-Time' ? li.frequency : null
+    const descParts = [li.description, freqLabel].filter(Boolean)
+    const descHtml = descParts.length
+      ? descParts.map((p, i) => i === 0
+          ? esc(p)
+          : `<span style="display:block;font-size:11px;color:#6b7280;margin-top:1px;">🔁 ${esc(p)}</span>`)
+          .join('')
+      : ''
+    return `
     <tr>
       <td class="td-main">${esc(li.serviceName)}</td>
-      <td class="td-sub td-desc">${esc(li.description)}</td>
+      <td class="td-sub td-desc">${descHtml}</td>
       <td class="td-sub td-num td-bold">${li.isSubscription ? fmtMoney(li.monthlyAmount ?? li.lineTotal) + '/mo' : fmtMoney(li.lineTotal)}</td>
-    </tr>`).join('')
+    </tr>`
+  }).join('')
 
   // Build totals section — mixed quotes (one-time + recurring) get separate rows
   // so we never show "$X/mo" when the amount actually includes one-time charges.
@@ -512,12 +522,14 @@ function mapLineItemsToServices(
       matchedLineItems.add(matchIdx)
       const li = lineItems[matchIdx]
       const price = li.monthlyAmount ?? li.lineTotal
+      // li.frequency comes from the calculator (e.g. "Bi-Weekly", "Monthly", "Every 6 Weeks")
+      const freq = (li.frequency && li.frequency !== 'One-Time') ? li.frequency : null
       result.push({
         label: svc.label,
         checked: true,
         modifier: li.description ?? null,
         price: price ? `$${Number(price).toFixed(2)}/mo` : null,
-        frequency: null,
+        frequency: freq,
         scope: svc.scope,
       })
     } else {
@@ -536,7 +548,12 @@ function mapLineItemsToServices(
   const unmatched = lineItems.filter((_, i) => !matchedLineItems.has(i))
   if (unmatched.length > 0) {
     const customDesc = unmatched
-      .map(li => `${li.serviceName ?? 'Custom Service'}${(li.monthlyAmount || li.lineTotal) ? ` — $${Number(li.monthlyAmount ?? li.lineTotal).toFixed(2)}/mo` : ''}`)
+      .map(li => {
+        const parts = [li.serviceName ?? 'Custom Service']
+        if (li.monthlyAmount || li.lineTotal) parts.push(`$${Number(li.monthlyAmount ?? li.lineTotal).toFixed(2)}/mo`)
+        if (li.frequency && li.frequency !== 'One-Time') parts.push(li.frequency)
+        return parts.join(' · ')
+      })
       .join('; ')
     result.push({
       label: 'Other / Custom Service',

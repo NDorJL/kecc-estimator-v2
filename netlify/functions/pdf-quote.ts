@@ -113,13 +113,27 @@ export const handler: Handler = async (event) => {
     doc.fontSize(9).font('Helvetica').fillColor('#000000')
     for (const item of lineItems) {
       if (y > 700) { doc.addPage(); y = 50 }
-      // Measure row height to handle multi-line descriptions
-      const serviceH     = doc.heightOfString(item.serviceName, { width: colW[0] })
-      const descText     = item.description ?? ''
-      const descH        = descText ? doc.heightOfString(descText, { width: colW[1] }) : 0
-      const rowH         = Math.max(serviceH, descH, 14) + 6
+      const serviceH = doc.heightOfString(item.serviceName, { width: colW[0] })
+      const descText = item.description ?? ''
+      // Show frequency as a second line in the description column when present
+      const freqText = (item as any).frequency && (item as any).frequency !== 'One-Time'
+        ? `\u{1F501} ${(item as any).frequency}`  // 🔁 Bi-Weekly etc.
+        : ''
+      const fullDescText = [descText, freqText].filter(Boolean).join('\n')
+      const descH   = fullDescText ? doc.heightOfString(fullDescText, { width: colW[1] }) : 0
+      const rowH    = Math.max(serviceH, descH, 14) + 6
       doc.font('Helvetica-Bold').fillColor('#000000').text(item.serviceName, colX[0], y, { width: colW[0] })
-      if (descText) doc.font('Helvetica').fillColor('#555555').text(descText, colX[1], y, { width: colW[1] })
+      if (descText) {
+        doc.font('Helvetica').fillColor('#555555').text(descText, colX[1], y, { width: colW[1] })
+        if (freqText) {
+          const descTextH = doc.heightOfString(descText, { width: colW[1] })
+          doc.fontSize(8).fillColor('#888888').text(freqText, colX[1], y + descTextH, { width: colW[1] })
+          doc.fontSize(9).fillColor('#555555')
+        }
+      } else if (freqText) {
+        doc.font('Helvetica').fontSize(8).fillColor('#888888').text(freqText, colX[1], y, { width: colW[1] })
+        doc.fontSize(9).fillColor('#000000')
+      }
       doc.font('Helvetica-Bold').fillColor('#000000').text(
         fmt(item.lineTotal) + (item.isSubscription ? '/mo' : ''),
         colX[2], y, { width: colW[2], align: 'right' },
