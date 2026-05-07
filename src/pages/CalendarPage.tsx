@@ -1278,7 +1278,19 @@ function AddServiceSheet({
 
 // ── Add Sub Visit Sheet ───────────────────────────────────────────────────────
 
-// ── Frequency → interval in days ─────────────────────────────────────────────
+// ── Preview: next N occurrences from a start date at a given interval ─────────
+// Used only for the "upcoming dates" preview in the sheet — the actual calendar
+// rendering is handled by generateSubEvents() which computes dates on the fly.
+function previewNextOccurrences(startDate: string, intervalDays: number, count = 5): string[] {
+  const dates: string[] = []
+  let cur = new Date(startDate + 'T12:00:00')
+  while (dates.length < count) {
+    dates.push(cur.toISOString().slice(0, 10))
+    cur = new Date(cur.getTime() + intervalDays * 24 * 60 * 60 * 1000)
+  }
+  return dates
+}
+
 function frequencyToDays(freq: string): number | null {
   const f = (freq ?? '').toLowerCase().replace(/[-–]/g, ' ')
   if (f.includes('bi weekly') || f.includes('biweekly') || f.includes('every 2 week') || f.includes('2 week')) return 14
@@ -1290,21 +1302,6 @@ function frequencyToDays(freq: string): number | null {
   if (f.includes('quarterly') || f.includes('every 3 month')) return 91
   if (f.includes('annual') || f.includes('yearly') || f.includes('per year')) return 365
   return null
-}
-
-// Generate occurrences indefinitely from startDate at intervalDays spacing.
-// Cap at MAX_OCCURRENCES — for bi-weekly this covers ~19 years, monthly ~41 years.
-// When a subscription is cancelled, the future jobs should be cancelled/deleted then.
-const MAX_OCCURRENCES = 500
-
-function generateIndefiniteOccurrences(startDate: string, intervalDays: number): string[] {
-  const dates: string[] = []
-  let cur = new Date(startDate + 'T12:00:00')
-  while (dates.length < MAX_OCCURRENCES) {
-    dates.push(cur.toISOString().slice(0, 10))
-    cur = new Date(cur.getTime() + intervalDays * 24 * 60 * 60 * 1000)
-  }
-  return dates
 }
 
 function AddSubVisitSheet({
@@ -1358,50 +1355,55 @@ function AddSubVisitSheet({
 
   const selectedServices = selectedSub?.services.filter(s => selectedServiceIds.has(s.id)) ?? []
 
-  // Generate indefinite occurrences for each selected service from the first date
+  // Preview: next few dates for each selected service starting from scheduledDate
   const schedulePreview = useMemo(() => {
     if (!scheduledDate || selectedServices.length === 0) return []
     return selectedServices.map(svc => {
       const days = frequencyToDays(svc.frequency)
-      const dates = days ? generateIndefiniteOccurrences(scheduledDate, days) : [scheduledDate]
-      return { svc, dates, days }
+      const preview = days ? previewNextOccurrences(scheduledDate, days, 5) : [scheduledDate]
+      return { svc, days, preview }
     })
   }, [selectedServices, scheduledDate])
-
-  const totalJobCount = schedulePreview.reduce((n, p) => n + p.dates.length, 0)
 
   async function handleAdd() {
     if (!selectedSub || selectedServiceIds.size === 0 || !scheduledDate) return
     setSaving(true)
     try {
-      const jobsToCreate: Array<{ serviceName: string; scheduledDate: string }> = []
+      // Build new serviceSchedule entries for each selected service.
+      // generateSubEvents() in the calendar reads these to render recurring events
+      // automatically and indefinitely — no job records need to be pre-created.
+      const startDow = new Date(scheduledDate + 'T12:00:00').getDay()
 
-      for (const { svc, dates } of schedulePreview) {
-        for (const date of dates) {
-          jobsToCreate.push({ serviceName: svc.serviceName, scheduledDate: date })
-        }
-      }
+      const existingSchedules: typeof selectedSub.serviceSchedules =
+        (selectedSub.serviceSchedules ?? []).filter(
+          sch => !selectedServiceIds.has(sch.serviceId)  // remove any old schedule for this service
+        )
 
-      // Create all jobs sequentially
-      for (const j of jobsToCreate) {
-        await apiRequest('POST', '/jobs', {
-          serviceName: j.serviceName,
-          jobType: 'subscription',
-          subscriptionId: selectedSub.id,
-          contactId: (selectedSub as any).contactId ?? null,
-          customerName: selectedSub.customerName,
-          customerAddress: selectedSub.customerAddress,
-          customerPhone: selectedSub.customerPhone,
-          scheduledDate: j.scheduledDate,
-          scheduledWindow,
-          notes: notes || null,
-          status: 'scheduled',
-        })
-      }
+      const newSchedules = selectedServices.map(svc => ({
+        serviceId:    svc.id,
+        serviceName:  svc.serviceName,
+        frequency:    svc.frequency,
+        dayOfWeek:    startDow,
+        startDate:    scheduledDate,
+        contractorId: null,
+      }))
+
+      const updatedSchedules = [...existingSchedules, ...newSchedules]
+
+      // Persist back to the subscription — also update startDate if not set
+      await apiRequest('PATCH', `/subscriptions/${selectedSub.id}`, {
+        serviceSchedules: updatedSchedules,
+        ...((!selectedSub.startDate || selectedSub.startDate === '1970-01-01')
+          ? { startDate: scheduledDate }
+          : {}),
+      })
 
       toast({
-        title: `${totalJobCount} visits scheduled`,
-        description: `${selectedServices.length} service${selectedServices.length !== 1 ? 's' : ''} — recurring indefinitely`,
+        title: 'Recurring schedule set',
+        description:
+          `${selectedServices.length} service${selectedServices.length !== 1 ? 's' : ''} will repeat ` +
+          selectedServices.map(s => s.frequency.toLowerCase()).join(' / ') +
+          ` starting ${scheduledDate}`,
       })
       onCreated()
       onClose()
@@ -1490,31 +1492,24 @@ function AddSubVisitSheet({
                 <Input type="date" className="mt-1 min-h-[44px]" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
               </div>
 
-              {/* Auto-schedule preview — shows as soon as a date is chosen */}
+              {/* Recurrence preview */}
               {schedulePreview.length > 0 && scheduledDate && (
                 <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 space-y-2">
                   <p className="text-xs font-semibold text-primary">
-                    📅 Recurring indefinitely — {totalJobCount} visits scheduled
+                    🔁 Recurring indefinitely from {new Date(scheduledDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                   </p>
-                  {schedulePreview.map(({ svc, dates, days }) => {
-                    const preview5 = dates.slice(0, 5)
-                    return (
-                      <div key={svc.id}>
-                        <p className="text-xs font-medium text-foreground">{svc.serviceName}</p>
-                        <p className="text-[10px] text-muted-foreground mb-0.5">
-                          {days ? svc.frequency : 'Frequency unrecognised — 1 visit'}
-                          {' · '}{dates.length} total
-                        </p>
-                        <p className="text-[10px] text-muted-foreground font-mono">
-                          {preview5.map(d => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })).join(' · ')}
-                          {dates.length > 5 ? ` · +${dates.length - 5} more` : ''}
-                        </p>
-                      </div>
-                    )
-                  })}
-                  {schedulePreview.some(p => !p.days) && (
-                    <p className="text-[10px] text-amber-600">⚠ Unrecognised frequency — add it to the service in the Subscriptions tab to enable auto-recurrence.</p>
-                  )}
+                  {schedulePreview.map(({ svc, days, preview }) => (
+                    <div key={svc.id}>
+                      <p className="text-xs font-medium text-foreground">{svc.serviceName}</p>
+                      <p className="text-[10px] text-muted-foreground mb-0.5">
+                        {days ? svc.frequency : '⚠ Frequency not recognised'}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground font-mono">
+                        {preview.map(d => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })).join(' · ')}
+                        {days ? ' · …' : ''}
+                      </p>
+                    </div>
+                  ))}
                 </div>
               )}
               <div>
@@ -1540,10 +1535,8 @@ function AddSubVisitSheet({
                 disabled={saving || selectedServiceIds.size === 0 || !scheduledDate}
               >
                 {saving
-                  ? `Creating ${totalJobCount} visit${totalJobCount !== 1 ? 's' : ''}…`
-                  : totalJobCount > selectedServiceIds.size
-                    ? `Schedule ${totalJobCount} Visits`
-                    : `Add ${selectedServiceIds.size} Service${selectedServiceIds.size !== 1 ? 's' : ''} to Calendar`
+                  ? 'Saving schedule…'
+                  : `Start Recurring Schedule`
                 }
               </Button>
             </>
