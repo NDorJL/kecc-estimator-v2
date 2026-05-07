@@ -527,7 +527,7 @@ function mapLineItemsToServices(
       result.push({
         label: svc.label,
         checked: true,
-        modifier: li.description ?? null,
+        modifier: null,  // description (acreage etc.) intentionally excluded from SA
         price: price ? `$${Number(price).toFixed(2)}/mo` : null,
         frequency: freq,
         scope: svc.scope,
