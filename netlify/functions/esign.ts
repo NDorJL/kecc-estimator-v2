@@ -589,6 +589,89 @@ function detectPlanType(quoteType: string | null): 'autopilot' | 'tcep' | 'tpc' 
   return 'autopilot'
 }
 
+// ── Lawn-care subscription type detection ─────────────────────────────────────
+
+type LawnType = 'single_service_lawn' | 'bundled_lawn' | 'other'
+
+/**
+ * Detect whether lawn care is the sole recurring service or part of a bundle.
+ *
+ * single_service_lawn  — lawn care is the only checked/recurring service
+ * bundled_lawn         — lawn care is present alongside ≥1 other recurring service
+ * other                — no lawn care detected
+ *
+ * Uses the checked services list from mapLineItemsToServices so the source of
+ * truth is the actual line-item composition, not the plan name.
+ */
+function detectLawnType(checkedServices: CheckedService[]): LawnType {
+  const LAWN_KEYWORDS = ['lawn', 'mow', 'mowing', 'grass', 'turf', 'grounds', 'cut grass', 'cutting']
+  const isLawn = (label: string) => LAWN_KEYWORDS.some(kw => label.toLowerCase().includes(kw))
+
+  const checkedOnes = checkedServices.filter(s => s.checked)
+  const lawnServices = checkedOnes.filter(s => isLawn(s.label))
+  const otherServices = checkedOnes.filter(s => !isLawn(s.label))
+
+  if (lawnServices.length === 0) return 'other'
+  if (otherServices.length === 0) return 'single_service_lawn'
+  return 'bundled_lawn'
+}
+
+/**
+ * Returns the correct Billing / Cancellation clause text based on the
+ * detected lawn type. The returned object has separate fields for the
+ * Billing paragraph and the Cancellation paragraph so they can be
+ * injected into their respective sections independently.
+ */
+function getLawnClauses(lawnType: LawnType, party: string): {
+  billingExtra: string
+  cancellationText: string
+} {
+  if (lawnType === 'single_service_lawn') {
+    return {
+      billingExtra:
+        `<p style="margin:8px 0 0;">` +
+        `<strong>Lawn Care Services &#8212; 12-Month Level Billing.</strong> ` +
+        `Lawn Care Services provided as a standalone recurring service are offered on a twelve (12) month service term. ` +
+        `${party.charAt(0).toUpperCase() + party.slice(1)} acknowledges that monthly billing is structured as level billing across the full twelve-month term, ` +
+        `including active and off-season months, in order to provide consistent service scheduling and annual pricing stability.` +
+        `</p>`,
+      cancellationText:
+        `This agreement defines scope, expectations, schedule, and pricing. ` +
+        `For this standalone Lawn Care subscription, the service term is twelve (12) months with level monthly billing year-round. ` +
+        `Either party may cancel the recurring service upon thirty (30) days&#8217; written notice, ` +
+        `subject to any charges incurred or services performed prior to the effective cancellation date. ` +
+        `Upon cancellation, KECC will calculate the value of services already delivered at KECC&#8217;s then-current standard (non-subscriber) rates ` +
+        `and compare that to subscription payments collected to date; any difference will be settled accordingly.`,
+    }
+  }
+
+  if (lawnType === 'bundled_lawn') {
+    return {
+      billingExtra:
+        `<p style="margin:8px 0 0;">` +
+        `<strong>Seasonal Lawn Care Adjustment.</strong> ` +
+        `For bundled recurring service plans that include Lawn Care Services together with other recurring services, the lawn care portion of the plan is seasonally adjusted during the winter season. ` +
+        `For purposes of this Agreement, the winter season is defined as December&#160;1 through February&#160;28, or February&#160;29 in a leap year. ` +
+        `During that period, Lawn Care Services will be removed from the monthly plan price and automatically reinstated beginning March&#160;1. ` +
+        `All other recurring bundled services shall remain active and continue under this Agreement unless otherwise stated in the selected plan. ` +
+        `The seasonal lawn care adjustment described above applies only to bundled multi-service plans and does not apply to standalone lawn care subscriptions.` +
+        `</p>`,
+      cancellationText:
+        `This agreement defines scope, expectations, schedule, and pricing. It is a discretionary service agreement, not a fixed-term long-term contract. ` +
+        `The ${party} may cancel at any time with written or emailed notice, subject only to the pro-rated balancing of services delivered vs. payments described in the Billing section above. ` +
+        `Note: the seasonal removal of Lawn Care Services during the winter season does not constitute cancellation; all other bundled services remain active and billable during that period.`,
+    }
+  }
+
+  // 'other' — no lawn care, use default text
+  return {
+    billingExtra: '',
+    cancellationText:
+      `This agreement defines scope, expectations, schedule, and pricing. It is a discretionary service agreement, not a fixed-term long-term contract. ` +
+      `The ${party} may cancel at any time, subject only to the pro-rated balancing of services delivered vs. payments described in the Billing section above.`,
+  }
+}
+
 function buildFullAgreementPage(opts: {
   token: string
   isResidential: boolean
@@ -638,6 +721,11 @@ function buildFullAgreementPage(opts: {
   const isAutopilot = planType === 'autopilot'
   const isTCEP = planType === 'tcep'
   const isTPC = planType === 'tpc'
+
+  // ── Lawn-care clause detection ─────────────────────────────────────────────
+  const party = isResidential ? 'customer' : 'client'
+  const lawnType = detectLawnType(checkedServices)
+  const { billingExtra, cancellationText } = getLawnClauses(lawnType, party)
 
   // ── Services checklist rows ────────────────────────────────────────────────
   const serviceRowsHtml = checkedServices.map(svc => {
@@ -959,7 +1047,7 @@ function buildFullAgreementPage(opts: {
     <div class="sec">
       <div class="legal-text">
         <h4>Billing, Term &amp; Proration</h4>
-        <p style="margin:0;">Services are billed on a recurring subscription basis, in advance, starting on or around the first scheduled service window. The monthly rate is a blended/averaged amount reflecting all included services over the plan term and is not tied to any single visit&#8217;s price. Either party may cancel at any time with written or emailed notice. Upon cancellation, KECC will calculate the value of services already delivered at KECC&#8217;s then-current standard (non-subscriber) rates and compare that to subscription payments collected to date. If delivered service value exceeds payments collected, the ${isResidential ? 'customer' : 'client'} agrees to pay a pro-rated final balance for the difference. If payments collected exceed services delivered, KECC will refund or credit the difference. Scope and pricing may be adjusted with at least 30 days&#8217; written notice if property conditions, labor costs, materials, or service requirements materially change.</p>
+        <p style="margin:0;">Services are billed on a recurring subscription basis, in advance, starting on or around the first scheduled service window. The monthly rate is a blended/averaged amount reflecting all included services over the plan term and is not tied to any single visit&#8217;s price. Either party may cancel at any time with written or emailed notice. Upon cancellation, KECC will calculate the value of services already delivered at KECC&#8217;s then-current standard (non-subscriber) rates and compare that to subscription payments collected to date. If delivered service value exceeds payments collected, the ${party} agrees to pay a pro-rated final balance for the difference. If payments collected exceed services delivered, KECC will refund or credit the difference. Scope and pricing may be adjusted with at least 30 days&#8217; written notice if property conditions, labor costs, materials, or service requirements materially change.${billingExtra}</p>
       </div>
     </div>
 
@@ -983,7 +1071,7 @@ function buildFullAgreementPage(opts: {
     <div class="sec">
       <div class="legal-text">
         <h4>Cancellation</h4>
-        <p style="margin:0;">This agreement defines scope, expectations, schedule, and pricing. It is a discretionary service agreement, not a fixed-term long-term contract. The ${isResidential ? 'customer' : 'client'} may cancel at any time, subject only to the pro-rated balancing of services delivered vs. payments described in the Billing section above.</p>
+        <p style="margin:0;">${cancellationText}</p>
       </div>
     </div>
 
