@@ -1292,12 +1292,13 @@ function frequencyToDays(freq: string): number | null {
   return null
 }
 
-// Generate ISO date strings for all occurrences between start and end (inclusive)
-function generateOccurrences(startDate: string, endDate: string, intervalDays: number): string[] {
+// Generate 12 months of occurrences from startDate at intervalDays spacing
+function generateYearOccurrences(startDate: string, intervalDays: number): string[] {
   const dates: string[] = []
-  const end = new Date(endDate + 'T12:00:00')
+  const end = new Date(startDate + 'T12:00:00')
+  end.setFullYear(end.getFullYear() + 1)  // exactly 12 months forward
   let cur = new Date(startDate + 'T12:00:00')
-  while (cur <= end && dates.length < 200) { // 200 cap as safety
+  while (cur <= end && dates.length < 400) {
     dates.push(cur.toISOString().slice(0, 10))
     cur = new Date(cur.getTime() + intervalDays * 24 * 60 * 60 * 1000)
   }
@@ -1317,7 +1318,6 @@ function AddSubVisitSheet({
   const [selectedSub, setSelectedSub] = useState<Subscription | null>(null)
   const [selectedServiceIds, setSelectedServiceIds] = useState<Set<string>>(new Set())
   const [scheduledDate, setScheduledDate] = useState(defaultDate)
-  const [endDate, setEndDate] = useState('')
   const [scheduledWindow, setScheduledWindow] = useState('anytime')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
@@ -1325,7 +1325,6 @@ function AddSubVisitSheet({
   useEffect(() => {
     if (open) {
       setScheduledDate(defaultDate)
-      setEndDate('')
       setSelectedSub(null)
       setSubSearch('')
       setSelectedServiceIds(new Set())
@@ -1355,54 +1354,46 @@ function AddSubVisitSheet({
     })
   }
 
-  // Preview: compute occurrences for selected services
   const selectedServices = selectedSub?.services.filter(s => selectedServiceIds.has(s.id)) ?? []
 
-  // Occurrence preview per service (only when endDate is set)
-  const occurrencePreview = useMemo(() => {
-    if (!scheduledDate || !endDate || endDate <= scheduledDate) return null
+  // Auto-generate 12 months of dates for each selected service based on its frequency
+  const schedulePreview = useMemo(() => {
+    if (!scheduledDate || selectedServices.length === 0) return []
     return selectedServices.map(svc => {
       const days = frequencyToDays(svc.frequency)
-      const dates = days ? generateOccurrences(scheduledDate, endDate, days) : [scheduledDate]
+      const dates = days ? generateYearOccurrences(scheduledDate, days) : [scheduledDate]
       return { svc, dates, days }
     })
-  }, [selectedServices, scheduledDate, endDate])
+  }, [selectedServices, scheduledDate])
 
-  const totalJobCount = occurrencePreview
-    ? occurrencePreview.reduce((n, p) => n + p.dates.length, 0)
-    : selectedServices.length  // without endDate: one job per service
+  const totalJobCount = schedulePreview.reduce((n, p) => n + p.dates.length, 0)
+
+  // End date label for display (12 months from first visit)
+  const throughDate = useMemo(() => {
+    if (!scheduledDate) return ''
+    const d = new Date(scheduledDate + 'T12:00:00')
+    d.setFullYear(d.getFullYear() + 1)
+    return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+  }, [scheduledDate])
 
   async function handleAdd() {
     if (!selectedSub || selectedServiceIds.size === 0 || !scheduledDate) return
     setSaving(true)
     try {
-      const jobsToCreate: Array<{
-        serviceName: string
-        scheduledDate: string
-        subscriptionId: string
-      }> = []
+      const jobsToCreate: Array<{ serviceName: string; scheduledDate: string }> = []
 
-      for (const svc of selectedServices) {
-        const days = frequencyToDays(svc.frequency)
-        const dates = (days && endDate && endDate > scheduledDate)
-          ? generateOccurrences(scheduledDate, endDate, days)
-          : [scheduledDate]
-
+      for (const { svc, dates } of schedulePreview) {
         for (const date of dates) {
-          jobsToCreate.push({
-            serviceName: svc.serviceName,
-            scheduledDate: date,
-            subscriptionId: selectedSub.id,
-          })
+          jobsToCreate.push({ serviceName: svc.serviceName, scheduledDate: date })
         }
       }
 
-      // Batch-create all jobs sequentially to avoid overwhelming the API
+      // Create all jobs sequentially
       for (const j of jobsToCreate) {
         await apiRequest('POST', '/jobs', {
           serviceName: j.serviceName,
           jobType: 'subscription',
-          subscriptionId: j.subscriptionId,
+          subscriptionId: selectedSub.id,
           contactId: (selectedSub as any).contactId ?? null,
           customerName: selectedSub.customerName,
           customerAddress: selectedSub.customerAddress,
@@ -1415,10 +1406,8 @@ function AddSubVisitSheet({
       }
 
       toast({
-        title: `${jobsToCreate.length} visit${jobsToCreate.length !== 1 ? 's' : ''} scheduled`,
-        description: endDate
-          ? `${selectedServices.length} service${selectedServices.length !== 1 ? 's' : ''} — recurring from ${scheduledDate} through ${endDate}`
-          : `Added for ${scheduledDate}`,
+        title: `${totalJobCount} visits scheduled`,
+        description: `${selectedServices.length} service${selectedServices.length !== 1 ? 's' : ''} through ${throughDate}`,
       })
       onCreated()
       onClose()
@@ -1502,47 +1491,37 @@ function AddSubVisitSheet({
                 ))}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs">First Visit Date *</Label>
-                  <Input type="date" className="mt-1 min-h-[44px]" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
-                </div>
-                <div>
-                  <Label className="text-xs">Schedule Through <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                  <Input
-                    type="date"
-                    className="mt-1 min-h-[44px]"
-                    value={endDate}
-                    min={scheduledDate || undefined}
-                    onChange={e => setEndDate(e.target.value)}
-                  />
-                </div>
+              <div>
+                <Label className="text-xs">First Visit Date *</Label>
+                <Input type="date" className="mt-1 min-h-[44px]" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
               </div>
 
-              {/* Occurrence preview */}
-              {occurrencePreview && occurrencePreview.length > 0 && (
-                <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 space-y-1.5">
+              {/* Auto-schedule preview — shows as soon as a date is chosen */}
+              {schedulePreview.length > 0 && scheduledDate && (
+                <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 space-y-2">
                   <p className="text-xs font-semibold text-primary">
-                    📅 {totalJobCount} visit{totalJobCount !== 1 ? 's' : ''} will be created
+                    📅 {totalJobCount} visits auto-generated through {throughDate}
                   </p>
-                  {occurrencePreview.map(({ svc, dates, days }) => (
-                    <p key={svc.id} className="text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">{svc.serviceName}</span>
-                      {' — '}
-                      {days ? `every ${days} day${days !== 1 ? 's' : ''}` : 'single visit'}
-                      {' · '}{dates.length} occurrence{dates.length !== 1 ? 's' : ''}
-                    </p>
-                  ))}
-                  {occurrencePreview.some(p => !p.days) && (
-                    <p className="text-[10px] text-amber-600">⚠ Some services have unrecognised frequencies — one visit will be created for those.</p>
+                  {schedulePreview.map(({ svc, dates, days }) => {
+                    const preview5 = dates.slice(0, 5)
+                    return (
+                      <div key={svc.id}>
+                        <p className="text-xs font-medium text-foreground">{svc.serviceName}</p>
+                        <p className="text-[10px] text-muted-foreground mb-0.5">
+                          {days ? svc.frequency : 'Frequency unrecognised — 1 visit'}
+                          {' · '}{dates.length} total
+                        </p>
+                        <p className="text-[10px] text-muted-foreground font-mono">
+                          {preview5.map(d => new Date(d + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })).join(' · ')}
+                          {dates.length > 5 ? ` · +${dates.length - 5} more` : ''}
+                        </p>
+                      </div>
+                    )
+                  })}
+                  {schedulePreview.some(p => !p.days) && (
+                    <p className="text-[10px] text-amber-600">⚠ Unrecognised frequency — add it to the service in the Subscriptions tab to enable auto-recurrence.</p>
                   )}
                 </div>
-              )}
-
-              {!endDate && selectedServices.length > 0 && scheduledDate && (
-                <p className="text-xs text-muted-foreground">
-                  💡 Add a "Schedule Through" date to auto-generate the full recurring schedule.
-                </p>
               )}
               <div>
                 <Label className="text-xs">Time Window</Label>
