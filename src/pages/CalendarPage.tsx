@@ -1278,6 +1278,32 @@ function AddServiceSheet({
 
 // ── Add Sub Visit Sheet ───────────────────────────────────────────────────────
 
+// ── Frequency → interval in days ─────────────────────────────────────────────
+function frequencyToDays(freq: string): number | null {
+  const f = (freq ?? '').toLowerCase().replace(/[-–]/g, ' ')
+  if (f.includes('bi weekly') || f.includes('biweekly') || f.includes('every 2 week') || f.includes('2 week')) return 14
+  if (f.includes('weekly') || f === 'weekly') return 7
+  if (f.includes('every 4 week') || f.includes('4 week')) return 28
+  if (f.includes('every 6 week') || f.includes('6 week')) return 42
+  if (f.includes('every 8 week') || f.includes('8 week')) return 56
+  if (f.includes('monthly') || f === 'monthly') return 30
+  if (f.includes('quarterly') || f.includes('every 3 month')) return 91
+  if (f.includes('annual') || f.includes('yearly') || f.includes('per year')) return 365
+  return null
+}
+
+// Generate ISO date strings for all occurrences between start and end (inclusive)
+function generateOccurrences(startDate: string, endDate: string, intervalDays: number): string[] {
+  const dates: string[] = []
+  const end = new Date(endDate + 'T12:00:00')
+  let cur = new Date(startDate + 'T12:00:00')
+  while (cur <= end && dates.length < 200) { // 200 cap as safety
+    dates.push(cur.toISOString().slice(0, 10))
+    cur = new Date(cur.getTime() + intervalDays * 24 * 60 * 60 * 1000)
+  }
+  return dates
+}
+
 function AddSubVisitSheet({
   open, onClose, defaultDate, onCreated,
 }: {
@@ -1291,6 +1317,7 @@ function AddSubVisitSheet({
   const [selectedSub, setSelectedSub] = useState<Subscription | null>(null)
   const [selectedServiceIds, setSelectedServiceIds] = useState<Set<string>>(new Set())
   const [scheduledDate, setScheduledDate] = useState(defaultDate)
+  const [endDate, setEndDate] = useState('')
   const [scheduledWindow, setScheduledWindow] = useState('anytime')
   const [notes, setNotes] = useState('')
   const [saving, setSaving] = useState(false)
@@ -1298,6 +1325,7 @@ function AddSubVisitSheet({
   useEffect(() => {
     if (open) {
       setScheduledDate(defaultDate)
+      setEndDate('')
       setSelectedSub(null)
       setSubSearch('')
       setSelectedServiceIds(new Set())
@@ -1327,26 +1355,71 @@ function AddSubVisitSheet({
     })
   }
 
+  // Preview: compute occurrences for selected services
+  const selectedServices = selectedSub?.services.filter(s => selectedServiceIds.has(s.id)) ?? []
+
+  // Occurrence preview per service (only when endDate is set)
+  const occurrencePreview = useMemo(() => {
+    if (!scheduledDate || !endDate || endDate <= scheduledDate) return null
+    return selectedServices.map(svc => {
+      const days = frequencyToDays(svc.frequency)
+      const dates = days ? generateOccurrences(scheduledDate, endDate, days) : [scheduledDate]
+      return { svc, dates, days }
+    })
+  }, [selectedServices, scheduledDate, endDate])
+
+  const totalJobCount = occurrencePreview
+    ? occurrencePreview.reduce((n, p) => n + p.dates.length, 0)
+    : selectedServices.length  // without endDate: one job per service
+
   async function handleAdd() {
-    if (!selectedSub || selectedServiceIds.size === 0) return
+    if (!selectedSub || selectedServiceIds.size === 0 || !scheduledDate) return
     setSaving(true)
     try {
-      const services = selectedSub.services.filter(s => selectedServiceIds.has(s.id))
-      await Promise.all(services.map(svc =>
-        apiRequest('POST', '/jobs', {
-          serviceName: svc.serviceName,
-          jobType: 'one_time',
-          subscriptionId: selectedSub.id,
+      const jobsToCreate: Array<{
+        serviceName: string
+        scheduledDate: string
+        subscriptionId: string
+      }> = []
+
+      for (const svc of selectedServices) {
+        const days = frequencyToDays(svc.frequency)
+        const dates = (days && endDate && endDate > scheduledDate)
+          ? generateOccurrences(scheduledDate, endDate, days)
+          : [scheduledDate]
+
+        for (const date of dates) {
+          jobsToCreate.push({
+            serviceName: svc.serviceName,
+            scheduledDate: date,
+            subscriptionId: selectedSub.id,
+          })
+        }
+      }
+
+      // Batch-create all jobs sequentially to avoid overwhelming the API
+      for (const j of jobsToCreate) {
+        await apiRequest('POST', '/jobs', {
+          serviceName: j.serviceName,
+          jobType: 'subscription',
+          subscriptionId: j.subscriptionId,
+          contactId: (selectedSub as any).contactId ?? null,
           customerName: selectedSub.customerName,
           customerAddress: selectedSub.customerAddress,
           customerPhone: selectedSub.customerPhone,
-          scheduledDate,
+          scheduledDate: j.scheduledDate,
           scheduledWindow,
           notes: notes || null,
           status: 'scheduled',
         })
-      ))
-      toast({ title: 'Visit added', description: `${services.length} service${services.length !== 1 ? 's' : ''} added to calendar.` })
+      }
+
+      toast({
+        title: `${jobsToCreate.length} visit${jobsToCreate.length !== 1 ? 's' : ''} scheduled`,
+        description: endDate
+          ? `${selectedServices.length} service${selectedServices.length !== 1 ? 's' : ''} — recurring from ${scheduledDate} through ${endDate}`
+          : `Added for ${scheduledDate}`,
+      })
       onCreated()
       onClose()
     } catch (err) {
@@ -1429,10 +1502,48 @@ function AddSubVisitSheet({
                 ))}
               </div>
 
-              <div>
-                <Label className="text-xs">Date</Label>
-                <Input type="date" className="mt-1 min-h-[44px]" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">First Visit Date *</Label>
+                  <Input type="date" className="mt-1 min-h-[44px]" value={scheduledDate} onChange={e => setScheduledDate(e.target.value)} />
+                </div>
+                <div>
+                  <Label className="text-xs">Schedule Through <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                  <Input
+                    type="date"
+                    className="mt-1 min-h-[44px]"
+                    value={endDate}
+                    min={scheduledDate || undefined}
+                    onChange={e => setEndDate(e.target.value)}
+                  />
+                </div>
               </div>
+
+              {/* Occurrence preview */}
+              {occurrencePreview && occurrencePreview.length > 0 && (
+                <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 space-y-1.5">
+                  <p className="text-xs font-semibold text-primary">
+                    📅 {totalJobCount} visit{totalJobCount !== 1 ? 's' : ''} will be created
+                  </p>
+                  {occurrencePreview.map(({ svc, dates, days }) => (
+                    <p key={svc.id} className="text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">{svc.serviceName}</span>
+                      {' — '}
+                      {days ? `every ${days} day${days !== 1 ? 's' : ''}` : 'single visit'}
+                      {' · '}{dates.length} occurrence{dates.length !== 1 ? 's' : ''}
+                    </p>
+                  ))}
+                  {occurrencePreview.some(p => !p.days) && (
+                    <p className="text-[10px] text-amber-600">⚠ Some services have unrecognised frequencies — one visit will be created for those.</p>
+                  )}
+                </div>
+              )}
+
+              {!endDate && selectedServices.length > 0 && scheduledDate && (
+                <p className="text-xs text-muted-foreground">
+                  💡 Add a "Schedule Through" date to auto-generate the full recurring schedule.
+                </p>
+              )}
               <div>
                 <Label className="text-xs">Time Window</Label>
                 <Select value={scheduledWindow} onValueChange={setScheduledWindow}>
@@ -1455,7 +1566,12 @@ function AddSubVisitSheet({
                 onClick={handleAdd}
                 disabled={saving || selectedServiceIds.size === 0 || !scheduledDate}
               >
-                {saving ? 'Adding…' : `Add ${selectedServiceIds.size} Service${selectedServiceIds.size !== 1 ? 's' : ''} to Calendar`}
+                {saving
+                  ? `Creating ${totalJobCount} visit${totalJobCount !== 1 ? 's' : ''}…`
+                  : totalJobCount > selectedServiceIds.size
+                    ? `Schedule ${totalJobCount} Visits`
+                    : `Add ${selectedServiceIds.size} Service${selectedServiceIds.size !== 1 ? 's' : ''} to Calendar`
+                }
               </Button>
             </>
           )}
