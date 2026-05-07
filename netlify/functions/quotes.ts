@@ -178,12 +178,44 @@ export const handler: Handler = async (event) => {
       const esignUrl = `${siteUrl}/.netlify/functions/esign?token=${encodeURIComponent(quote.accept_token)}`
       const firstName = (quote.customer_name ?? 'there').split(' ')[0]
 
-      const message =
-        `Hi ${firstName}, Knox Exterior Care Co. here! Your quote is ready — follow this link to view. ` +
-        `If you'd like to move forward, simply sign the e-sign at the bottom of the quote, and we'll reach out about getting you on the schedule.\n\n` +
-        `Please reach out to this number with any questions or concerns - thank you for the opportunity to serve!\n\n` +
-        `Automated msg. Reply STOP to opt out.\n\n` +
-        esignUrl
+      // If this is a recurring quote, also generate and include the service agreement link
+      let agreementUrl: string | null = null
+      const isRecurring = quote.quote_type && (
+        quote.quote_type.includes('autopilot') ||
+        quote.quote_type.includes('tcep') ||
+        quote.quote_type.includes('tpc')
+      )
+
+      if (isRecurring) {
+        try {
+          const agreeRes = await fetch(
+            `${siteUrl}/.netlify/functions/agreements?action=generate-from-lead`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                quoteId: id,
+                leadId: quote.lead_id ?? null,
+              }),
+            }
+          )
+          if (agreeRes.ok) {
+            const agreeData = await agreeRes.json() as { signUrl?: string }
+            agreementUrl = agreeData.signUrl ?? null
+          }
+        } catch (agreeErr) {
+          console.error('[quotes/send] Failed to generate service agreement:', agreeErr)
+          // non-fatal — still send the quote
+        }
+      }
+
+      const message = agreementUrl
+        ? `Hi ${firstName}, Knox Exterior Care Co. here! Your quote and service agreement are ready to review and sign:\n\nEstimate: ${esignUrl}\n\nService Agreement: ${agreementUrl}\n\nPlease sign both to get started. Reply STOP to opt out.`
+        : `Hi ${firstName}, Knox Exterior Care Co. here! Your quote is ready — follow this link to view. ` +
+          `If you'd like to move forward, simply sign the e-sign at the bottom of the quote, and we'll reach out about getting you on the schedule.\n\n` +
+          `Please reach out to this number with any questions or concerns - thank you for the opportunity to serve!\n\n` +
+          `Automated msg. Reply STOP to opt out.\n\n` +
+          esignUrl
 
       await sendOpenPhoneSms(apiKey, fromNumber, quote.customer_phone, message)
 
@@ -201,7 +233,7 @@ export const handler: Handler = async (event) => {
           contact_id: updated.contact_id,
           type: 'sms_out',
           summary: `Quote sent via SMS to ${quote.customer_phone}`,
-          metadata: { quoteId: id, esignUrl },
+          metadata: { quoteId: id, esignUrl, agreementUrl: agreementUrl ?? null },
         }) } catch (_e) { /* non-fatal */ }
       }
 

@@ -190,6 +190,11 @@ export interface ServiceAgreement {
   qbInvoiceId: string | null;
   createdAt: string;
   updatedAt: string;
+  quoteId: string | null;
+  leadId: string | null;
+  leadNotes: string | null;
+  customerEmail: string | null;
+  customerPhone: string | null;
 }
 
 // ── Seasonal constants (from original shared/schema.ts) ────────────────
@@ -479,6 +484,11 @@ export function rowToServiceAgreement(r: any): ServiceAgreement {
     qbInvoiceId: r.qb_invoice_id ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    quoteId: r.quote_id ?? null,
+    leadId: r.lead_id ?? null,
+    leadNotes: r.lead_notes ?? null,
+    customerEmail: r.customer_email ?? null,
+    customerPhone: r.customer_phone ?? null,
   };
 }
 

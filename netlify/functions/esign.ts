@@ -366,7 +366,211 @@ function buildQuotePage(opts: {
 
 // ── Full service agreement page ────────────────────────────────────────────
 
-interface ServiceRow { serviceName: string; frequency: string; pricePerMonth: number; description?: string }
+interface CheckedService {
+  label: string
+  checked: boolean
+  modifier: string | null
+  price: string | null
+  frequency: string | null
+  scope: string
+}
+
+// ── Service mapping utility ────────────────────────────────────────────────
+
+function mapLineItemsToServices(
+  lineItems: LineItemData[],
+  isResidential: boolean
+): CheckedService[] {
+  const RES_SERVICES: Array<{ label: string; keywords: string[]; scope: string }> = [
+    {
+      label: 'Lawn Care / Mowing',
+      keywords: ['lawn', 'mow', 'mowing', 'grass', 'turf', 'cut grass', 'cutting'],
+      scope: 'Routine mowing of accessible turf, trimming along edges/obstacles, edging along hard surfaces as needed, and blowing clippings off hardscapes; excludes major grading, sod installation, or large one-time cleanups.',
+    },
+    {
+      label: 'Window Cleaning (Exterior)',
+      keywords: ['window', 'glass door'],
+      scope: 'Cleaning of safely reachable exterior windows and glass doors using standard tools; excludes high-access windows requiring special equipment, interior glass, and storm windows unless separately noted.',
+    },
+    {
+      label: 'Exterior House Wash / Pressure Washing',
+      keywords: ['pressure', 'wash', 'soft wash', 'house wash', 'power wash', 'exterior clean'],
+      scope: 'Soft-wash or low-pressure cleaning of designated exterior surfaces as agreed; excludes roofs, unsafe areas, or surfaces not specified in writing.',
+    },
+    {
+      label: 'Trash / Recycling Bin Cleaning',
+      keywords: ['trash', 'bin', 'recycling', 'garbage'],
+      scope: 'Cleaning and deodorizing standard residential trash/recycling bins to remove typical dirt and organic buildup; excludes hazardous waste, chemicals, or heavy contamination.',
+    },
+    {
+      label: 'Pet Waste Cleanup',
+      keywords: ['pet', 'waste', 'dog', 'poop'],
+      scope: 'Picking up of pet waste in exterior yard areas of property. Waste will be disposed of off-site, customer understands that price may increase or decrease depending on number of animals. Price reflected here is good for the number of animals owned at the time of this agreement.',
+    },
+    {
+      label: 'Exterior Inspection & Minor Tune-Ups',
+      keywords: ['inspection', 'tune', 'handyman', 'check'],
+      scope: 'Periodic visual inspection of exterior elements and quick minor adjustments (tightening loose hardware, basic door/hinge tweaks, simple re-securing tasks) using hand tools; excludes structural repairs, painting, electrical, roofing, plumbing, or any work requiring permits or specialty trades.',
+    },
+    {
+      label: 'Dryer Vent Cleaning',
+      keywords: ['dryer', 'vent'],
+      scope: 'Cleaning of primary dryer vent run from accessible connection points to remove lint buildup; excludes appliance disassembly, cutting into walls, or HVAC modifications.',
+    },
+    {
+      label: 'Gutter Cleaning',
+      keywords: ['gutter', 'downspout'],
+      scope: 'Removal of debris from accessible gutters/downspouts using ladders/tools where safe; excludes roof-walking, major repairs, and work requiring special equipment unless separately agreed.',
+    },
+    {
+      label: 'Seasonal Ice Prevention (Salting Concrete)',
+      keywords: ['salt', 'ice', 'winter', 'snow prevention', 'de-ice'],
+      scope: 'Up to a set number of salt applications per winter on designated walkways/entries as requested by customer during snow/ice conditions; reduces but does not eliminate slip risk; customer remains responsible for overall site safety.',
+    },
+    {
+      label: 'Landscape / Mulch Refresh',
+      keywords: ['mulch', 'landscape', 'bed', 'flower bed', 'landscaping'],
+      scope: 'Periodic refresh of existing beds (mulch or similar) and basic lawn treatment as agreed; quantities and specific products adjusted to property size and may be itemized separately.',
+    },
+  ]
+
+  const COMM_SERVICES: Array<{ label: string; keywords: string[]; scope: string }> = [
+    {
+      label: 'Grounds Maintenance / Lawn Care',
+      keywords: ['lawn', 'mow', 'mowing', 'grass', 'turf', 'grounds', 'cut grass', 'cutting'],
+      scope: 'Routine mowing of designated turf, trimming around obstacles, edging along hard surfaces, and blowing debris from walks/curb lines; excludes redesign, large-scale landscaping, or grading unless separately quoted.',
+    },
+    {
+      label: 'Exterior Window Cleaning',
+      keywords: ['window', 'glass door'],
+      scope: 'Cleaning of designated, safely reachable exterior windows/doors; excludes upper stories or special-access work requiring lifts or rope access unless separately specified.',
+    },
+    {
+      label: 'Pressure Washing',
+      keywords: ['pressure', 'wash', 'soft wash', 'power wash', 'exterior clean'],
+      scope: 'Cleaning of agreed exterior surfaces (e.g., sidewalks, entries, curbs) using appropriate pressure/softwash methods; excludes building facades or roofs unless clearly written into scope.',
+    },
+    {
+      label: 'Parking Lot Sweeping',
+      keywords: ['parking', 'sweep', 'lot'],
+      scope: 'Sweeping or blowing of accessible parking lot surfaces and curbs to remove typical loose debris, trash, and leaves; excludes oil stain removal, paint removal, and structural asphalt/concrete repairs.',
+    },
+    {
+      label: 'Graffiti Removal',
+      keywords: ['graffiti'],
+      scope: 'Removal or reduction of graffiti from designated surfaces using appropriate methods; results may vary based on material and severity; structural repairs or repainting are excluded unless separately quoted.',
+    },
+    {
+      label: 'Dumpster Enclosure Cleanup',
+      keywords: ['dumpster', 'enclosure'],
+      scope: 'Cleaning of dumpster pad and enclosure surfaces to remove typical grime; excludes hazardous waste handling, grease trap cleaning, or structural repairs.',
+    },
+    {
+      label: 'Sign Cleaning / Sign Maintenance',
+      keywords: ['sign'],
+      scope: 'Cleaning of exterior building/monument signs and basic minor maintenance (tightening hardware, replacing accessible bulbs where provided); excludes rewiring, fabrication, rebranding, or structural sign work.',
+    },
+    {
+      label: 'Solar Panel Cleaning',
+      keywords: ['solar', 'panel'],
+      scope: 'Surface cleaning of accessible solar panels to remove dust/pollen/buildup using non-abrasive methods; excludes electrical work, panel repair, roof repair, or special-safety systems unless separately agreed.',
+    },
+    {
+      label: 'Exterior Inspection with Handyman Tune-Ups',
+      keywords: ['inspection', 'tune', 'handyman', 'check'],
+      scope: 'Periodic exterior inspection of building and grounds with small handyman-style adjustments (tightening loose hardware, simple re-securing tasks, replacing accessible bulbs); excludes structural work, roofing, electrical, plumbing, HVAC, painting, or any specialty trade work.',
+    },
+    {
+      label: 'Seasonal Ice Prevention (Salting Concrete)',
+      keywords: ['salt', 'ice', 'winter', 'snow prevention', 'de-ice'],
+      scope: 'Up to a set number of salt applications per winter on designated walkways/entries/critical areas when requested by client during snow/ice conditions; reduces but does not eliminate slip risk; client remains responsible for premises safety and compliance.',
+    },
+    {
+      label: 'On-Call Snow Response',
+      keywords: ['snow response', 'snow removal', 'snow plow'],
+      scope: 'Response to client-initiated snow/ice service requests as route and weather allow; no guaranteed response time unless separately agreed in writing.',
+    },
+    {
+      label: 'Light Exterior Carpentry / Repair',
+      keywords: ['carpentry', 'repair', 'trim', 'wood'],
+      scope: 'Minor non-structural exterior repairs within KECC\'s capabilities (e.g., small trim fixes, simple re-secures) as described in notes; excludes structural work, major repairs, or code-permitted trades.',
+    },
+  ]
+
+  const services = isResidential ? RES_SERVICES : COMM_SERVICES
+  const result: CheckedService[] = []
+  const matchedLineItems = new Set<number>()
+
+  for (const svc of services) {
+    const matchIdx = lineItems.findIndex((li, idx) => {
+      if (matchedLineItems.has(idx)) return false
+      const name = (li.serviceName ?? '').toLowerCase()
+      return svc.keywords.some(kw => name.includes(kw))
+    })
+
+    if (matchIdx >= 0) {
+      matchedLineItems.add(matchIdx)
+      const li = lineItems[matchIdx]
+      const price = li.monthlyAmount ?? li.lineTotal
+      result.push({
+        label: svc.label,
+        checked: true,
+        modifier: li.description ?? null,
+        price: price ? `$${Number(price).toFixed(2)}/mo` : null,
+        frequency: null,
+        scope: svc.scope,
+      })
+    } else {
+      result.push({
+        label: svc.label,
+        checked: false,
+        modifier: null,
+        price: null,
+        frequency: null,
+        scope: svc.scope,
+      })
+    }
+  }
+
+  // Any unmatched line items → Other / Custom Service
+  const unmatched = lineItems.filter((_, i) => !matchedLineItems.has(i))
+  if (unmatched.length > 0) {
+    const customDesc = unmatched
+      .map(li => `${li.serviceName ?? 'Custom Service'}${(li.monthlyAmount || li.lineTotal) ? ` — $${Number(li.monthlyAmount ?? li.lineTotal).toFixed(2)}/mo` : ''}`)
+      .join('; ')
+    result.push({
+      label: 'Other / Custom Service',
+      checked: true,
+      modifier: customDesc,
+      price: null,
+      frequency: null,
+      scope: isResidential
+        ? 'Any additional service specifically described here and agreed in writing by KECC and customer.'
+        : 'Any additional service specifically described here and agreed in writing by KECC and client.',
+    })
+  } else {
+    result.push({
+      label: 'Other / Custom Service',
+      checked: false,
+      modifier: null,
+      price: null,
+      frequency: null,
+      scope: isResidential
+        ? 'Any additional service specifically described here and agreed in writing by KECC and customer.'
+        : 'Any additional service specifically described here and agreed in writing by KECC and client.',
+    })
+  }
+
+  return result
+}
+
+function detectPlanType(quoteType: string | null): 'autopilot' | 'tcep' | 'tpc' {
+  const qt = (quoteType ?? '').toLowerCase()
+  if (qt.includes('autopilot')) return 'autopilot'
+  if (qt.includes('tcep')) return 'tcep'
+  if (qt.includes('tpc')) return 'tpc'
+  return 'autopilot'
+}
 
 function buildFullAgreementPage(opts: {
   token: string
@@ -376,112 +580,85 @@ function buildFullAgreementPage(opts: {
   companyPhone: string | null
   companyEmail: string | null
   logoUrl: string | null
+  // Customer/Business info
   customerName: string
   businessName: string | null
-  repName: string | null      // commercial: authorized rep
+  repName: string | null
   repTitle: string | null
   serviceAddress: string | null
   billingAddress: string | null
   email: string | null
   phone: string | null
   accessNotes: string | null
+  // Plan
+  planType: 'autopilot' | 'tcep' | 'tpc'
   monthlyRate: number
-  startDate: string | null
-  services: ServiceRow[]
+  agreementDate: string
+  serviceStartDate: string
+  planReviewDate: string
+  // Services
+  checkedServices: CheckedService[]
+  // Lead notes
+  leadNotes: string | null
+  // Signatures
+  keccSigData: string | null
   alreadySigned: boolean
   signedAt: string | null
+  signerPrintedName: string | null
+  signatureData: string | null
+  funcUrl: string
 }): string {
   const {
-    token, isResidential, quoteType, companyName, companyPhone, companyEmail, logoUrl,
+    token, isResidential, companyName, companyPhone, companyEmail, logoUrl,
     customerName, businessName, repName, repTitle,
     serviceAddress, billingAddress, email, phone, accessNotes,
-    monthlyRate, startDate, services, alreadySigned, signedAt,
+    planType, monthlyRate, agreementDate, serviceStartDate, planReviewDate,
+    checkedServices, leadNotes,
+    keccSigData, alreadySigned, signedAt, signerPrintedName, signatureData,
+    funcUrl,
   } = opts
 
-  const qt = (quoteType ?? '').toLowerCase()
-  const isAutopilot = qt.includes('autopilot')
-  // TCEP = Total Care Exterior Plan (includes 'tcep' in type)
-  // TPC  = Total Property Care (includes 'tpc' but not 'tcep', or explicit _tpc suffix)
-  const isTCEP = qt.includes('tcep')
-  const isTPC  = qt.includes('_tpc') || (qt.includes('tpc') && !qt.includes('tcep'))
-  const planLabel = isAutopilot ? 'One-Service Autopilot' : isTCEP ? 'Total Care Exterior Plan (TCEP)' : isTPC ? 'Total Property Care (TPC)' : ''
-  const today = new Date()
-  const agreementDate = today.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
-  const reviewDate = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate())
-    .toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+  const isAutopilot = planType === 'autopilot'
+  const isTCEP = planType === 'tcep'
+  const isTPC = planType === 'tpc'
 
-  const logoHtml = logoUrl
-    ? `<img src="${esc(logoUrl)}" alt="${esc(companyName)}" style="max-height:52px;max-width:130px;object-fit:contain;display:block;margin-bottom:6px;">`
-    : ''
+  // ── Services checklist rows ────────────────────────────────────────────────
+  const serviceRowsHtml = checkedServices.map(svc => {
+    const checkHtml = svc.checked
+      ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;background:#16a34a;border-radius:3px;color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">✓</span>`
+      : `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:2px solid #d1d5db;border-radius:3px;flex-shrink:0;"></span>`
+    const modifierHtml = svc.checked && (svc.modifier || svc.price || svc.frequency)
+      ? `<div style="margin-top:3px;font-size:11px;color:#374151;"><span style="font-weight:600;">Modifier / Price / Frequency:</span> ${esc([svc.price, svc.frequency, svc.modifier].filter(Boolean).join(' · '))}</div>`
+      : ''
+    return `<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid #f3f4f6;align-items:flex-start;">
+      <div style="margin-top:2px;">${checkHtml}</div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:13px;font-weight:${svc.checked ? '700' : '500'};color:${svc.checked ? '#111827' : '#6b7280'};">${esc(svc.label)}</div>
+        ${modifierHtml}
+        <div style="margin-top:3px;font-size:10px;color:#9ca3af;line-height:1.4;">${esc(svc.scope)}</div>
+      </div>
+    </div>`
+  }).join('')
 
-  // Service rows
-  const serviceRowsHtml = services.map(s => `
-    <tr>
-      <td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;font-size:13px;font-weight:600;">${esc(s.serviceName)}</td>
-      <td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;font-size:12px;color:#555;">${esc(s.description ?? '')}</td>
-      <td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;font-size:13px;text-align:center;">${esc(s.frequency)}</td>
-      <td style="padding:8px 6px;border-bottom:1px solid #f0f0f0;font-size:13px;font-weight:600;text-align:right;">${fmtMoney(s.pricePerMonth)}/mo</td>
-    </tr>`).join('')
+  // ── KECC signature block ───────────────────────────────────────────────────
+  const keccSigHtml = keccSigData
+    ? `<img src="${esc(keccSigData)}" alt="KECC Signature" style="max-height:60px;max-width:220px;display:block;margin-bottom:4px;">`
+    : `<span style="font-family:'Brush Script MT',cursive;font-size:28px;color:#111827;display:block;margin-bottom:4px;">Nicholas G Dunn</span>`
 
-  // Legal text — Bonuses & Guarantees (plan-specific)
-  const autopilotBonuses = `
-<p style="margin:10px 0 4px;font-size:13px;font-weight:700;color:#1a1a1a;">One-Service Autopilot — Guarantees &amp; Bonuses</p>
-<p style="margin:0 0 6px;font-size:12px;color:#374151;"><strong>"Zero-Risk First Month"</strong> — For the first month of a new One-Service Autopilot plan, if the ${isResidential ? 'customer' : 'client'} is dissatisfied after KECC performs the first scheduled visit(s) and notifies KECC in writing within 7 days, KECC will refund or credit up to one month of subscription charges and/or cancel the plan. Applies only to workmanship within KECC's control; does not apply to outcomes affected by weather, access issues, pre-existing conditions, or unrealistic expectations.</p>
-<p style="margin:0 0 6px;font-size:12px;color:#374151;"><strong>"Show Up or It's Free"</strong> — If KECC fails to make a reasonable attempt to perform scheduled recurring service during the agreed window for reasons within KECC's control, or does not reschedule within 24 hours, KECC will credit or refund up to one month of subscription charges. Does not apply where service is delayed by lack of access, unsafe conditions, customer-requested changes, severe weather, or events outside KECC's control.</p>
-<p style="margin:0 0 6px;font-size:12px;color:#374151;"><strong>"Loyalty Price Lock"</strong> — KECC will honor the recurring service rate for 12 months after this agreement is ratified, for the originally quoted scope and typical property conditions. KECC may adjust pricing with written notice if property size, scope, labor/material costs, or regulatory requirements materially change. The price lock applies to recurring service fees only.</p>
-<p style="margin:0 0 4px;font-size:12px;color:#374151;"><em>Bonuses included:</em> Property Shield Report · Curb Appeal Photo Set · Neighbor Referral Credit ($100 applied to one future invoice) · Service Reminders.</p>
-<p style="margin:0 0 8px;font-size:11px;color:#6b7280;">Bonuses have no cash value, are non-transferable, and may not be redeemed for cash or combined with other offers except at KECC's discretion. One-Service Autopilot plans do not receive bonuses reserved for higher-tier plans unless expressly stated in writing.</p>`
-
-  const tcepTpcBonuses = `
-<p style="margin:10px 0 4px;font-size:13px;font-weight:700;color:#1a1a1a;">${isTCEP ? 'Total Care Exterior Plan (TCEP)' : 'Total Property Care (TPC)'} — Guarantees &amp; Bonuses</p>
-<p style="margin:0 0 4px;font-size:12px;color:#374151;">Includes all One-Service Autopilot guarantees and bonuses (Zero-Risk First Month, Show Up or It's Free, Loyalty Price Lock, Property Shield Report, Curb Appeal Photo Set, Neighbor Referral Credit, Service Reminders) on a broader basis, plus:</p>
-<p style="margin:0 0 6px;font-size:12px;color:#374151;"><strong>"Beat Any Comparable Quote"</strong> — KECC will attempt to beat or match a current written quote from another insured provider for comparable recurring exterior services at the same property. ${isResidential ? 'Customer' : 'Client'} must provide a quote dated within 30 days that clearly describes services and frequency. KECC alone decides comparability and is not required to match prices that are unsustainably low, promotional, or inconsistent with KECC's safety or insurance standards.</p>
-<p style="margin:0 0 6px;font-size:12px;color:#374151;"><strong>"Seasonal Plan Adjustments"</strong> — KECC may shift tasks seasonally (e.g., more mowing in growth season, more ice/leaf work in fall/winter) while keeping the overall annual service level and blended subscription value roughly consistent. Routine seasonal adjustments do not change the agreed monthly rate unless a specific service is explicitly paused for more than one month.</p>
-<p style="margin:0 0 8px;font-size:12px;color:#374151;"><strong>"Priority Scheduling"</strong> — ${isResidential ? 'Customer\'s' : 'Client\'s'} property receives preferred placement in KECC's routing and rescheduling, especially after weather delays. This is a relative preference only and does not guarantee specific dates or times. All services remain subject to weather, safety, staffing, and routing constraints.</p>
-<p style="margin:0 0 8px;font-size:11px;color:#6b7280;">All bonuses and guarantees: (1) require the client to be active and current on payments; (2) do not expand core service scope; (3) are provided in reasonable quantities determined by KECC; (4) have no cash value and are non-transferable; (5) may be adjusted on a prospective basis with prior notice of any already-earned benefits honored.</p>`
-
-  const bonusesSection = isAutopilot ? autopilotBonuses : tcepTpcBonuses
-
-  const legalText = `
-<div style="background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-top:20px;font-size:12px;color:#374151;line-height:1.6;">
-
-  <p style="margin:0 0 10px;font-size:14px;font-weight:700;color:#1a1a1a;">Bonuses and Guarantees — Plan Tiers, Definitions, and Limitations</p>
-  ${bonusesSection}
-
-  <hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0;"/>
-  <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:#1a1a1a;">Billing, Term &amp; Proration</p>
-  <p style="margin:0 0 8px;">Services are billed on a recurring subscription basis, in advance, starting on or around the first scheduled service window. The monthly rate is a blended/averaged amount reflecting all included services over the plan term and is not tied to any single visit's price. Either party may cancel at any time with written or emailed notice. Upon cancellation, KECC will calculate the value of services already delivered at KECC's then-current standard (non-subscriber) rates and compare that to subscription payments collected. If delivered service value exceeds payments collected, the ${isResidential ? 'customer' : 'client'} agrees to pay a pro-rated final balance for the difference. If payments collected exceed services delivered, KECC will refund or credit the difference. Scope and pricing may be adjusted with at least 30 days' written notice if property conditions, labor costs, materials, or service requirements materially change.</p>
-
-  <hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0;"/>
-  <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:#1a1a1a;">Access, Scheduling &amp; Safety</p>
-  <p style="margin:0 0 8px;">${isResidential ? 'Customer' : 'Client'} will provide reasonable safe access (unlocked gates, codes, removal of aggressive ${isResidential ? 'pets' : 'animals'}, etc.). KECC schedules services during normal business hours based on routing efficiency and weather. KECC may skip, modify, or reschedule services if unsafe or impractical conditions exist (severe weather, unsafe ladder/roof access, hazardous materials, blocked areas, active construction). Skipped items may be rolled into a future visit where practical, as pricing is based on blended subscription value, not per-visit charges. KECC is not responsible for loss of business or consequential damages related to normal schedule changes or delays.</p>
-
-  <hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0;"/>
-  <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:#1a1a1a;">Scope Limitations &amp; Exclusions</p>
-  <p style="margin:0 0 8px;">This agreement covers only services explicitly listed in the Included Recurring Services section above. Work requiring specialty trades (roofing, structural repairs, electrical, plumbing, HVAC, major concrete/asphalt repair${!isResidential ? ', sign fabrication' : ''}) is outside scope unless added in writing. KECC does not include hazardous material cleanup, emergency response, or remediation unless specifically written into the plan. KECC is not responsible for pre-existing damage, existing defects, failing materials, or hidden conditions. KECC is not responsible for damage to underground utilities, unmarked obstacles, or items hidden in turf or work areas not disclosed (${isResidential ? 'hoses, cables, toys, shallow irrigation heads' : 'irrigation heads, cables, buried obstacles'}, etc.). Light wear and minor disturbance of delicate surfaces may occur despite reasonable care.</p>
-
-  <hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0;"/>
-  <p style="margin:0 0 6px;font-size:13px;font-weight:700;color:#1a1a1a;">Cancellation</p>
-  <p style="margin:0 0 8px;">This agreement defines scope, expectations, schedule, and pricing. It is a discretionary service agreement, not a fixed-term long-term contract. The ${isResidential ? 'customer' : 'client'} may cancel at any time, subject only to the pro-rated balancing of services delivered vs. payments described in the Billing section above.</p>
-
-  <hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0;"/>
-  <p style="margin:0 0 4px;font-size:12px;color:#374151;"><strong>${isResidential ? 'Customer' : 'Client'} Acknowledgment:</strong> ${isResidential ? 'Customer' : 'Client'} acknowledges that the services, frequencies, and pricing listed in this agreement represent the complete scope of recurring services, unless amended in writing.</p>
-</div>`
-
-  // Signature section
-  const funcUrl = `/.netlify/functions/esign?token=${encodeURIComponent(token)}`
+  // ── Customer signature section ─────────────────────────────────────────────
   const sigLabel = isResidential ? '✓  I Agree & Sign' : '✓  I Agree & Sign as Authorized Representative'
+  const downloadBtn = `<button onclick="window.print()" class="no-print" style="display:inline-flex;align-items:center;gap:8px;margin-top:16px;padding:12px 24px;background:#fff;color:#166534;border:2px solid #16a34a;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">Download PDF Copy</button>`
 
-  const agrDownloadBtn = `<button onclick="window.print()" class="no-print" style="display:inline-flex;align-items:center;gap:8px;margin-top:16px;padding:12px 24px;background:#fff;color:#166534;border:2px solid #16a34a;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;">📄 Download PDF Copy</button>`
-
-  const signatureSection = alreadySigned
+  const customerSigSection = alreadySigned
     ? `<div style="border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0;padding:20px 16px;display:flex;gap:12px;align-items:flex-start;">
-        <span style="font-size:24px;line-height:1;">✅</span>
+        <span style="font-size:24px;line-height:1;">&#x2705;</span>
         <div style="flex:1;">
           <p style="margin:0 0 3px;font-size:14px;font-weight:700;color:#166534;">Signed — ${esc(customerName)}</p>
-          ${signedAt ? `<p style="margin:0 0 3px;font-size:12px;color:#15803d;">${fmtDateLong(signedAt)}</p>` : ''}
+          ${signerPrintedName ? `<p style="margin:0 0 3px;font-size:12px;color:#15803d;">Printed name: ${esc(signerPrintedName)}</p>` : ''}
+          ${signedAt ? `<p style="margin:0 0 3px;font-size:12px;color:#15803d;">${new Date(signedAt).toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})} at ${new Date(signedAt).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZoneName:'short'})}</p>` : ''}
+          ${signatureData ? `<img src="${esc(signatureData)}" alt="Customer Signature" style="max-height:60px;max-width:220px;display:block;margin:8px 0 4px;">` : ''}
           <p style="margin:0 0 12px;font-size:11px;color:#16a34a;">Electronic signature on file · Legally binding</p>
-          ${agrDownloadBtn}
+          ${downloadBtn}
         </div>
       </div>`
     : `<div id="sigCard">
@@ -491,6 +668,17 @@ function buildFullAgreementPage(opts: {
         <p style="margin:0 0 14px;font-size:12px;color:#6b7280;">
           I have read the full agreement above and agree to its terms. Draw your signature below.
         </p>
+        <div style="margin-bottom:10px;">
+          <label style="display:block;font-size:11px;font-weight:600;color:#6b7280;margin-bottom:4px;">${isResidential ? 'Printed Name' : 'Printed Name'}</label>
+          <input id="printedNameInput" type="text" placeholder="${isResidential ? 'Your full name' : 'Representative full name'}"
+            style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#111827;background:#fff;outline:none;">
+        </div>
+        ${!isResidential ? `<div style="margin-bottom:10px;">
+          <label style="display:block;font-size:11px;font-weight:600;color:#6b7280;margin-bottom:4px;">Title</label>
+          <input id="titleInput" type="text" placeholder="Your title / role"
+            style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#111827;background:#fff;outline:none;">
+        </div>` : ''}
+        <label style="display:block;font-size:11px;font-weight:600;color:#6b7280;margin-bottom:4px;">Signature</label>
         <div style="position:relative;border:2px solid #d1d5db;border-radius:10px;background:#fff;overflow:hidden;margin-bottom:10px;">
           <canvas id="sigCanvas" style="display:block;cursor:crosshair;touch-action:none;"></canvas>
           <button type="button" id="clearBtn" style="position:absolute;bottom:8px;right:8px;background:#fff;border:1px solid #d1d5db;border-radius:6px;padding:4px 12px;font-size:11px;color:#6b7280;cursor:pointer;">Clear</button>
@@ -505,12 +693,85 @@ function buildFullAgreementPage(opts: {
         </p>
       </div>
       <div id="successCard" style="display:none;border-radius:12px;background:#f0fdf4;border:1px solid #bbf7d0;padding:32px 16px;text-align:center;">
-        <div style="font-size:44px;margin-bottom:12px;">✅</div>
+        <div style="font-size:44px;margin-bottom:12px;">&#x2705;</div>
         <p style="margin:0 0 6px;font-size:16px;font-weight:700;color:#166534;">Thank you, ${esc(customerName)}!</p>
         <p style="margin:0 0 4px;font-size:13px;color:#15803d;">Your agreement has been signed. A link to your signed copy has been sent to your phone.</p>
-        ${agrDownloadBtn}
+        ${downloadBtn}
       </div>
-      ${sigScript(token, sigLabel, funcUrl)}`
+      <script>
+(function(){
+  var TOKEN='${esc(token)}';
+  var FUNC_URL='${esc(funcUrl)}';
+  var canvas=document.getElementById('sigCanvas');
+  var ctx=canvas.getContext('2d');
+  var sigCard=document.getElementById('sigCard');
+  var successCard=document.getElementById('successCard');
+  var drawing=false,hasSig=false;
+  var dpr=window.devicePixelRatio||1;
+
+  function initCanvas(){
+    var w=canvas.parentElement.offsetWidth||320;
+    canvas.width=w*dpr;
+    canvas.height=160*dpr;
+    canvas.style.width=w+'px';
+    canvas.style.height='160px';
+    ctx.scale(dpr,dpr);
+    ctx.strokeStyle='#111827';
+    ctx.lineWidth=2.5;
+    ctx.lineCap='round';
+    ctx.lineJoin='round';
+  }
+  if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',initCanvas);}else{initCanvas();}
+
+  function getPos(e){var r=canvas.getBoundingClientRect();var src=e.touches?e.touches[0]:e;return{x:src.clientX-r.left,y:src.clientY-r.top};}
+  canvas.addEventListener('mousedown',function(e){drawing=true;var p=getPos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);});
+  canvas.addEventListener('mousemove',function(e){if(!drawing)return;var p=getPos(e);ctx.lineTo(p.x,p.y);ctx.stroke();hasSig=true;});
+  canvas.addEventListener('mouseup',function(){drawing=false;});
+  canvas.addEventListener('mouseleave',function(){drawing=false;});
+  canvas.addEventListener('touchstart',function(e){e.preventDefault();drawing=true;var p=getPos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);},{passive:false});
+  canvas.addEventListener('touchmove',function(e){e.preventDefault();if(!drawing)return;var p=getPos(e);ctx.lineTo(p.x,p.y);ctx.stroke();hasSig=true;},{passive:false});
+  canvas.addEventListener('touchend',function(){drawing=false;});
+
+  document.getElementById('clearBtn').addEventListener('click',function(){
+    ctx.clearRect(0,0,canvas.width/dpr,canvas.height/dpr);hasSig=false;
+  });
+
+  document.getElementById('submitBtn').addEventListener('click',function(){
+    var err=document.getElementById('errMsg');
+    var btn=document.getElementById('submitBtn');
+    var nameInput=document.getElementById('printedNameInput');
+    if(!hasSig){err.textContent='Please draw your signature before submitting.';err.style.display='block';return;}
+    if(nameInput&&!nameInput.value.trim()){err.textContent='Please enter your printed name.';err.style.display='block';return;}
+    err.style.display='none';
+    btn.disabled=true;
+    btn.textContent='Submitting…';
+    fetch(FUNC_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({signatureData:canvas.toDataURL('image/png'),printedName:nameInput?nameInput.value.trim():''})
+    })
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.success){
+        sigCard.style.display='none';
+        successCard.style.display='block';
+        window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});
+      } else {
+        err.textContent=d.message||'An error occurred. Please try again.';
+        err.style.display='block';
+        btn.disabled=false;
+        btn.textContent='${esc(sigLabel)}';
+      }
+    })
+    .catch(function(){
+      err.textContent='Network error. Please check your connection and try again.';
+      err.style.display='block';
+      btn.disabled=false;
+      btn.textContent='${esc(sigLabel)}';
+    });
+  });
+})();
+</script>`
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -521,8 +782,8 @@ function buildFullAgreementPage(opts: {
   <style>
     *,*::before,*::after{box-sizing:border-box;}
     body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:#f3f4f6;color:#111827;-webkit-text-size-adjust:100%;}
-    .wrap{max-width:720px;margin:0 auto;padding:16px 12px 40px;}
-    @media(min-width:760px){.wrap{padding:32px 16px 60px;}}
+    .wrap{max-width:760px;margin:0 auto;padding:16px 12px 40px;}
+    @media(min-width:800px){.wrap{padding:32px 16px 60px;}}
     .doc{background:#fff;border-radius:16px;box-shadow:0 2px 20px rgba(0,0,0,.09);overflow:hidden;}
     .sec{padding:20px 24px;border-bottom:1px solid #f0f0f0;}
     .sec:last-child{border-bottom:none;}
@@ -535,6 +796,9 @@ function buildFullAgreementPage(opts: {
     .check-box{width:16px;height:16px;border:2px solid #d1d5db;border-radius:3px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;}
     .check-box.checked{background:#3d6b35;border-color:#3d6b35;}
     .sig-divider{border:none;border-top:2px dashed #e5e7eb;margin:24px 0 20px;}
+    .legal-text{background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:16px;font-size:12px;color:#374151;line-height:1.6;}
+    .legal-text h4{margin:0 0 4px;font-size:13px;font-weight:700;color:#1a1a1a;}
+    .legal-text hr{border:none;border-top:1px solid #e5e7eb;margin:12px 0;}
     @media print{
       .no-print{display:none!important;}
       body{background:#fff;}
@@ -549,44 +813,41 @@ function buildFullAgreementPage(opts: {
   <div class="doc">
 
     <!-- Header -->
-    <div class="sec" style="background:#3d6b35;color:#fff;border-bottom:none;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
-        <div>
-          ${logoHtml}
-          <p style="margin:0;font-size:18px;font-weight:800;color:#fff;">${esc(companyName)}</p>
-          ${companyPhone ? `<p style="margin:2px 0 0;font-size:12px;color:rgba(255,255,255,.8);">${esc(companyPhone)}</p>` : ''}
-          ${companyEmail ? `<p style="margin:2px 0 0;font-size:12px;color:rgba(255,255,255,.8);">${esc(companyEmail)}</p>` : ''}
-        </div>
-        <div style="text-align:right;">
-          <p style="margin:0;font-size:14px;font-weight:700;color:rgba(255,255,255,.9);">${isResidential ? 'Residential' : 'Commercial'} Master Recurring</p>
-          <p style="margin:0;font-size:14px;font-weight:700;color:#fff;">Service Agreement</p>
-        </div>
-      </div>
+    <div class="sec" style="text-align:center;padding:16px 24px 12px;">
+      <p style="margin:0 0 4px;font-size:12px;color:#6b7280;">865-381-3169 | office@knoxexteriorcareco.com | www.knoxexteriorcare.com</p>
+      <p style="margin:0;font-size:18px;font-weight:800;color:#111827;">${isResidential ? 'Residential' : 'Commercial'} Master Recurring Service Agreement</p>
     </div>
 
     <!-- Customer / Business Info -->
     <div class="sec">
       <p class="sec-title">${isResidential ? 'Customer &amp; Property Information' : 'Business &amp; Property Information'}</p>
+      ${isResidential ? `
       <div class="field-row">
-        ${isResidential
-          ? `<div class="field"><label>Customer Name</label><p>${esc(customerName)}</p></div>`
-          : `<div class="field"><label>Business / Client Name</label><p>${esc(businessName || customerName)}</p></div>`
-        }
-        ${isResidential
-          ? `<div class="field"><label>Email</label><p>${esc(email || '—')}</p></div>`
-          : `<div class="field"><label>Authorized Representative</label><p>${esc(repName || customerName)}</p></div>`
-        }
+        <div class="field"><label>Customer Name</label><p>${esc(customerName)}</p></div>
+        <div class="field"><label>Email</label><p>${esc(email || '—')}</p></div>
       </div>
       <div class="field-row">
         <div class="field"><label>Service Address</label><p>${esc(serviceAddress || '—')}</p></div>
-        <div class="field"><label>${isResidential ? 'Phone' : 'Title'}</label><p>${isResidential ? esc(phone || '—') : esc(repTitle || '—')}</p></div>
-      </div>
-      ${!isResidential ? `<div class="field-row">
-        <div class="field"><label>Email</label><p>${esc(email || '—')}</p></div>
         <div class="field"><label>Phone</label><p>${esc(phone || '—')}</p></div>
-      </div>` : ''}
+      </div>
       ${billingAddress ? `<div class="field" style="margin-bottom:10px;"><label>Billing Address (if different)</label><p>${esc(billingAddress)}</p></div>` : ''}
       ${accessNotes ? `<div class="field"><label>Access Instructions / Gate Codes / Notes</label><p style="white-space:pre-wrap;">${esc(accessNotes)}</p></div>` : ''}
+      ` : `
+      <div class="field-row">
+        <div class="field"><label>Business / Client Name</label><p>${esc(businessName || customerName)}</p></div>
+        <div class="field"><label>Authorized Representative Name</label><p>${esc(repName || customerName)}</p></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Title</label><p>${esc(repTitle || '—')}</p></div>
+        <div class="field"><label>Service / Property Address</label><p>${esc(serviceAddress || '—')}</p></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Email</label><p>${esc(email || '—')}</p></div>
+        <div class="field"><label>Phone</label><p>${esc(phone || '—')}</p></div>
+      </div>
+      ${billingAddress ? `<div class="field" style="margin-bottom:10px;"><label>Billing Address (if different)</label><p>${esc(billingAddress)}</p></div>` : ''}
+      ${accessNotes ? `<div class="field"><label>Access Instructions / Gate Codes / Notes</label><p style="white-space:pre-wrap;">${esc(accessNotes)}</p></div>` : ''}
+      `}
     </div>
 
     <!-- Plan Selection -->
@@ -594,65 +855,152 @@ function buildFullAgreementPage(opts: {
       <p class="sec-title">Plan Selection</p>
       <div style="display:flex;flex-wrap:wrap;gap:8px 24px;margin-bottom:14px;">
         <div class="check-row">
-          <div class="check-box ${isAutopilot ? 'checked' : ''}">${isAutopilot ? '✓' : ''}</div>
+          <div class="check-box ${isAutopilot ? 'checked' : ''}">${isAutopilot ? '&#x2713;' : ''}</div>
           <span style="font-size:13px;">One-Service Autopilot</span>
         </div>
         <div class="check-row">
-          <div class="check-box ${isTCEP ? 'checked' : ''}">${isTCEP ? '✓' : ''}</div>
+          <div class="check-box ${isTCEP ? 'checked' : ''}">${isTCEP ? '&#x2713;' : ''}</div>
           <span style="font-size:13px;">Total Care Exterior Plan (TCEP)</span>
         </div>
         <div class="check-row">
-          <div class="check-box ${isTPC ? 'checked' : ''}">${isTPC ? '✓' : ''}</div>
-          <span style="font-size:13px;">Total Property Care (TPC)</span>
+          <div class="check-box ${isTPC ? 'checked' : ''}">${isTPC ? '&#x2713;' : ''}</div>
+          <span style="font-size:13px;">Total Property Command (TPC)</span>
         </div>
       </div>
       <div class="field-row">
         <div class="field"><label>Monthly Rate</label><p style="font-size:18px;font-weight:800;color:#3d6b35;">${fmtMoney(monthlyRate)}<span style="font-size:13px;font-weight:500;color:#6b7280;"> / month</span></p></div>
-        <div class="field"><label>Service Start Date</label><p>${esc(fmtDate(startDate))}</p></div>
+        <div class="field"><label>Service Start Date</label><p>${esc(serviceStartDate)}</p></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Billing Frequency</label><p>Monthly</p></div>
-        <div class="field"><label>Plan Review / Renewal Date</label><p>${esc(reviewDate)}</p></div>
+        <div class="field"><label>Billing Frequency</label>
+          <div class="check-row" style="margin:0;">
+            <div class="check-box checked">&#x2713;</div>
+            <span style="font-size:13px;">Monthly</span>
+          </div>
+        </div>
+        <div class="field"><label>Plan Review / Renewal Date</label><p>${esc(planReviewDate)}</p></div>
       </div>
       <div class="field"><label>Date of Agreement</label><p>${esc(agreementDate)}</p></div>
     </div>
 
-    <!-- Included Services -->
+    <!-- Included Recurring Services -->
     <div class="sec">
       <p class="sec-title">Included Recurring Services</p>
-      <table style="width:100%;border-collapse:collapse;">
-        <thead>
-          <tr style="border-bottom:2px solid #e5e7eb;">
-            <th style="text-align:left;padding:6px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;">Service</th>
-            <th style="text-align:left;padding:6px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;">Description</th>
-            <th style="text-align:center;padding:6px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;">Frequency</th>
-            <th style="text-align:right;padding:6px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:.05em;">$/Month</th>
-          </tr>
-        </thead>
-        <tbody>${serviceRowsHtml}</tbody>
-        <tfoot>
-          <tr style="border-top:2px solid #111827;">
-            <td colspan="3" style="padding:10px 6px;font-size:14px;font-weight:700;text-align:right;">Monthly Total</td>
-            <td style="padding:10px 6px;font-size:14px;font-weight:800;text-align:right;color:#3d6b35;">${fmtMoney(monthlyRate)}/mo</td>
-          </tr>
-        </tfoot>
-      </table>
+      ${serviceRowsHtml}
     </div>
 
-    <!-- Legal Text -->
+    ${leadNotes ? `<!-- Property Notes & Additional Caveats -->
     <div class="sec">
-      ${legalText}
+      <p class="sec-title">Property Notes &amp; Additional Caveats</p>
+      <p style="margin:0 0 8px;font-size:13px;color:#111827;white-space:pre-wrap;">${esc(leadNotes)}</p>
+      <p style="margin:0;font-size:10px;color:#9ca3af;font-style:italic;">The above notes were captured at agreement generation and are incorporated into this agreement's scope context.</p>
+    </div>` : ''}
+
+    <!-- Bonuses and Guarantees -->
+    <div class="sec">
+      <div class="legal-text">
+        <h4 style="margin-bottom:10px;font-size:14px;">Bonuses and Guarantees &#8212; Plan Tiers, Definitions, and Limitations</h4>
+        <p style="margin:0 0 8px;">The bonuses and guarantees offered by Knox Exterior Care Co. (&#8220;KECC&#8221;) are plan-specific. This section defines exactly which benefits apply to each plan type and sets reasonable limits on their use.</p>
+
+        <h4>One-Service Autopilot &#8212; Limited Bonuses and Guarantees</h4>
+        <p style="margin:0 0 6px;">Clients on a One-Service Autopilot plan are eligible for a reduced set of guarantees and bonuses as follows:</p>
+        <p style="margin:0 0 4px;font-weight:600;">Guarantees included with One-Service Autopilot</p>
+        <p style="margin:0 0 6px;"><strong>&#8220;Zero-Risk First Month&#8221;</strong> &#8212; For the first month of a new One-Service Autopilot plan at a given property, if the client is dissatisfied with the recurring service after KECC has performed the first scheduled visit(s) and notifies KECC in writing within a reasonable time (within 7 days of that visit), KECC will refund or credit up to one month of subscription charges for that plan and/or cancel the plan going forward. This guarantee applies only to workmanship and service quality within KECC&#8217;s control and does not apply to outcomes affected by weather, access issues, pre&#8209;existing conditions, or unrealistic expectations.</p>
+        <p style="margin:0 0 6px;"><strong>&#8220;Show Up or It&#8217;s Free&#8221;</strong> &#8212; If KECC fails to make a reasonable attempt to perform the scheduled recurring service during the agreed service window(s) for reasons within KECC&#8217;s control, or does not reschedule a delayed service within 24 hours after the original scheduled date, KECC will credit or refund up to one month of subscription charges for that service. This guarantee does not apply where service is delayed, rescheduled, or prevented by lack of access, unsafe or hazardous conditions, customer-requested changes, severe weather, or other events outside KECC&#8217;s control.</p>
+        <p style="margin:0 0 6px;"><strong>&#8220;Loyalty Price Lock&#8221;</strong> &#8212; KECC will honor the recurring service rate for the One-Service Autopilot plan stable for the originally quoted scope and typical property conditions, for 12 months after the service agreement is ratified. KECC may adjust pricing with written notice if there are material changes in property size or condition, scope of work, labor or material costs, regulatory requirements, or if services are added or removed. The price lock applies to recurring service fees only and does not limit adjustments for one-off or out-of-scope work.</p>
+        <p style="margin:0 0 4px;font-weight:600;">Bonuses included with One-Service Autopilot</p>
+        <p style="margin:0 0 6px;"><strong>&#8220;Property Shield Report&#8221;</strong> &#8212; One-time, high-level written summary of notable exterior conditions and maintenance observations for the property, delivered in a standard format and frequency determined by KECC.</p>
+        <p style="margin:0 0 6px;"><strong>&#8220;Curb Appeal Photo Set&#8221;</strong> &#8212; Periodic exterior photos of key serviced areas (such as entry, frontage, or main visible areas), provided in a reasonable number and format determined by KECC to document appearance and improvements over time.</p>
+        <p style="margin:0 0 6px;"><strong>&#8220;Neighbor Referral Credit&#8221;</strong> &#8212; $100 Credit applied to one future invoice when a new qualifying customer signs up, remains active under KECC&#8217;s then-current criteria, and lists the client as the referrer. Credits are not cash, may be capped in number or value per client, and may not be stacked beyond KECC&#8217;s referral policy.</p>
+        <p style="margin:0 0 6px;"><strong>&#8220;Service Reminders&#8221;</strong> &#8212; Reasonable reminders of upcoming visits using KECC&#8217;s standard communication channels (for example, email, text, phone, or app notifications, as available), subject to system and routing capabilities.</p>
+        <p style="margin:0 0 4px;font-weight:600;">Limitations for One-Service Autopilot</p>
+        <p style="margin:0 0 4px;">One-Service Autopilot plans do not receive any additional bonuses or guarantees reserved for higher-tier plans unless expressly stated in writing.</p>
+        <p style="margin:0 0 4px;">All bonuses are provided in a reasonable, standard format and frequency determined by KECC; they are not unlimited, on-demand, or fully custom deliverables.</p>
+        <p style="margin:0 0 10px;">All bonuses and guarantees have no cash value, are non-transferable, and may not be redeemed for cash or combined with other offers except at KECC&#8217;s discretion.</p>
+
+        <hr/>
+        <h4>Total Care Exterior Plans and Total Property Command &#8212; Full Bonuses and Guarantees</h4>
+        <p style="margin:0 0 6px;">Clients on Total Care Exterior Plans (TCEP) and Total Property Command (TPC) are eligible for the full bonus and guarantee set, which includes everything in the One-Service Autopilot tier above plus any additional plan-specific benefits described here.</p>
+        <p style="margin:0 0 4px;font-weight:600;">Guarantees included with TCEP and TPC</p>
+        <p style="margin:0 0 6px;"><strong>&#8220;Beat Any Comparable Quote&#8221;</strong> &#8212; KECC will attempt to beat or match a current written quote from another insured provider for a comparable scope and frequency of recurring exterior services at the same property. The client must provide a quote dated within 30 days that clearly describes services and frequency. KECC alone decides if the quote is comparable. KECC is not required to match prices that are unsustainably low, incomplete, promotional loss-leaders, or inconsistent with KECC&#8217;s safety, quality, or insurance standards. KECC may fulfill this by adjusting scope or structure of the plan, not necessarily matching every line item.</p>
+        <p style="margin:0 0 4px;font-weight:600;">Bonuses included with TCEP and TPC</p>
+        <p style="margin:0 0 6px;">TCEP and TPC plans include all bonuses listed for One-Service Autopilot (Property Shield Report, Curb Appeal Photo Set, Neighbor Referral Credit, Service Reminders) on a broader or more robust basis, plus any higher-tier bonuses KECC may add for these plans. Additionally, TCEP and TPC plans include:</p>
+        <p style="margin:0 0 6px;"><strong>&#8220;Seasonal Plan Adjustments&#8221;</strong> &#8212; KECC may shift which tasks are emphasized and when they are performed over the year (for example, more mowing in growth season, more leaf/ice work in fall/winter) while keeping the overall annual service level and blended subscription value roughly consistent. Routine seasonal adjustments do not change the agreed monthly rate, unless a specific service is explicitly paused for more than one month&#8217;s time due to seasonal need or property need.</p>
+        <p style="margin:0 0 10px;"><strong>&#8220;Priority Scheduling&#8221;</strong> &#8212; the client&#8217;s property is given preferred placement in KECC&#8217;s normal routing and rescheduling ahead of non-priority customers, especially after weather delays. This is a relative preference only and does not guarantee specific dates, times, or response speeds. All services remain subject to weather, safety, staffing, and routing constraints, and KECC is not liable for business interruption or lost revenue due to schedule changes.</p>
+
+        <hr/>
+        <p style="margin:0 0 4px;font-weight:600;">General limitations for all bonuses and guarantees (all plans)</p>
+        <p style="margin:0 0 4px;">The client must be active and current on payments for the applicable plan when a bonus or guarantee is earned, delivered, or claimed.</p>
+        <p style="margin:0 0 4px;">Bonuses and guarantees do not expand or override the core service scope defined elsewhere in this agreement and do not convert KECC into an unlimited inspection, consulting, or emergency-response provider.</p>
+        <p style="margin:0 0 4px;">KECC provides bonuses and guarantees in quantities and frequencies that are reasonable for the plan type; repeat, custom, or on-demand versions beyond normal practice may be declined or quoted separately.</p>
+        <p style="margin:0 0 4px;">KECC may adjust, pause, or discontinue specific bonuses or guarantees on a prospective basis, provided that any benefit already earned or specifically promised in writing will be honored under its stated terms.</p>
+        <p style="margin:0 0 0;">KECC may reasonably decline or limit claims that appear abusive, fraudulent, or clearly outside the spirit and intent of the offer.</p>
+      </div>
     </div>
 
-    <!-- Signature -->
+    <!-- Billing, Term & Proration -->
+    <div class="sec">
+      <div class="legal-text">
+        <h4>Billing, Term &amp; Proration</h4>
+        <p style="margin:0;">Services are billed on a recurring subscription basis, in advance, starting on or around the first scheduled service window. The monthly rate is a blended/averaged amount reflecting all included services over the plan term and is not tied to any single visit&#8217;s price. Either party may cancel at any time with written or emailed notice. Upon cancellation, KECC will calculate the value of services already delivered at KECC&#8217;s then-current standard (non-subscriber) rates and compare that to subscription payments collected to date. If delivered service value exceeds payments collected, the ${isResidential ? 'customer' : 'client'} agrees to pay a pro-rated final balance for the difference. If payments collected exceed services delivered, KECC will refund or credit the difference. Scope and pricing may be adjusted with at least 30 days&#8217; written notice if property conditions, labor costs, materials, or service requirements materially change.</p>
+      </div>
+    </div>
+
+    <!-- Access, Scheduling & Safety -->
+    <div class="sec">
+      <div class="legal-text">
+        <h4>Access, Scheduling &amp; Safety</h4>
+        <p style="margin:0;">${isResidential ? 'Customer' : 'Client'} will provide reasonable safe access (unlocked gates, codes, removal of aggressive ${isResidential ? 'pets' : 'animals'}, etc.). KECC schedules services during normal business hours based on routing efficiency and weather. KECC may skip, modify, or reschedule services if unsafe or impractical conditions exist (severe weather, unsafe ladder/roof access, hazardous materials, blocked areas, active construction). Skipped items may be rolled into a future visit where practical, as pricing is based on blended subscription value, not per-visit charges. KECC is not responsible for loss of business or consequential damages related to normal schedule changes or delays.</p>
+      </div>
+    </div>
+
+    <!-- Scope Limitations & Exclusions -->
+    <div class="sec">
+      <div class="legal-text">
+        <h4>Scope Limitations &amp; Exclusions</h4>
+        <p style="margin:0;">This agreement covers only services explicitly selected (checked) in the checklist and any written custom items in the notes. Work requiring specialty trades (roofing, structural repairs, electrical, plumbing, HVAC, major concrete/asphalt repair${!isResidential ? ', sign fabrication' : ''}) is outside scope. KECC does not include hazardous material cleanup, emergency response, or remediation unless specifically written into the plan. KECC is not responsible for pre-existing damage, existing defects, failing materials, or hidden conditions. KECC is not responsible for damage to underground utilities, unmarked obstacles, or items hidden in turf or work areas not disclosed (hoses, cables, toys, shallow irrigation heads, etc.). Light wear and minor disturbance of delicate surfaces may occur despite reasonable care.</p>
+      </div>
+    </div>
+
+    <!-- Cancellation -->
+    <div class="sec">
+      <div class="legal-text">
+        <h4>Cancellation</h4>
+        <p style="margin:0;">This agreement defines scope, expectations, schedule, and pricing. It is a discretionary service agreement, not a fixed-term long-term contract. The ${isResidential ? 'customer' : 'client'} may cancel at any time, subject only to the pro-rated balancing of services delivered vs. payments described in the Billing section above.</p>
+      </div>
+    </div>
+
+    <!-- Customer Acknowledgment -->
+    <div class="sec">
+      <div style="display:flex;align-items:flex-start;gap:8px;">
+        <div class="check-box checked" style="margin-top:2px;">&#x2713;</div>
+        <p style="margin:0;font-size:13px;color:#111827;"><strong>${isResidential ? 'Customer' : 'Client'} Acknowledgment:</strong> ${isResidential ? 'Customer' : 'Client'} acknowledges that the services, frequencies, and pricing selected and written on this agreement represent the complete scope of recurring services, unless amended in writing.</p>
+      </div>
+    </div>
+
+    <!-- Signature Section -->
     <div class="sec">
       <hr class="sig-divider"/>
-      ${signatureSection}
-      ${alreadySigned ? '' : `<p style="font-size:11px;color:#9ca3af;margin-top:16px;text-align:center;">
-        Knox Exterior Care Co. | Questions? Contact your KECC representative directly.
-        Completed agreements should be retained by both parties for the duration of the service relationship
-        and for a minimum of one year following cancellation.
-      </p>`}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-bottom:32px;">
+        <!-- KECC signature (pre-filled, not interactive) -->
+        <div>
+          <p style="margin:0 0 8px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;">Knox Exterior Care Co. &#8212; Authorized Signature</p>
+          ${keccSigHtml}
+          <p style="margin:4px 0 0;font-size:12px;color:#374151;border-top:1px solid #e5e7eb;padding-top:4px;">Nicholas G Dunn, Owner</p>
+          <p style="margin:2px 0 0;font-size:11px;color:#6b7280;">${esc(agreementDate)}</p>
+        </div>
+        <!-- Customer/Client section label -->
+        <div>
+          <p style="margin:0 0 8px;font-size:12px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.05em;">${isResidential ? 'Customer Signature' : 'Authorized Representative Signature'}</p>
+          <p style="margin:0;font-size:12px;color:#9ca3af;font-style:italic;">See signature pad below</p>
+        </div>
+      </div>
+
+      ${customerSigSection}
+
+      <p style="font-size:11px;color:#9ca3af;margin-top:16px;text-align:center;">
+        Knox Exterior Care Co. | Questions about this agreement? Contact your KECC representative directly. Completed agreements should be retained by both parties for the duration of the service relationship and for a minimum of one year following cancellation.
+      </p>
     </div>
 
   </div>
@@ -730,8 +1078,11 @@ export const handler: Handler = async (event) => {
 
       // ── Full service agreement page ──────────────────────────────────────
       if (agreementRow) {
-        // Fetch subscription + contact to populate the full agreement
-        const [subRes, contactRes] = await Promise.all([
+        // Fetch linked quote (prefer quote_id on agreement), subscription, contact
+        const [quoteLinkedRes, subRes, contactRes] = await Promise.all([
+          agreementRow.quote_id
+            ? supabase.from('quotes').select('*').eq('id', agreementRow.quote_id).single()
+            : Promise.resolve({ data: null }),
           agreementRow.subscription_id
             ? supabase.from('subscriptions').select('*').eq('id', agreementRow.subscription_id).single()
             : Promise.resolve({ data: null }),
@@ -740,42 +1091,74 @@ export const handler: Handler = async (event) => {
             : Promise.resolve({ data: null }),
         ])
 
-        const sub     = subRes.data
-        const contact = contactRes.data
-        const qt      = agreementRow.quote_type ?? ''
-        const isRes   = !qt.includes('commercial')
+        const quoteLinked = quoteLinkedRes.data
+        const sub         = subRes.data
+        const contact     = contactRes.data
+        const qt          = quoteLinked?.quote_type ?? agreementRow.quote_type ?? ''
+        const isRes       = !qt.includes('commercial')
+        const planType    = detectPlanType(qt)
+        const keccSigData = settings?.owner_signature_data ?? null
 
-        const services: ServiceRow[] = sub
-          ? (Array.isArray(sub.services) ? sub.services : []).map((s: Record<string, unknown>) => ({
-              serviceName:  String(s.serviceName ?? ''),
-              frequency:    String(s.frequency ?? ''),
-              pricePerMonth: Number(s.pricePerMonth ?? 0),
-              description:  s.description ? String(s.description) : undefined,
-            }))
-          : []
+        // Build line items from linked quote or subscription services
+        let lineItems: LineItemData[] = []
+        if (quoteLinked && Array.isArray(quoteLinked.line_items)) {
+          lineItems = quoteLinked.line_items as LineItemData[]
+        } else if (sub && Array.isArray(sub.services)) {
+          lineItems = (sub.services as Record<string, unknown>[]).map(s => ({
+            serviceName:  String(s.serviceName ?? ''),
+            description:  s.description ? String(s.description) : undefined,
+            monthlyAmount: Number(s.pricePerMonth ?? 0),
+            lineTotal:    Number(s.pricePerMonth ?? 0),
+            isSubscription: true,
+          }))
+        }
+
+        const checkedServices = mapLineItemsToServices(lineItems, isRes)
+
+        // Monthly rate: from linked quote's subscription items, or subscription total
+        const monthlyRate = quoteLinked
+          ? (Array.isArray(quoteLinked.line_items) ? quoteLinked.line_items : [])
+              .filter((li: LineItemData) => li.isSubscription)
+              .reduce((sum: number, li: LineItemData) => sum + (li.monthlyAmount ?? li.lineTotal ?? 0), 0)
+          : (sub?.in_season_monthly_total ?? 0)
+
+        const today = new Date()
+        const agreementDate  = today.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+        const planReviewDate = new Date(today.getFullYear() + 1, today.getMonth(), today.getDate())
+          .toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+
+        const funcUrl = `/.netlify/functions/esign?token=${encodeURIComponent(token)}`
 
         const html = buildFullAgreementPage({
           token,
-          isResidential:  isRes,
-          quoteType:      qt || null,
+          isResidential:    isRes,
+          quoteType:        qt || null,
           companyName,
-          companyPhone:   settings?.phone  ?? null,
-          companyEmail:   settings?.email  ?? null,
+          companyPhone:     settings?.phone  ?? null,
+          companyEmail:     settings?.email  ?? null,
           logoUrl,
-          customerName:   agreementRow.customer_name ?? (contact?.name ?? ''),
-          businessName:   contact?.business_name ?? null,
-          repName:        contact?.name ?? null,
-          repTitle:       null,
-          serviceAddress: agreementRow.customer_address ?? (sub?.customer_address ?? null),
-          billingAddress: null,
-          email:          contact?.email ?? (sub?.customer_email ?? null),
-          phone:          contact?.phone ?? (sub?.customer_phone ?? null),
-          accessNotes:    null,
-          monthlyRate:    sub?.in_season_monthly_total ?? 0,
-          startDate:      sub?.start_date ?? null,
-          services,
-          alreadySigned:  !!agreementRow.signed_at,
-          signedAt:       agreementRow.signed_at ?? null,
+          customerName:     agreementRow.customer_name ?? (contact?.name ?? ''),
+          businessName:     contact?.business_name ?? null,
+          repName:          contact?.name ?? null,
+          repTitle:         null,
+          serviceAddress:   agreementRow.customer_address ?? (quoteLinked?.customer_address ?? sub?.customer_address ?? null),
+          billingAddress:   null,
+          email:            agreementRow.customer_email ?? contact?.email ?? quoteLinked?.customer_email ?? sub?.customer_email ?? null,
+          phone:            agreementRow.customer_phone ?? contact?.phone ?? quoteLinked?.customer_phone ?? sub?.customer_phone ?? null,
+          accessNotes:      null,
+          planType,
+          monthlyRate,
+          agreementDate,
+          serviceStartDate: agreementDate,
+          planReviewDate,
+          checkedServices,
+          leadNotes:        agreementRow.lead_notes ?? null,
+          keccSigData,
+          alreadySigned:    !!agreementRow.signed_at,
+          signedAt:         agreementRow.signed_at ?? null,
+          signerPrintedName: agreementRow.signer_printed_name ?? null,
+          signatureData:    agreementRow.signature_data ?? null,
+          funcUrl,
         })
         return { statusCode: 200, headers: HTML_HEADERS, body: html }
       }
@@ -805,7 +1188,7 @@ export const handler: Handler = async (event) => {
         return { statusCode: 404, headers: JSON_HEADERS, body: JSON.stringify({ success: false, message: 'Invalid token' }) }
       }
 
-      let body: { signatureData?: string } = {}
+      let body: { signatureData?: string; printedName?: string } = {}
       try { body = JSON.parse(event.body ?? '{}') } catch (_e) { /* ignore */ }
 
       if (!body.signatureData) {
@@ -864,44 +1247,6 @@ export const handler: Handler = async (event) => {
           }) } catch (_e) { /* non-fatal */ }
         }
 
-        // ── Recurring quote: auto-generate & SMS a service agreement ──────────
-        const lineItems = Array.isArray(quoteRow.line_items) ? quoteRow.line_items : []
-        const hasSubItems = lineItems.some((li: { isSubscription?: boolean }) => li.isSubscription)
-
-        if (hasSubItems && quoteRow.contact_id) {
-          try {
-            const agreeToken = randomUUID()
-            const { data: newAgreement } = await supabase.from('service_agreements').insert({
-              contact_id:       quoteRow.contact_id,
-              customer_name:    quoteRow.customer_name ?? '',
-              customer_address: quoteRow.customer_address ?? null,
-              quote_type:       quoteRow.quote_type ?? null,
-              status:           'pending_signature',
-              accept_token:     agreeToken,
-            }).select().single()
-
-            if (newAgreement) {
-              if (apiKey && fromNumber && quoteRow.customer_phone) {
-                const agreeUrl = `${siteUrl}/.netlify/functions/esign?token=${encodeURIComponent(agreeToken)}`
-                const agreeMsg =
-                  `One more step — please review and sign your ${companyName} service agreement here: ${agreeUrl} ` +
-                  `Reply STOP to opt out.`
-                await sendOpenPhoneSms(apiKey, fromNumber, quoteRow.customer_phone, agreeMsg)
-              }
-
-              try { await supabase.from('activities').insert({
-                contact_id: quoteRow.contact_id,
-                type:       'esign_sent',
-                summary:    `Service agreement auto-generated and sent for signing`,
-                metadata:   { agreementId: newAgreement.id, quoteId: quoteRow.id },
-              }) } catch (_e) { /* non-fatal */ }
-            }
-          } catch (agreeErr) {
-            // Non-fatal — quote signing already succeeded
-            console.error('[esign] Failed to auto-generate service agreement:', agreeErr)
-          }
-        }
-
         return { statusCode: 200, headers: JSON_HEADERS, body: JSON.stringify({ success: true }) }
       }
 
@@ -910,11 +1255,12 @@ export const handler: Handler = async (event) => {
           return { statusCode: 409, headers: JSON_HEADERS, body: JSON.stringify({ success: false, message: 'Already signed' }) }
         }
         const { error } = await supabase.from('service_agreements').update({
-          status:         'signed',
-          signed_at:      signedAt,
-          signature_data: body.signatureData,
-          signed_ip:      signedIp,
-          updated_at:     signedAt,
+          status:               'signed',
+          signed_at:            signedAt,
+          signature_data:       body.signatureData,
+          signed_ip:            signedIp,
+          updated_at:           signedAt,
+          signer_printed_name:  body.printedName ?? null,
         }).eq('id', agreementRow.id)
         if (error) throw new Error(error.message)
 
@@ -948,12 +1294,15 @@ export const handler: Handler = async (event) => {
           stage:     'recurring',
         })
 
-        try { await supabase.from('activities').insert({
-          contact_id: agreementRow.contact_id,
-          type:       'esign_completed',
-          summary:    `Service agreement signed by ${agreementRow.customer_name} — ready to schedule`,
-          metadata:   { agreementId: agreementRow.id, subscriptionId: agreementRow.subscription_id },
-        }) } catch (_e) { /* non-fatal */ }
+        // Log esign_completed activity on the contact
+        if (agreementRow.contact_id) {
+          try { await supabase.from('activities').insert({
+            contact_id: agreementRow.contact_id,
+            type:       'esign_completed',
+            summary:    `Service agreement signed by ${agreementRow.customer_name ?? 'customer'}`,
+            metadata:   { agreementId: agreementRow.id, quoteId: agreementRow.quote_id ?? null },
+          }) } catch (_e) { /* non-fatal */ }
+        }
 
         // ── Confirmation SMS: signed agreement copy link ───────────────────────
         try {
@@ -964,9 +1313,9 @@ export const handler: Handler = async (event) => {
           const agreeCompany    = agreeSettings?.company_name    ?? 'Knox Exterior Care Co.'
           const agrSiteUrl      = (process.env.URL ?? '').replace(/\/$/, '')
 
-          // Retrieve phone from contact if not directly on the agreement
-          let customerPhone: string | null = null
-          if (agreementRow.contact_id) {
+          // Use customer_phone directly on agreementRow first, then fall back to contact
+          let customerPhone: string | null = agreementRow.customer_phone ?? null
+          if (!customerPhone && agreementRow.contact_id) {
             const { data: contactRow } = await supabase
               .from('contacts').select('phone').eq('id', agreementRow.contact_id).single()
             customerPhone = contactRow?.phone ?? null

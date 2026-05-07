@@ -133,6 +133,87 @@ export const handler: Handler = async (event) => {
       }
     }
 
+    // ── POST ?action=generate-from-lead ─────────────────────────────────────
+    // Creates a ready-to-sign agreement linked to a quote (and optionally a lead).
+    // Line items, lead notes, and customer contact info are all captured here.
+    if (method === 'POST' && !id && action === 'generate-from-lead') {
+      const body = JSON.parse(event.body ?? '{}')
+      const { leadId, quoteId } = body
+
+      if (!quoteId) {
+        return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'quoteId required' }) }
+      }
+
+      // Fetch quote
+      const { data: quote } = await supabase.from('quotes').select('*').eq('id', quoteId).single()
+      if (!quote) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Quote not found' }) }
+
+      // Fetch lead notes
+      let leadNotes: string | null = null
+      const effectiveLeadId: string | null = leadId ?? quote.lead_id ?? null
+      if (effectiveLeadId) {
+        const { data: lead } = await supabase.from('leads').select('notes').eq('id', effectiveLeadId).single()
+        leadNotes = lead?.notes ?? null
+      }
+
+      // Resolve contact email + phone
+      const contactId: string | null = quote.contact_id ?? null
+      let contactEmail: string | null = quote.customer_email ?? null
+      let contactPhone: string | null = quote.customer_phone ?? null
+      if (contactId && (!contactEmail || !contactPhone)) {
+        const { data: contact } = await supabase.from('contacts').select('email, phone').eq('id', contactId).single()
+        contactEmail = contactEmail ?? contact?.email ?? null
+        contactPhone = contactPhone ?? contact?.phone ?? null
+      }
+
+      // Void any existing pending/draft agreements for this quote
+      await supabase
+        .from('service_agreements')
+        .update({ status: 'void', updated_at: new Date().toISOString() })
+        .eq('quote_id', quoteId)
+        .in('status', ['draft', 'pending_signature'])
+
+      const token = randomUUID()
+
+      const { data: agreementRow, error: insertError } = await supabase
+        .from('service_agreements')
+        .insert({
+          contact_id:       contactId,
+          quote_id:         quoteId,
+          lead_id:          effectiveLeadId,
+          customer_name:    quote.customer_name ?? '',
+          customer_address: quote.customer_address ?? null,
+          customer_email:   contactEmail,
+          customer_phone:   contactPhone,
+          quote_type:       quote.quote_type ?? null,
+          lead_notes:       leadNotes,
+          status:           'pending_signature',
+          accept_token:     token,
+        })
+        .select()
+        .single()
+
+      if (insertError) throw insertError
+
+      // Log activity (non-fatal)
+      if (contactId) {
+        try { await supabase.from('activities').insert({
+          contact_id: contactId,
+          type:       'esign_sent',
+          summary:    `Service agreement generated for ${quote.customer_name ?? 'customer'}`,
+          metadata:   { agreementId: agreementRow.id, quoteId },
+        }) } catch (_e) { /* non-fatal */ }
+      }
+
+      const baseUrl = process.env.URL ?? 'http://localhost:8888'
+      const signUrl = `${baseUrl}/.netlify/functions/esign?token=${token}`
+      return {
+        statusCode: 201,
+        headers: CORS,
+        body: JSON.stringify({ agreement: rowToServiceAgreement(agreementRow), signUrl, token }),
+      }
+    }
+
     // CREATE agreement (legacy — kept for backward compat)
     if (method === 'POST' && !id) {
       const body = JSON.parse(event.body ?? '{}')
