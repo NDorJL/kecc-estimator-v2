@@ -93,6 +93,73 @@ export const handler: Handler = async (event) => {
         .select()
         .single()
       if (error) throw error
+
+      // ── Auto-create/activate subscription when lead moves to 'recurring' ───
+      // Ensures the lead's monthly value is always reflected in MRR metrics,
+      // regardless of whether the stage was set manually or automatically.
+      if (body.stage === 'recurring' && data.contact_id) {
+        try {
+          // Check if an active (or paused) subscription already exists for this contact
+          const { data: existingSub } = await supabase
+            .from('subscriptions')
+            .select('id, status')
+            .eq('contact_id', data.contact_id)
+            .not('status', 'eq', 'CANCELLED')
+            .limit(1)
+            .maybeSingle()
+
+          if (existingSub) {
+            // Just activate it if it's not already active
+            if (existingSub.status !== 'ACTIVE') {
+              await supabase.from('subscriptions')
+                .update({ status: 'ACTIVE' })
+                .eq('id', existingSub.id)
+            }
+          } else if (data.quote_id) {
+            // No subscription yet — create one from the linked quote
+            const { data: quote } = await supabase
+              .from('quotes').select('*').eq('id', data.quote_id).single()
+
+            if (quote) {
+              const lineItems: Array<Record<string, unknown>> = Array.isArray(quote.line_items) ? quote.line_items : []
+              const subItems = lineItems.filter(li => li.isSubscription)
+
+              // Build services array from subscription line items
+              const services = subItems.map(li => ({
+                id:           li.serviceId ?? String(Math.random()),
+                serviceId:    li.serviceId ?? '',
+                serviceName:  li.serviceName ?? '',
+                frequency:    li.frequency ?? 'Monthly',
+                pricePerMonth: Number(li.monthlyAmount ?? li.lineTotal ?? 0),
+                pricePerVisit: Number(li.unitPrice ?? 0),
+              }))
+
+              // Monthly total: sum of subscription items, or full quote total
+              const monthlyTotal = subItems.length > 0
+                ? subItems.reduce((s, li) => s + Number(li.monthlyAmount ?? li.lineTotal ?? 0), 0)
+                : Number(quote.total ?? 0)
+
+              await supabase.from('subscriptions').insert({
+                contact_id:              data.contact_id,
+                quote_id:                data.quote_id,
+                customer_name:           quote.customer_name ?? '',
+                customer_address:        quote.customer_address ?? null,
+                customer_phone:          quote.customer_phone ?? null,
+                customer_email:          quote.customer_email ?? null,
+                status:                  'ACTIVE',
+                services,
+                in_season_monthly_total: monthlyTotal,
+                quote_type:              quote.quote_type ?? null,
+              })
+              console.log(`[leads] Auto-created subscription for lead ${id} (contact ${data.contact_id}) — $${monthlyTotal}/mo`)
+            }
+          }
+        } catch (subErr) {
+          // Non-fatal — lead stage already saved successfully
+          console.error('[leads] Auto-subscription failed:', subErr instanceof Error ? subErr.message : subErr)
+        }
+      }
+
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToLead(data)) }
     }
 

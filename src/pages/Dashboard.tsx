@@ -176,13 +176,33 @@ export default function Dashboard() {
   )
 
   // ── KPI calculations ─────────────────────────────────────────────────────────
-  const mrr = (subs ?? [])
-    .filter(s => s.status === 'ACTIVE')
-    .reduce((sum, s) => sum + s.inSeasonMonthlyTotal, 0)
+  const activeSubs = (subs ?? []).filter(s => s.status === 'ACTIVE')
+  const subMrr = activeSubs.reduce((sum, s) => sum + s.inSeasonMonthlyTotal, 0)
+
+  // Also include recurring-stage leads whose estimatedValue isn't already
+  // represented by an active subscription for that contact. This covers:
+  // - Leads manually dragged to Recurring before the auto-subscription feature
+  // - Any edge case where subscription creation failed
+  const activeSubContactIds = useMemo(() =>
+    new Set(activeSubs.map(s => (s as any).contactId).filter(Boolean)),
+  [activeSubs])
+
+  const pipelineRecurringMrr = useMemo(() =>
+    (leads ?? [])
+      .filter(l =>
+        l.stage === 'recurring' &&
+        l.contactId &&
+        !activeSubContactIds.has(l.contactId) &&
+        (l.estimatedValue ?? 0) > 0
+      )
+      .reduce((sum, l) => sum + (l.estimatedValue ?? 0), 0),
+  [leads, activeSubContactIds])
+
+  const mrr = subMrr + pipelineRecurringMrr
 
   const openQuotes = (quotes ?? []).filter(q => q.status === 'draft' || q.status === 'sent')
   const openQuotesValue = openQuotes.reduce((sum, q) => sum + q.total, 0)
-  const activeSubs = (subs ?? []).filter(s => s.status === 'ACTIVE').length
+  const activeSubsCount = activeSubs.length
 
   // ── Dynamic quick nav ────────────────────────────────────────────────────────
   // Show pages that are NOT visible in the nav bar (except dashboard itself)
@@ -575,7 +595,7 @@ export default function Dashboard() {
         />
         <KpiCard
           title="Active Subscriptions"
-          value={loading ? '—' : String(activeSubs)}
+          value={loading ? '—' : String(activeSubsCount)}
           sub="in season"
           icon={CalendarCheck}
           loading={loading}
