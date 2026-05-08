@@ -40,38 +40,39 @@
   }
 
   .dark {
-    --background: 240 7% 7%;
-    --foreground: 0 0% 93%;
-    --card: 240 6% 10%;
-    --card-foreground: 0 0% 93%;
-    --popover: 240 6% 10%;
-    --popover-foreground: 0 0% 93%;
-    --primary: 24 95% 53%;
-    --primary-foreground: 20 14.3% 4.1%;
-    --secondary: 240 5% 13%;
-    --secondary-foreground: 0 0% 93%;
-    --muted: 240 5% 13%;
-    --muted-foreground: 240 4% 55%;
-    --accent: 240 5% 13%;
-    --accent-foreground: 0 0% 93%;
+    /* ── Phantom Dark — locked-in default dark theme ── */
+    --background: 240 12% 8%;        /* #131318 near-black */
+    --foreground: 240 21% 93%;       /* #e8e8f0 soft white with purple tint */
+    --card: 240 16% 13%;             /* #1c1c27 elevated surface */
+    --card-foreground: 240 21% 93%;
+    --popover: 240 16% 13%;
+    --popover-foreground: 240 21% 93%;
+    --primary: 249 76% 79%;          /* #ab9ff2 Phantom lavender */
+    --primary-foreground: 240 12% 8%; /* #131318 dark text on lavender button */
+    --secondary: 240 19% 17%;        /* #232333 muted surface */
+    --secondary-foreground: 240 21% 93%;
+    --muted: 240 19% 17%;            /* #232333 */
+    --muted-foreground: 240 18% 66%; /* #9898b8 muted purple-grey */
+    --accent: 240 19% 17%;
+    --accent-foreground: 240 21% 93%;
     --destructive: 0 72.2% 50.6%;
     --destructive-foreground: 60 9.1% 97.8%;
-    --border: 240 6% 15%;
-    --input: 240 6% 15%;
-    --ring: 24 95% 53%;
-    --chart-1: 220 70% 50%;
+    --border: 240 18% 22%;           /* #2e2e42 subtle dark border */
+    --input: 240 18% 22%;
+    --ring: 249 76% 79%;             /* matches primary */
+    --chart-1: 249 76% 79%;
     --chart-2: 160 60% 45%;
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
-    --sidebar-background: 240 7% 6%;
-    --sidebar-foreground: 0 0% 80%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 5% 11%;
-    --sidebar-accent-foreground: 0 0% 90%;
-    --sidebar-border: 240 6% 13%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 240 16% 10%; /* slightly darker than card */
+    --sidebar-foreground: 240 21% 75%;
+    --sidebar-primary: 249 76% 79%;
+    --sidebar-primary-foreground: 240 12% 8%;
+    --sidebar-accent: 240 18% 18%;
+    --sidebar-accent-foreground: 240 21% 93%;
+    --sidebar-border: 240 18% 20%;
+    --sidebar-ring: 249 76% 79%;
   }
 }
 

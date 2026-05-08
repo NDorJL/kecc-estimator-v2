@@ -59,14 +59,22 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       {/* Brand header */}
-      <SidebarHeader className="border-b border-sidebar-border px-3 py-3">
-        <div className={`flex items-center gap-2.5 ${isCollapsed ? 'justify-center' : ''}`}>
-          {/* KECC logo mark — simple rounded square with initials */}
-          <div className="h-7 w-7 rounded-md bg-primary flex items-center justify-center shrink-0">
-            <span className="text-[10px] font-black text-primary-foreground tracking-tighter">KC</span>
-          </div>
+      <SidebarHeader className="border-b border-sidebar-border px-3 py-2.5">
+        <div className={`flex items-center gap-3 ${isCollapsed ? 'justify-center' : ''}`}>
+          {/* Company logo — show uploaded image or fall back to initials */}
+          {settings?.logoUrl ? (
+            <img
+              src={settings.logoUrl}
+              alt="Company logo"
+              className="h-9 w-9 rounded-md object-contain shrink-0 bg-card border border-border/40 p-0.5"
+            />
+          ) : (
+            <div className="h-9 w-9 rounded-md bg-primary flex items-center justify-center shrink-0">
+              <span className="text-[11px] font-black text-primary-foreground tracking-tighter">KC</span>
+            </div>
+          )}
           {!isCollapsed && (
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 pl-1">
               <p className="text-xs font-semibold leading-none truncate">
                 {settings?.companyName ?? 'Knox Exterior Care'}
               </p>

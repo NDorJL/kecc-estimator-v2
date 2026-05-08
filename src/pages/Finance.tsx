@@ -1871,8 +1871,7 @@ function computeMetric(
     }
     case 'quoteValue':    return quotes.filter(q => !q.trashedAt && inBucket(q.createdAt, b)).reduce((s, q) => s + (q.total || 0), 0)
     case 'leadsCreated':  return leads.filter(l => inBucket(l.createdAt, b)).length
-    // Bug 9 fix: use completedAt ?? scheduledDate for date matching
-    case 'jobsCompleted': return jobs.filter(j => j.status === 'completed' && inBucket(j.completedAt ?? j.scheduledDate, b)).length
+    case 'jobsCompleted': return jobs.filter(j => j.status === 'completed' && inBucket(j.completedAt ?? j.scheduledDate ?? j.createdAt, b)).length
     case 'newContacts':   return contacts.filter(c => inBucket(c.createdAt, b)).length
     case 'quotesCreated': return quotes.filter(q => !q.trashedAt && inBucket(q.createdAt, b)).length
   }
@@ -1941,13 +1940,12 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
   const txsInRange     = useMemo(() => transactions.filter(t => inWindow(t.date, curWin)), [transactions, curWin])
   const quotesInRange  = useMemo(() => quotes.filter(q => !q.trashedAt && inWindow(q.createdAt, curWin)), [quotes, curWin])
   const leadsInRange   = useMemo(() => leads.filter(l => inWindow(l.createdAt, curWin)), [leads, curWin])
-  // Bug 9 fix: Jobs completed should match on completedAt (newer jobs) OR scheduledDate
-  // (older jobs that may not have completedAt set). Status comparison is lowercase 'completed'.
+  // Jobs completed: prefer completedAt, fall back to scheduledDate, then createdAt.
+  // This ensures older jobs with no completedAt/scheduledDate still count.
   const jobsInRange = useMemo(() => jobs.filter(j => {
     if (j.status !== 'completed') return false
-    // Prefer completedAt for newer jobs; fall back to scheduledDate for older ones
-    const dateToCheck = j.completedAt ?? j.scheduledDate ?? ''
-    return dateToCheck ? inWindow(dateToCheck, curWin) : false
+    const dateToCheck = j.completedAt ?? j.scheduledDate ?? j.createdAt ?? ''
+    return dateToCheck ? inWindow(dateToCheck, curWin) : true
   }), [jobs, curWin])
   const contactsInRange = useMemo(() => contacts.filter(c => inWindow(c.createdAt, curWin)), [contacts, curWin])
 
@@ -1985,8 +1983,8 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
   // Bug 9 fix (prior period): same completedAt ?? scheduledDate fallback
   const priorJobs     = useMemo(() => jobs.filter(j => {
     if (j.status !== 'completed') return false
-    const dateToCheck = j.completedAt ?? j.scheduledDate ?? ''
-    return dateToCheck ? inWindow(dateToCheck, priorWin) : false
+    const dateToCheck = j.completedAt ?? j.scheduledDate ?? j.createdAt ?? ''
+    return dateToCheck ? inWindow(dateToCheck, priorWin) : true
   }).length, [jobs, priorWin])
   const priorWinDenom = useMemo(() => quotes.filter(q => !q.trashedAt && inWindow(q.createdAt, priorWin) && ['sent','accepted','declined'].includes(q.status)).length, [quotes, priorWin])
   const priorAccepted = useMemo(() => quotes.filter(q => q.status === 'accepted' && !q.trashedAt && inWindow(q.createdAt, priorWin)).length, [quotes, priorWin])
@@ -2060,7 +2058,7 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
       if (Array.isArray(q.lineItems)) {
         q.lineItems.forEach((li: any) => {
           const name = li.serviceName || li.name || 'Unknown'
-          map[name] = (map[name] || 0) + (Number(li.total) || Number(li.price) || 0)
+          map[name] = (map[name] || 0) + (Number(li.lineTotal) || Number(li.unitPrice) || 0)
         })
       }
     })

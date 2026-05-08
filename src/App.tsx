@@ -1,7 +1,7 @@
 import { Switch, Route, Router, useLocation } from 'wouter'
 import { useHashLocation } from 'wouter/use-hash-location'
 import { queryClient } from './lib/queryClient'
-import { QueryClientProvider, useQuery } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { Toaster } from '@/components/ui/toaster'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ThemeProvider, useTheme } from '@/components/theme-provider'
@@ -10,12 +10,6 @@ import { ServicesProvider } from '@/lib/services-context'
 import { Button } from '@/components/ui/button'
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/AppSidebar'
-import { useEffect } from 'react'
-import { apiGet } from '@/lib/queryClient'
-import { CompanySettings } from '@/types'
-import {
-  applyTheme, clearTheme,
-} from '@/lib/theme'
 import {
   LayoutDashboard, Calendar,
   Sun, Moon, Briefcase,
@@ -35,25 +29,7 @@ import SettingsPage from '@/pages/Settings'
 import Finance from '@/pages/Finance'
 import Marketing from '@/pages/Marketing'
 
-// ── Theme applicator — runs whenever settings change ─────────────────────────
-
-function ThemeApplicator() {
-  const { data: settings } = useQuery<CompanySettings>({
-    queryKey: ['/settings'],
-    queryFn: () => apiGet<CompanySettings>('/settings'),
-    staleTime: 5 * 60 * 1000,
-  })
-
-  useEffect(() => {
-    if (!settings?.themeConfig || Object.keys(settings.themeConfig).length === 0) {
-      clearTheme()
-      return
-    }
-    applyTheme(settings.themeConfig)
-  }, [settings?.themeConfig])
-
-  return null
-}
+// ThemeApplicator removed — Phantom Dark is the fixed theme, managed via CSS variables
 
 // ── Header ───────────────────────────────────────────────────────────────────
 
@@ -78,7 +54,6 @@ function AppLayout() {
   return (
     <SidebarProvider defaultOpen={true}>
       <div className="flex h-[100dvh] w-full overflow-hidden">
-        <ThemeApplicator />
         <AppSidebar />
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
           <AppHeader />

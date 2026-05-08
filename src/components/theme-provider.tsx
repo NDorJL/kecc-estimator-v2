@@ -11,24 +11,21 @@ const ThemeContext = createContext<ThemeContextValue | undefined>(undefined)
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      return 'dark'
+    // Check localStorage for a saved preference, otherwise default to dark (Phantom Dark)
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('kecc-theme') as Theme | null
+      if (saved === 'light' || saved === 'dark') return saved
     }
-    return 'light'
+    return 'dark'
   })
 
   useEffect(() => {
     const root = document.documentElement
     if (theme === 'dark') root.classList.add('dark')
     else root.classList.remove('dark')
+    // Persist so Phantom Dark survives page reloads
+    localStorage.setItem('kecc-theme', theme)
   }, [theme])
-
-  useEffect(() => {
-    const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const handler = (e: MediaQueryListEvent) => setTheme(e.matches ? 'dark' : 'light')
-    mq.addEventListener('change', handler)
-    return () => mq.removeEventListener('change', handler)
-  }, [])
 
   const toggleTheme = useCallback(() => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'))
