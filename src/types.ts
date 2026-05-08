@@ -76,6 +76,7 @@ export interface Quote {
   leadId: string | null;
   amendments: QuoteAmendment[];
   originalTotal: number | null;  // frozen at signing; null = pre-amendment era
+  revisedFromId: string | null;  // set on revision quotes; points to the original signed quote
 }
 
 // ── Subscription Types ─────────────────────────────────────────────────
@@ -353,6 +354,7 @@ export function rowToQuote(r: any): Quote {
     leadId: r.lead_id ?? null,
     amendments: Array.isArray(r.amendments) ? r.amendments : [],
     originalTotal: r.original_total != null ? Number(r.original_total) : null,
+    revisedFromId: r.revised_from_id ?? null,
   };
 }
 

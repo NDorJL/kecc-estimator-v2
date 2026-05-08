@@ -508,6 +508,36 @@ function KanbanColumn({
 
 // ── Quote Detail inside Lead Sheet ───────────────────────────────────────────
 
+// Apply all amendments to a quote's line items to produce a clean revised list
+function buildRevisedLineItems(quote: Quote, amendments: QuoteAmendment[]): LineItem[] {
+  const amendByItemId = new Map(
+    amendments.filter(a => a.lineItemId).map(a => [a.lineItemId!, a])
+  )
+  const result: LineItem[] = quote.lineItems
+    .filter(li => amendByItemId.get(li.serviceId)?.type !== 'removal')
+    .map(li => {
+      const a = amendByItemId.get(li.serviceId)
+      if (a?.type === 'adjustment') {
+        const newAmt = a.newAmount ?? li.lineTotal
+        return { ...li, serviceName: a.newName ?? li.serviceName, description: a.newDescription ?? li.description, unitPrice: newAmt, lineTotal: newAmt }
+      }
+      return li
+    })
+  amendments.filter(a => a.type === 'addition').forEach(a => {
+    result.push({
+      serviceId: `amend_${a.id}`,
+      serviceName: a.label,
+      category: 'Supplemental',
+      description: a.addedDescription,
+      quantity: 1,
+      unitPrice: a.addedAmount ?? 0,
+      lineTotal: a.addedAmount ?? 0,
+      isSubscription: false,
+    })
+  })
+  return result
+}
+
 // Compute total from original + all amendments
 function computeAmendedTotal(quote: Quote): number {
   const base = quote.originalTotal ?? quote.total
@@ -1035,7 +1065,7 @@ function LeadDetailSheet({
 
   // Add supplemental charge to the linked quote
   const amendmentMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (!effectiveQuote) throw new Error('No quote linked')
       const isSigned = !!effectiveQuote.signedAt
 
@@ -1098,7 +1128,7 @@ function LeadDetailSheet({
       }
 
       const updatedAmendments = [...existingAmendments, newAmendment]
-      // Recompute total from original + all amendments
+      // Recompute amended total
       const base = effectiveQuote.originalTotal ?? effectiveQuote.total
       const newTotal = base + updatedAmendments.reduce((d, a) => {
         if (a.type === 'addition')   return d + (a.addedAmount ?? 0)
@@ -1106,10 +1136,41 @@ function LeadDetailSheet({
         if (a.type === 'removal')    return d - (a.originalAmount ?? 0)
         return d
       }, 0)
-      return apiRequest('PATCH', `/quotes/${effectiveQuote.id}`, {
-        amendments: updatedAmendments,
-        total: newTotal,
-      })
+
+      // Save amendments to original quote
+      await apiRequest('PATCH', `/quotes/${effectiveQuote.id}`, { amendments: updatedAmendments, total: newTotal })
+
+      // Build clean revised line items with amendments baked in
+      const revisedItems = buildRevisedLineItems(effectiveQuote, updatedAmendments)
+      const revisedPayload = {
+        customerName:    effectiveQuote.customerName,
+        customerAddress: effectiveQuote.customerAddress,
+        customerPhone:   effectiveQuote.customerPhone,
+        customerEmail:   effectiveQuote.customerEmail,
+        businessName:    effectiveQuote.businessName,
+        quoteType:       effectiveQuote.quoteType,
+        lineItems:       revisedItems,
+        subtotal:        newTotal,
+        discount:        null,
+        total:           newTotal,
+        notes:           effectiveQuote.notes,
+        status:          'draft',
+        contactId:       effectiveQuote.contactId,
+        leadId:          lead?.id,
+        revisedFromId:   effectiveQuote.id,
+      }
+
+      // Update existing revision if one exists, otherwise create new
+      const existingRevision = allLeadQuotes.find(q => q.revisedFromId === effectiveQuote.id)
+      if (existingRevision) {
+        await apiRequest('PATCH', `/quotes/${existingRevision.id}`, {
+          lineItems: revisedItems,
+          subtotal: newTotal,
+          total: newTotal,
+        })
+      } else {
+        await apiRequest('POST', '/quotes', revisedPayload)
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
@@ -1120,9 +1181,9 @@ function LeadDetailSheet({
       setAmendAmount('')
       setAmendLineItemId('')
       const msgs: Record<AmendmentType, string> = {
-        addition: 'Charge added to quote',
-        adjustment: 'Line item adjusted',
-        removal: 'Line item removed from scope',
+        addition: 'Charge added — revised quote generated',
+        adjustment: 'Line item adjusted — revised quote updated',
+        removal: 'Item removed — revised quote updated',
       }
       toast({ title: msgs[amendMode] })
     },
@@ -1270,13 +1331,20 @@ function LeadDetailSheet({
                     const isPrimary = q.id === lead?.quoteId
                     const isExpanded = expandedQuoteId === q.id
                     const summary = servicesSummary(q.lineItems)
+                    const isRevision = !!q.revisedFromId
+                    const isCurrent = isRevision  // revisions are always the "current" version
                     return (
-                      <div key={q.id} className={`rounded-xl border overflow-hidden ${isPrimary ? 'border-primary/40' : ''}`}>
+                      <div key={q.id} className={`rounded-xl border overflow-hidden ${isCurrent ? 'border-green-500/50' : isPrimary ? 'border-primary/40' : ''}`}>
                         {/* Quote row header */}
                         <div className="flex items-center gap-2 px-3 py-2 bg-muted/20">
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              {isPrimary && (
+                              {isCurrent && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-green-600 text-white">
+                                  Current
+                                </span>
+                              )}
+                              {isPrimary && !isCurrent && (
                                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground">
                                   Primary
                                 </span>
@@ -1323,45 +1391,65 @@ function LeadDetailSheet({
                                   {setPrimaryMutation.isPending ? 'Setting…' : 'Set as Primary'}
                                 </Button>
                               )}
-                              {q.customerPhone && (() => {
-                                const qIsRecurring = isRecurringQuote(q)
-                                return qIsRecurring ? (
-                                  // Recurring: three options
-                                  <div className="flex gap-1 flex-1">
-                                    <Button
-                                      variant="outline" size="sm"
-                                      className="flex-1 text-xs text-blue-700 border-blue-300 hover:bg-blue-50 px-1.5"
-                                      onClick={() => { setLocalQuote(q); setSendMode('quote'); setShowSendConfirm(true) }}
-                                    >
-                                      <FileText className="h-3 w-3 mr-1 shrink-0" />Quote
+                              {/* ── Send / PDF / Email actions ─────── */}
+                              <div className="flex flex-col gap-1.5 flex-1">
+                                {/* SMS send row */}
+                                {q.customerPhone && (() => {
+                                  const qIsRecurring = isRecurringQuote(q)
+                                  return qIsRecurring ? (
+                                    <div className="flex gap-1">
+                                      <Button variant="outline" size="sm" className="flex-1 text-xs text-blue-700 border-blue-300 hover:bg-blue-50 px-1.5"
+                                        onClick={() => { setLocalQuote(q); setSendMode('quote'); setShowSendConfirm(true) }}>
+                                        <FileText className="h-3 w-3 mr-1 shrink-0" />Quote
+                                      </Button>
+                                      <Button variant="outline" size="sm" className="flex-1 text-xs text-violet-700 border-violet-300 hover:bg-violet-50 px-1.5"
+                                        onClick={() => { setLocalQuote(q); setSendMode('agreement'); setShowSendConfirm(true) }}>
+                                        <ScrollText className="h-3 w-3 mr-1 shrink-0" />Agreement
+                                      </Button>
+                                      <Button variant="outline" size="sm" className="flex-1 text-xs text-green-700 border-green-300 hover:bg-green-50 px-1.5"
+                                        onClick={() => { setLocalQuote(q); setSendMode('both'); setShowSendConfirm(true) }}>
+                                        <Send className="h-3 w-3 mr-1 shrink-0" />Both
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <Button variant="outline" size="sm" className="w-full text-xs text-blue-700 border-blue-300 hover:bg-blue-50"
+                                      onClick={() => { setLocalQuote(q); setSendMode('quote'); setShowSendConfirm(true) }}>
+                                      <Send className="h-3 w-3 mr-1" />
+                                      {q.sentAt ? 'Resend via SMS' : 'Send via SMS'}
                                     </Button>
-                                    <Button
-                                      variant="outline" size="sm"
-                                      className="flex-1 text-xs text-violet-700 border-violet-300 hover:bg-violet-50 px-1.5"
-                                      onClick={() => { setLocalQuote(q); setSendMode('agreement'); setShowSendConfirm(true) }}
-                                    >
-                                      <ScrollText className="h-3 w-3 mr-1 shrink-0" />Agreement
-                                    </Button>
-                                    <Button
-                                      variant="outline" size="sm"
-                                      className="flex-1 text-xs text-green-700 border-green-300 hover:bg-green-50 px-1.5"
-                                      onClick={() => { setLocalQuote(q); setSendMode('both'); setShowSendConfirm(true) }}
-                                    >
-                                      <Send className="h-3 w-3 mr-1 shrink-0" />Both
-                                    </Button>
-                                  </div>
-                                ) : (
-                                  // One-time: just send quote
+                                  )
+                                })()}
+
+                                {/* PDF + Email row */}
+                                <div className="flex gap-1.5">
                                   <Button
                                     variant="outline" size="sm"
-                                    className="flex-1 text-xs text-blue-700 border-blue-300 hover:bg-blue-50"
-                                    onClick={() => { setLocalQuote(q); setSendMode('quote'); setShowSendConfirm(true) }}
+                                    className="flex-1 text-xs gap-1.5"
+                                    onClick={() => window.open(`/.netlify/functions/pdf-quote?quoteId=${q.id}`, '_blank')}
                                   >
-                                    <Send className="h-3 w-3 mr-1" />
-                                    {q.sentAt ? 'Resend' : 'Send SMS'}
+                                    <FileText className="h-3 w-3 shrink-0" />Download PDF
                                   </Button>
-                                )
-                              })()}
+                                  {q.customerEmail && (
+                                    <Button
+                                      variant="outline" size="sm"
+                                      className="flex-1 text-xs gap-1.5"
+                                      onClick={() => {
+                                        const pdfUrl = `${window.location.origin}/.netlify/functions/pdf-quote?quoteId=${q.id}`
+                                        const esignUrl = q.acceptToken
+                                          ? `${window.location.origin}/.netlify/functions/esign?token=${q.acceptToken}`
+                                          : pdfUrl
+                                        const subject = encodeURIComponent('Your Quote from Knox Exterior Care Co.')
+                                        const body = encodeURIComponent(
+                                          `Hi ${q.customerName.split(' ')[0]},\n\nPlease find your quote attached or view it here:\n${esignUrl}\n\nThank you for the opportunity to serve you!\n\nKnox Exterior Care Co.`
+                                        )
+                                        window.location.href = `mailto:${q.customerEmail}?subject=${subject}&body=${body}`
+                                      }}
+                                    >
+                                      <Mail className="h-3 w-3 shrink-0" />Email
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
                             </div>
                           </div>
                         )}
