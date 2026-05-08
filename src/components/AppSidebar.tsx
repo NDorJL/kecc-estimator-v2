@@ -6,7 +6,7 @@ import {
 import {
   LayoutDashboard, Users, Calendar, Briefcase, Target,
   FileText, RefreshCw, TrendingUp, Megaphone,
-  Calculator, BookOpen, Settings,
+  Calculator, BookOpen, Settings, NotebookPen,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/lib/queryClient'
@@ -35,8 +35,9 @@ const NAV_GROUPS = [
   {
     label: 'Tools',
     items: [
-      { id: 'calculator', label: 'Calculator', path: '/calculator', icon: Calculator },
-      { id: 'pricebook',  label: 'Price Book', path: '/pricebook',  icon: BookOpen },
+      { id: 'calculator',  label: 'Calculator',  path: '/calculator',  icon: Calculator },
+      { id: 'pricebook',   label: 'Price Book',  path: '/pricebook',   icon: BookOpen },
+      { id: 'scratchpad',  label: 'Scratch Pad', path: '/scratchpad',  icon: NotebookPen },
     ],
   },
 ]

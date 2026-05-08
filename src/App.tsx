@@ -10,11 +10,7 @@ import { ServicesProvider } from '@/lib/services-context'
 import { Button } from '@/components/ui/button'
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/AppSidebar'
-import {
-  LayoutDashboard, Calendar,
-  Sun, Moon, Briefcase,
-  Target,
-} from 'lucide-react'
+import { Sun, Moon } from 'lucide-react'
 import Dashboard from '@/pages/Dashboard'
 import Contacts from '@/pages/Contacts'
 import ContactDetail from '@/pages/ContactDetail'
@@ -28,17 +24,58 @@ import PriceBook from '@/pages/PriceBook'
 import SettingsPage from '@/pages/Settings'
 import Finance from '@/pages/Finance'
 import Marketing from '@/pages/Marketing'
+import ScratchPad from '@/pages/ScratchPad'
 
 // ThemeApplicator removed — Phantom Dark is the fixed theme, managed via CSS variables
 
-// ── Header ───────────────────────────────────────────────────────────────────
+// ── Page label map ────────────────────────────────────────────────────────────
+
+const PAGE_LABELS: Record<string, string> = {
+  '/':              'Dashboard',
+  '/leads':         'Leads',
+  '/contacts':      'Contacts',
+  '/calendar':      'Calendar',
+  '/jobs':          'Jobs',
+  '/quotes':        'Quotes',
+  '/subscriptions': 'Subscriptions',
+  '/finance':       'Finance',
+  '/marketing':     'Marketing',
+  '/calculator':    'Calculator',
+  '/pricebook':     'Price Book',
+  '/settings':      'Settings',
+  '/scratchpad':    'Scratch Pad',
+}
+
+function getPageLabel(location: string): string {
+  if (location === '/') return 'Dashboard'
+  // Try exact match first, then prefix match (handles /contacts/123 etc.)
+  if (PAGE_LABELS[location]) return PAGE_LABELS[location]
+  const prefix = Object.keys(PAGE_LABELS)
+    .filter(k => k !== '/' && location.startsWith(k))
+    .sort((a, b) => b.length - a.length)[0]
+  return prefix ? PAGE_LABELS[prefix] : ''
+}
+
+// ── Header ────────────────────────────────────────────────────────────────────
 
 function AppHeader() {
   const { theme, toggleTheme } = useTheme()
+  const [location] = useLocation()
+  const pageLabel = getPageLabel(location)
+
   return (
     <header className="sticky top-0 z-50 flex items-center gap-2 border-b bg-card/95 backdrop-blur-sm px-3" style={{ minHeight: 48 }}>
       <SidebarTrigger className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground" />
-      <div className="flex-1" />
+
+      {/* Current page name — centered between the two icons */}
+      <div className="flex-1 flex justify-center">
+        {pageLabel && (
+          <span className="text-sm font-semibold tracking-tight truncate max-w-[200px]">
+            {pageLabel}
+          </span>
+        )}
+      </div>
+
       <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-8 w-8 rounded-full">
         {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
       </Button>
@@ -46,7 +83,7 @@ function AppHeader() {
   )
 }
 
-// ── App layout ───────────────────────────────────────────────────────────────
+// ── App layout ────────────────────────────────────────────────────────────────
 
 function AppLayout() {
   const [location] = useLocation()
@@ -75,6 +112,7 @@ function AppLayout() {
               <Route path="/settings" component={SettingsPage} />
               <Route path="/finance" component={Finance} />
               <Route path="/marketing" component={Marketing} />
+              <Route path="/scratchpad" component={ScratchPad} />
               <Route>
                 <div className="flex flex-col items-center justify-center h-full p-8 text-center">
                   <h2 className="text-2xl font-bold mb-2">Page Not Found</h2>
@@ -83,30 +121,6 @@ function AppLayout() {
               </Route>
             </Switch>
           </main>
-
-          {/* Mobile quick-nav — 4 most-used items, hidden on desktop */}
-          <nav className="md:hidden flex items-center justify-around border-t border-border bg-card/95 backdrop-blur-sm py-1" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-            {[
-              { path: '/',         icon: LayoutDashboard, label: 'Home' },
-              { path: '/leads',    icon: Target,          label: 'Leads' },
-              { path: '/calendar', icon: Calendar,        label: 'Calendar' },
-              { path: '/jobs',     icon: Briefcase,       label: 'Jobs' },
-            ].map(item => {
-              const active = item.path === '/' ? location === '/' : location.startsWith(item.path)
-              return (
-                <a
-                  key={item.path}
-                  href={`#${item.path}`}
-                  className={`flex flex-col items-center gap-0.5 px-4 py-2 min-h-[52px] justify-center transition-colors ${
-                    active ? 'text-primary' : 'text-muted-foreground'
-                  }`}
-                >
-                  <item.icon className={`h-5 w-5 transition-transform ${active ? 'scale-110' : ''}`} />
-                  <span className="text-[10px] font-semibold">{item.label}</span>
-                </a>
-              )
-            })}
-          </nav>
         </div>
       </div>
     </SidebarProvider>
