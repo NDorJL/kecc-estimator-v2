@@ -142,6 +142,28 @@ export const handler: Handler = async (event) => {
         .single()
       if (error) throw error
 
+      // ── Stamp sent_at on the linked quote when moved to 'quoted' ────────────
+      // This starts the 3-day unsigned-quote countdown on the dashboard regardless
+      // of whether the quote was delivered via SMS or handed over in person.
+      if (body.stage === 'quoted' && data.quote_id) {
+        try {
+          const { data: q } = await supabase
+            .from('quotes')
+            .select('id, sent_at')
+            .eq('id', data.quote_id)
+            .single()
+          if (q && !q.sent_at) {
+            await supabase
+              .from('quotes')
+              .update({ sent_at: new Date().toISOString() })
+              .eq('id', q.id)
+          }
+        } catch (_e) {
+          // Non-fatal — lead stage already saved successfully
+          console.error('[leads] Failed to stamp sent_at on quote:', _e instanceof Error ? _e.message : _e)
+        }
+      }
+
       // ── Auto-create/activate subscription when lead moves to 'recurring' ───
       // Ensures the lead's monthly value is always reflected in MRR metrics,
       // regardless of whether the stage was set manually or automatically.
