@@ -378,6 +378,22 @@ export const handler: Handler = async (event) => {
         .select()
         .single()
       if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Agreement not found' }) }
+
+      // ── Cascade: propagate signed_at to lead.agreement_signed_at ─────────  // ← NEW
+      // Keeps the frontend canSchedule gate in sync when signing happens        // ← NEW
+      // via API PATCH rather than the esign page (which already does this).    // ← NEW
+      if (body.signedAt !== undefined && data.lead_id) {                        // ← NEW
+        try {                                                                    // ← NEW
+          await supabase                                                         // ← NEW
+            .from('leads')                                                       // ← NEW
+            .update({ agreement_signed_at: body.signedAt })                     // ← NEW
+            .eq('id', data.lead_id)                                             // ← NEW
+        } catch (e) {                                                            // ← NEW
+          console.error('[agreements] Failed to stamp agreement_signed_at on lead:', // ← NEW
+            e instanceof Error ? e.message : e)                                 // ← NEW
+        }                                                                        // ← NEW
+      }                                                                          // ← NEW
+
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToServiceAgreement(data)) }
     }
 
