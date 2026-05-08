@@ -118,6 +118,8 @@ export const handler: Handler = async (event) => {
       if (body.signedIp !== undefined)       update.signed_ip = body.signedIp
       if (body.qbInvoiceId !== undefined)    update.qb_invoice_id = body.qbInvoiceId
       if (body.sentAt !== undefined)         update.sent_at = body.sentAt
+      if (body.amendments !== undefined)     update.amendments = body.amendments
+      if (body.originalTotal !== undefined)  update.original_total = body.originalTotal !== null ? Number(body.originalTotal) : null
       if (Object.keys(update).length === 0) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'No fields to update' }) }
       const { data, error } = await supabase.from('quotes').update(update).eq('id', id).select().single()
       if (error) {

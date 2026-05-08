@@ -4,7 +4,7 @@ import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import { quoCallUrl, quoTextUrl } from '@/lib/utils'
 import { useQuoteContext } from '@/lib/quote-context'
-import { Lead, Quote, Job, LeadStage, LineItem, Contact, QuoteAttachment, LeadPhotoStack } from '@/types'
+import { Lead, Quote, Job, LeadStage, LineItem, Contact, QuoteAttachment, LeadPhotoStack, QuoteAmendment, AmendmentType } from '@/types'
 import {
   DndContext,
   DragEndEvent,
@@ -508,11 +508,30 @@ function KanbanColumn({
 
 // ── Quote Detail inside Lead Sheet ───────────────────────────────────────────
 
+// Compute total from original + all amendments
+function computeAmendedTotal(quote: Quote): number {
+  const base = quote.originalTotal ?? quote.total
+  return base + quote.amendments.reduce((d, a) => {
+    if (a.type === 'addition')   return d + (a.addedAmount ?? 0)
+    if (a.type === 'adjustment') return d + (a.newAmount ?? 0) - (a.originalAmount ?? 0)
+    if (a.type === 'removal')    return d - (a.originalAmount ?? 0)
+    return d
+  }, 0)
+}
+
 function QuoteDetailPanel({ quote }: { quote: Quote }) {
   const fmt = (n: number) => `$${n.toFixed(2)}`
 
   const onetimeItems = quote.lineItems.filter(li => !li.isSubscription)
   const subItems = quote.lineItems.filter(li => li.isSubscription)
+
+  // Build a map from lineItemId → amendment for adjustments/removals
+  const amendmentByItem = new Map<string, QuoteAmendment>()
+  quote.amendments.forEach(a => { if (a.lineItemId) amendmentByItem.set(a.lineItemId, a) })
+  const additionAmendments = quote.amendments.filter(a => a.type === 'addition')
+  const hasAmendments = quote.amendments.length > 0
+
+  const amendedTotal = computeAmendedTotal(quote)
 
   return (
     <div className="rounded-xl border bg-muted/30 overflow-hidden">
@@ -547,27 +566,72 @@ function QuoteDetailPanel({ quote }: { quote: Quote }) {
 
       {/* Line items */}
       <div className="p-3 space-y-1">
+        {/* ── Original signed line items ── */}
         {onetimeItems.length > 0 && (
           <>
-            {onetimeItems.length > 0 && subItems.length > 0 && (
+            {subItems.length > 0 && (
               <p className="text-[10px] text-muted-foreground uppercase font-semibold mb-1">One-Time</p>
             )}
-            {onetimeItems.map((li, i) => (
-              <div key={i} className="flex justify-between items-start gap-2">
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium leading-snug">{li.serviceName}</p>
-                  {li.description && (
-                    <p className="text-[10px] text-muted-foreground leading-snug">{li.description}</p>
-                  )}
-                  {li.quantity !== 1 && (
-                    <p className="text-[10px] text-muted-foreground">
-                      {li.quantity} {li.unitLabel ?? 'units'} × ${li.unitPrice.toFixed(2)}
-                    </p>
-                  )}
+            {onetimeItems.map((li, i) => {
+              const amendment = amendmentByItem.get(li.serviceId)
+              if (amendment?.type === 'removal') {
+                return (
+                  <div key={i} className="flex justify-between items-start gap-2 pl-2 border-l-2 border-red-400/60">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs line-through text-muted-foreground/60 leading-snug">{li.serviceName}</p>
+                      {amendment.label && <p className="text-[10px] text-red-500/80 italic leading-snug">{amendment.label}</p>}
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-[10px] font-semibold text-red-500 uppercase tracking-wide">Removed</span>
+                      <span className="text-xs line-through text-muted-foreground/60 tabular-nums">{fmt(li.lineTotal)}</span>
+                    </div>
+                  </div>
+                )
+              }
+              if (amendment?.type === 'adjustment') {
+                return (
+                  <div key={i} className="space-y-0.5 pl-2 border-l-2 border-amber-400/60">
+                    {/* Original — struck through */}
+                    <div className="flex justify-between items-start gap-2 opacity-50">
+                      <p className="text-xs line-through leading-snug flex-1 min-w-0">{li.serviceName}</p>
+                      <span className="text-xs line-through tabular-nums shrink-0">{fmt(li.lineTotal)}</span>
+                    </div>
+                    {/* Amended — in amber */}
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-amber-600 dark:text-amber-400 leading-snug">
+                          {amendment.newName ?? li.serviceName}
+                        </p>
+                        {amendment.newDescription && (
+                          <p className="text-[10px] text-amber-600/70 dark:text-amber-400/70 italic leading-snug">{amendment.newDescription}</p>
+                        )}
+                        {amendment.label && (
+                          <p className="text-[10px] text-muted-foreground italic leading-snug">{amendment.label}</p>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wide">Adjusted</span>
+                        <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 tabular-nums">{fmt(amendment.newAmount ?? li.lineTotal)}</span>
+                      </div>
+                    </div>
+                  </div>
+                )
+              }
+              return (
+                <div key={i} className="flex justify-between items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium leading-snug">{li.serviceName}</p>
+                    {li.description && <p className="text-[10px] text-muted-foreground leading-snug">{li.description}</p>}
+                    {li.quantity !== 1 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        {li.quantity} {li.unitLabel ?? 'units'} × ${li.unitPrice.toFixed(2)}
+                      </p>
+                    )}
+                  </div>
+                  <span className="text-xs font-semibold tabular-nums shrink-0">{fmt(li.lineTotal)}</span>
                 </div>
-                <span className="text-xs font-semibold tabular-nums shrink-0">${li.lineTotal.toFixed(2)}</span>
-              </div>
-            ))}
+              )
+            })}
           </>
         )}
 
@@ -580,13 +644,38 @@ function QuoteDetailPanel({ quote }: { quote: Quote }) {
               <div key={i} className="flex justify-between items-start gap-2">
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium leading-snug">{li.serviceName}</p>
-                  {li.description && (
-                    <p className="text-[10px] text-muted-foreground leading-snug">{li.description}</p>
-                  )}
+                  {li.description && <p className="text-[10px] text-muted-foreground leading-snug">{li.description}</p>}
                 </div>
                 <span className="text-xs font-semibold tabular-nums shrink-0">
-                  ${(li.monthlyAmount ?? li.lineTotal).toFixed(2)}/mo
+                  {fmt(li.monthlyAmount ?? li.lineTotal)}/mo
                 </span>
+              </div>
+            ))}
+          </>
+        )}
+
+        {/* ── Post-signing additions ── */}
+        {additionAmendments.length > 0 && (
+          <>
+            {(onetimeItems.length > 0 || subItems.length > 0) && (
+              <div className="flex items-center gap-2 mt-2 mb-1">
+                <div className="h-px flex-1 bg-border/50" />
+                <span className="text-[10px] text-green-600 dark:text-green-400 font-semibold uppercase tracking-wide">Post-Signing Additions</span>
+                <div className="h-px flex-1 bg-border/50" />
+              </div>
+            )}
+            {additionAmendments.map(a => (
+              <div key={a.id} className="flex justify-between items-start gap-2 pl-2 border-l-2 border-green-400/60">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-green-700 dark:text-green-400 leading-snug">{a.label}</p>
+                  {a.addedDescription && (
+                    <p className="text-[10px] text-green-600/70 dark:text-green-400/70 italic leading-snug">{a.addedDescription}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">Added</span>
+                  <span className="text-xs font-semibold text-green-700 dark:text-green-400 tabular-nums">+{fmt(a.addedAmount ?? 0)}</span>
+                </div>
               </div>
             ))}
           </>
@@ -597,29 +686,34 @@ function QuoteDetailPanel({ quote }: { quote: Quote }) {
           {quote.discount != null && quote.discount > 0 && (
             <div className="flex justify-between">
               <span className="text-xs text-muted-foreground">Discount</span>
-              <span className="text-xs text-green-600 font-medium">−${quote.discount.toFixed(2)}</span>
+              <span className="text-xs text-green-600 font-medium">−{fmt(quote.discount)}</span>
+            </div>
+          )}
+          {/* Show original total + amended total when amendments exist */}
+          {hasAmendments && quote.originalTotal != null && (
+            <div className="flex justify-between">
+              <span className="text-xs text-muted-foreground">Original Signed Total</span>
+              <span className="text-xs text-muted-foreground tabular-nums line-through">{fmt(quote.originalTotal)}</span>
             </div>
           )}
           {onetimeItems.length > 0 && subItems.length > 0 ? (
             <>
               <div className="flex justify-between">
-                <span className="text-xs font-semibold">Due Today</span>
-                <span className="text-sm font-bold tabular-nums">
-                  ${onetimeItems.reduce((s, li) => s + li.lineTotal, 0).toFixed(2)}
-                </span>
+                <span className="text-xs font-semibold">{hasAmendments ? 'Amended Due Today' : 'Due Today'}</span>
+                <span className="text-sm font-bold tabular-nums">{fmt(amendedTotal)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-xs font-semibold">Monthly</span>
                 <span className="text-sm font-bold tabular-nums text-primary">
-                  ${subItems.reduce((s, li) => s + (li.monthlyAmount ?? li.lineTotal), 0).toFixed(2)}/mo
+                  {fmt(subItems.reduce((s, li) => s + (li.monthlyAmount ?? li.lineTotal), 0))}/mo
                 </span>
               </div>
             </>
           ) : (
             <div className="flex justify-between">
-              <span className="text-xs font-semibold">Total</span>
-              <span className="text-sm font-bold tabular-nums text-primary">
-                ${quote.total.toFixed(2)}{subItems.length > 0 ? '/mo' : ''}
+              <span className="text-xs font-semibold">{hasAmendments ? 'Amended Total' : 'Total'}</span>
+              <span className={`text-sm font-bold tabular-nums ${hasAmendments ? 'text-amber-600 dark:text-amber-400' : 'text-primary'}`}>
+                {fmt(amendedTotal)}{subItems.length > 0 ? '/mo' : ''}
               </span>
             </div>
           )}
@@ -776,11 +870,13 @@ function LeadDetailSheet({
     saveStacks(stacks.map(s => s.id === stackId ? { ...s, photos } : s))
   }, [stacks, saveStacks])
 
-  // Supplemental charge form state
-  const [showSupplemental, setShowSupplemental] = useState(false)
-  const [suppDesc, setSuppDesc] = useState('Supplemental Service')
-  const [suppNotes, setSuppNotes] = useState('')
-  const [suppAmount, setSuppAmount] = useState('')
+  // Amendment / supplemental form state
+  const [showAmendForm, setShowAmendForm] = useState(false)
+  const [amendMode, setAmendMode] = useState<AmendmentType>('addition')
+  const [amendLabel, setAmendLabel] = useState('')
+  const [amendDetails, setAmendDetails] = useState('')
+  const [amendAmount, setAmendAmount] = useState('')
+  const [amendLineItemId, setAmendLineItemId] = useState('')
 
   // Fetch existing jobs for this lead's quote so we can show what's already scheduled
   // Use lead.quoteId (the primary quote) as the stable reference for querying jobs
@@ -938,35 +1034,97 @@ function LeadDetailSheet({
   })
 
   // Add supplemental charge to the linked quote
-  const supplementalMutation = useMutation({
-    mutationFn: ({ desc, notes, amount }: { desc: string; notes: string; amount: number }) => {
+  const amendmentMutation = useMutation({
+    mutationFn: () => {
       if (!effectiveQuote) throw new Error('No quote linked')
-      const newItem: LineItem = {
-        serviceId:   `supp_${Date.now()}`,
-        serviceName: desc,
-        category:    'Supplemental',
-        description: notes || undefined,
-        quantity:    1,
-        unitPrice:   amount,
-        lineTotal:   amount,
-        isSubscription: false,
+      const isSigned = !!effectiveQuote.signedAt
+
+      if (!isSigned) {
+        // Unsigned quote — add directly to lineItems (original behavior)
+        const newItem: LineItem = {
+          serviceId:   `supp_${Date.now()}`,
+          serviceName: amendLabel || 'Supplemental Service',
+          category:    'Supplemental',
+          description: amendDetails || undefined,
+          quantity:    1,
+          unitPrice:   parseFloat(amendAmount),
+          lineTotal:   parseFloat(amendAmount),
+          isSubscription: false,
+        }
+        const updatedItems = [...effectiveQuote.lineItems, newItem]
+        const newTotal = updatedItems.reduce((s, li) => s + li.lineTotal, 0) - (effectiveQuote.discount ?? 0)
+        return apiRequest('PATCH', `/quotes/${effectiveQuote.id}`, { lineItems: updatedItems, total: newTotal })
       }
-      const updatedItems = [...effectiveQuote.lineItems, newItem]
-      const newTotal = updatedItems.reduce((s, li) => s + li.lineTotal, 0)
-        - (effectiveQuote.discount ?? 0)
+
+      // Signed quote — create an amendment record
+      const existingAmendments = effectiveQuote.amendments ?? []
+      let newAmendment: QuoteAmendment
+      const originalItem = effectiveQuote.lineItems.find(li => li.serviceId === amendLineItemId)
+
+      if (amendMode === 'addition') {
+        newAmendment = {
+          id: `amend_${Date.now()}`,
+          type: 'addition',
+          label: amendLabel || 'Supplemental Service',
+          addedAmount: parseFloat(amendAmount),
+          addedDescription: amendDetails || undefined,
+          createdAt: new Date().toISOString(),
+        }
+      } else if (amendMode === 'adjustment') {
+        if (!originalItem) throw new Error('Select a line item to adjust')
+        newAmendment = {
+          id: `amend_${Date.now()}`,
+          type: 'adjustment',
+          label: amendDetails || '',
+          lineItemId: originalItem.serviceId,
+          lineItemName: originalItem.serviceName,
+          originalAmount: originalItem.lineTotal,
+          newName: amendLabel || originalItem.serviceName,
+          newAmount: parseFloat(amendAmount),
+          createdAt: new Date().toISOString(),
+        }
+      } else {
+        // removal
+        if (!originalItem) throw new Error('Select a line item to remove')
+        newAmendment = {
+          id: `amend_${Date.now()}`,
+          type: 'removal',
+          label: amendDetails || '',
+          lineItemId: originalItem.serviceId,
+          lineItemName: originalItem.serviceName,
+          originalAmount: originalItem.lineTotal,
+          createdAt: new Date().toISOString(),
+        }
+      }
+
+      const updatedAmendments = [...existingAmendments, newAmendment]
+      // Recompute total from original + all amendments
+      const base = effectiveQuote.originalTotal ?? effectiveQuote.total
+      const newTotal = base + updatedAmendments.reduce((d, a) => {
+        if (a.type === 'addition')   return d + (a.addedAmount ?? 0)
+        if (a.type === 'adjustment') return d + (a.newAmount ?? 0) - (a.originalAmount ?? 0)
+        if (a.type === 'removal')    return d - (a.originalAmount ?? 0)
+        return d
+      }, 0)
       return apiRequest('PATCH', `/quotes/${effectiveQuote.id}`, {
-        lineItems: updatedItems,
+        amendments: updatedAmendments,
         total: newTotal,
       })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
-      setShowSupplemental(false)
-      setSuppDesc('Supplemental Service')
-      setSuppNotes('')
-      setSuppAmount('')
-      toast({ title: 'Charge added', description: `The updated total is reflected on the quote.` })
+      setShowAmendForm(false)
+      setAmendLabel('')
+      setAmendDetails('')
+      setAmendAmount('')
+      setAmendLineItemId('')
+      const msgs: Record<AmendmentType, string> = {
+        addition: 'Charge added to quote',
+        adjustment: 'Line item adjusted',
+        removal: 'Line item removed from scope',
+      }
+      toast({ title: msgs[amendMode] })
     },
     onError: (err: Error) => toast({ title: 'Failed', description: err.message, variant: 'destructive' }),
   })
@@ -1388,85 +1546,212 @@ function LeadDetailSheet({
             </div>
           )}
 
-          {/* ── Supplemental charge ───────────────────────────────────────── */}
-          {effectiveQuote && (
-            <div className="rounded-xl border border-dashed border-primary/30 p-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide">Add to Quote</p>
-                  <p className="text-[10px] text-muted-foreground">Extra work or materials not in the original scope</p>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-1.5 h-8 text-xs border-primary/40 text-primary hover:bg-primary/5"
-                  onClick={() => setShowSupplemental(v => !v)}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add Charge
-                </Button>
-              </div>
+          {/* ── Quote Amendments ──────────────────────────────────────────── */}
+          {effectiveQuote && (() => {
+            const isSigned = !!effectiveQuote.signedAt
+            const lineItemOptions = effectiveQuote.lineItems.filter(li => !li.isSubscription)
+            const selectedItem = lineItemOptions.find(li => li.serviceId === amendLineItemId)
 
-              {showSupplemental && (
-                <div className="space-y-2 pt-1">
+            // For signed quotes, validate based on mode
+            const additionValid  = amendLabel.trim() && parseFloat(amendAmount) > 0
+            const adjustmentValid = !!selectedItem && (amendLabel.trim() || amendAmount)
+            const removalValid   = !!selectedItem
+            const canSave = !amendmentMutation.isPending && (
+              amendMode === 'addition'   ? !!additionValid :
+              amendMode === 'adjustment' ? !!adjustmentValid : !!removalValid
+            )
+            // Unsigned: require label + amount
+            const unsignedValid = !isSigned && amendLabel.trim() && parseFloat(amendAmount) > 0
+
+            return (
+              <div className="rounded-xl border border-dashed border-primary/30 p-3 space-y-2">
+                <div className="flex items-center justify-between">
                   <div>
-                    <Label className="text-xs">Charge Name</Label>
-                    <Input
-                      value={suppDesc}
-                      onChange={e => setSuppDesc(e.target.value)}
-                      placeholder="Supplemental Service"
-                      className="mt-1 h-9 text-sm"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Details <span className="text-muted-foreground font-normal">(visible to customer)</span></Label>
-                    <Textarea
-                      value={suppNotes}
-                      onChange={e => setSuppNotes(e.target.value)}
-                      placeholder="e.g. Replaced damaged irrigation valve discovered during service — parts and labor included."
-                      rows={3}
-                      className="mt-1 text-sm resize-none"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Amount ($)</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={suppAmount}
-                      onChange={e => setSuppAmount(e.target.value)}
-                      placeholder="0.00"
-                      className="mt-1 h-9 text-sm"
-                    />
-                  </div>
-                  {suppAmount && parseFloat(suppAmount) > 0 && (
-                    <p className="text-[10px] text-muted-foreground">
-                      New quote total: <strong>{fmtMoney((effectiveQuote.total ?? 0) + parseFloat(suppAmount))}</strong>
+                    <p className="text-xs font-semibold uppercase tracking-wide">
+                      {isSigned ? 'Quote Amendments' : 'Add to Quote'}
                     </p>
-                  )}
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => { setShowSupplemental(false); setSuppDesc('Supplemental Service'); setSuppNotes(''); setSuppAmount('') }}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="flex-1"
-                      disabled={!suppDesc.trim() || !suppAmount || parseFloat(suppAmount) <= 0 || supplementalMutation.isPending}
-                      onClick={() => supplementalMutation.mutate({ desc: suppDesc.trim(), notes: suppNotes.trim(), amount: parseFloat(suppAmount) })}
-                    >
-                      {supplementalMutation.isPending ? 'Saving…' : 'Add to Quote'}
-                    </Button>
+                    <p className="text-[10px] text-muted-foreground">
+                      {isSigned
+                        ? 'Post-signing changes — original signed quote is preserved'
+                        : 'Extra work or materials not in the original scope'}
+                    </p>
                   </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 h-8 text-xs border-primary/40 text-primary hover:bg-primary/5"
+                    onClick={() => { setShowAmendForm(v => !v); setAmendMode('addition'); setAmendLabel(''); setAmendDetails(''); setAmendAmount(''); setAmendLineItemId('') }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {isSigned ? 'Add Amendment' : 'Add Charge'}
+                  </Button>
                 </div>
-              )}
-            </div>
-          )}
+
+                {showAmendForm && (
+                  <div className="space-y-3 pt-1">
+                    {/* Mode selector — only for signed quotes */}
+                    {isSigned && (
+                      <div className="flex gap-1 rounded-lg bg-muted p-1">
+                        {([
+                          { mode: 'addition' as AmendmentType,   label: '＋ Add Charge' },
+                          { mode: 'adjustment' as AmendmentType, label: '≈ Adjust Item' },
+                          { mode: 'removal' as AmendmentType,    label: '− Remove Item' },
+                        ] as const).map(({ mode, label }) => (
+                          <button
+                            key={mode}
+                            className={`flex-1 text-[11px] font-semibold py-1 rounded-md transition-colors ${
+                              amendMode === mode
+                                ? mode === 'addition'   ? 'bg-green-600 text-white'
+                                : mode === 'adjustment' ? 'bg-amber-500 text-white'
+                                :                         'bg-red-500 text-white'
+                                : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                            onClick={() => { setAmendMode(mode); setAmendLabel(''); setAmendAmount(''); setAmendLineItemId('') }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Line item picker — for adjustment and removal */}
+                    {isSigned && (amendMode === 'adjustment' || amendMode === 'removal') && (
+                      <div>
+                        <Label className="text-xs">Which line item?</Label>
+                        <Select value={amendLineItemId} onValueChange={v => {
+                          setAmendLineItemId(v)
+                          const item = lineItemOptions.find(li => li.serviceId === v)
+                          if (item) {
+                            setAmendLabel(item.serviceName)
+                            setAmendAmount(item.lineTotal.toFixed(2))
+                          }
+                        }}>
+                          <SelectTrigger className="mt-1 h-9 text-sm">
+                            <SelectValue placeholder="Select a line item…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {lineItemOptions.map(li => (
+                              <SelectItem key={li.serviceId} value={li.serviceId}>
+                                {li.serviceName} — {fmtMoney(li.lineTotal)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+
+                    {/* Name / label field */}
+                    {(amendMode === 'addition' || (isSigned && amendMode === 'adjustment')) && (
+                      <div>
+                        <Label className="text-xs">
+                          {amendMode === 'addition' ? 'Charge Name' : 'Updated Service Name'}
+                        </Label>
+                        <Input
+                          value={amendLabel}
+                          onChange={e => setAmendLabel(e.target.value)}
+                          placeholder={amendMode === 'addition' ? 'e.g. Irrigation Diagnostic' : selectedItem?.serviceName ?? ''}
+                          className="mt-1 h-9 text-sm"
+                        />
+                      </div>
+                    )}
+
+                    {/* Details / context */}
+                    {amendMode !== 'removal' && (
+                      <div>
+                        <Label className="text-xs">
+                          {amendMode === 'addition'
+                            ? 'Details (visible to customer)'
+                            : 'Scope change notes'}
+                        </Label>
+                        <Textarea
+                          value={amendDetails}
+                          onChange={e => setAmendDetails(e.target.value)}
+                          placeholder={
+                            amendMode === 'addition'
+                              ? 'e.g. Replaced damaged irrigation valve — parts and labor included.'
+                              : 'e.g. Customer elected to handle repair themselves — reduced to diagnostic fee only.'
+                          }
+                          rows={2}
+                          className="mt-1 text-sm resize-none"
+                        />
+                      </div>
+                    )}
+
+                    {/* Removal — reason only */}
+                    {amendMode === 'removal' && (
+                      <div>
+                        <Label className="text-xs">Reason for removal</Label>
+                        <Input
+                          value={amendDetails}
+                          onChange={e => setAmendDetails(e.target.value)}
+                          placeholder="e.g. Customer opted out of this portion of the scope"
+                          className="mt-1 h-9 text-sm"
+                        />
+                      </div>
+                    )}
+
+                    {/* Amount field — for addition and adjustment */}
+                    {(amendMode === 'addition' || (isSigned && amendMode === 'adjustment')) && (
+                      <div>
+                        <Label className="text-xs">
+                          {amendMode === 'addition' ? 'Amount ($)' : 'New Amount ($)'}
+                        </Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={amendAmount}
+                          onChange={e => setAmendAmount(e.target.value)}
+                          placeholder="0.00"
+                          className="mt-1 h-9 text-sm"
+                        />
+                        {amendMode === 'adjustment' && selectedItem && amendAmount && (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            Change: {parseFloat(amendAmount) >= selectedItem.lineTotal ? '+' : ''}{fmtMoney(parseFloat(amendAmount) - selectedItem.lineTotal)}
+                            {' '}&rarr; new total: <strong>{fmtMoney(computeAmendedTotal({ ...effectiveQuote, amendments: [...(effectiveQuote.amendments ?? [])] }) + parseFloat(amendAmount) - selectedItem.lineTotal)}</strong>
+                          </p>
+                        )}
+                        {amendMode === 'addition' && parseFloat(amendAmount) > 0 && (
+                          <p className="text-[10px] text-muted-foreground mt-1">
+                            New total: <strong>{fmtMoney(computeAmendedTotal(effectiveQuote) + parseFloat(amendAmount))}</strong>
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Removal confirmation info */}
+                    {amendMode === 'removal' && selectedItem && (
+                      <p className="text-[10px] text-muted-foreground">
+                        This will remove <strong>{selectedItem.serviceName}</strong> ({fmtMoney(selectedItem.lineTotal)}) from the invoice total.{' '}
+                        New total: <strong>{fmtMoney(computeAmendedTotal(effectiveQuote) - selectedItem.lineTotal)}</strong>
+                      </p>
+                    )}
+
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" className="flex-1"
+                        onClick={() => { setShowAmendForm(false); setAmendLabel(''); setAmendDetails(''); setAmendAmount(''); setAmendLineItemId('') }}>
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        className={`flex-1 ${
+                          amendMode === 'addition'   ? 'bg-green-600 hover:bg-green-700 text-white' :
+                          amendMode === 'adjustment' ? 'bg-amber-500 hover:bg-amber-600 text-white' :
+                                                      'bg-red-500 hover:bg-red-600 text-white'
+                        }`}
+                        disabled={isSigned ? !canSave : !unsignedValid || amendmentMutation.isPending}
+                        onClick={() => amendmentMutation.mutate()}
+                      >
+                        {amendmentMutation.isPending ? 'Saving…' :
+                          amendMode === 'addition'   ? 'Add Charge' :
+                          amendMode === 'adjustment' ? 'Save Adjustment' : 'Remove from Scope'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* ── Generate QB Invoice (Finished/Unpaid only) ────────────────── */}
           {inFinishedUnpaid && effectiveQuote && (

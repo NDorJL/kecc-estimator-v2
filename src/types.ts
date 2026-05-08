@@ -23,6 +23,31 @@ export interface LineItem {
   monthlyAmount?: number;
 }
 
+// ── Quote Amendments ──────────────────────────────────────────────────
+// Post-signing changes that preserve the original signed quote as-is.
+// 'addition'  — new charge added after signing
+// 'adjustment' — existing line item scope/price changed after signing
+// 'removal'   — existing line item removed or zeroed after signing
+export type AmendmentType = 'addition' | 'adjustment' | 'removal'
+
+export interface QuoteAmendment {
+  id: string
+  type: AmendmentType
+  label: string           // user-written context note
+  createdAt: string
+  // addition
+  addedAmount?: number
+  addedDescription?: string
+  // adjustment & removal — which original line item
+  lineItemId?: string
+  lineItemName?: string
+  originalAmount?: number
+  // adjustment only — the new values
+  newName?: string
+  newDescription?: string
+  newAmount?: number
+}
+
 export interface Quote {
   id: string;
   customerName: string;
@@ -49,6 +74,8 @@ export interface Quote {
   qbInvoiceId: string | null;
   sentAt: string | null;
   leadId: string | null;
+  amendments: QuoteAmendment[];
+  originalTotal: number | null;  // frozen at signing; null = pre-amendment era
 }
 
 // ── Subscription Types ─────────────────────────────────────────────────
@@ -324,6 +351,8 @@ export function rowToQuote(r: any): Quote {
     qbInvoiceId: r.qb_invoice_id ?? null,
     sentAt: r.sent_at ?? null,
     leadId: r.lead_id ?? null,
+    amendments: Array.isArray(r.amendments) ? r.amendments : [],
+    originalTotal: r.original_total != null ? Number(r.original_total) : null,
   };
 }
 

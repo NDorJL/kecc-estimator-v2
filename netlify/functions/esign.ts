@@ -1312,6 +1312,8 @@ export const handler: Handler = async (event) => {
           signed_at:      signedAt,
           signature_data: body.signatureData,
           signed_ip:      signedIp,
+          // Freeze the original total at signing — amendments layer on top of this
+          ...(quoteRow.original_total == null ? { original_total: quoteRow.total } : {}),
         }).eq('id', quoteRow.id)
         if (error) throw new Error(error.message)
 
