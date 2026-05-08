@@ -235,6 +235,7 @@ function PhotoStackCard({
   onViewPhoto: (url: string) => void
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [collapsed, setCollapsed] = useState(false)
   const [editingLabel, setEditingLabel] = useState(false)
   const [labelDraft, setLabelDraft] = useState(stack.label)
   const [descDraft, setDescDraft] = useState(stack.description)
@@ -265,6 +266,18 @@ function PhotoStackCard({
     >
       {/* Stack header */}
       <div className="flex items-start gap-2 p-3 pb-2">
+        {/* Collapse toggle */}
+        <button
+          className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+          onClick={() => setCollapsed(c => !c)}
+          title={collapsed ? 'Expand' : 'Collapse'}
+        >
+          {collapsed
+            ? <ChevronDown className="h-3.5 w-3.5" />
+            : <ChevronUp className="h-3.5 w-3.5" />
+          }
+        </button>
+
         <div className="flex-1 min-w-0">
           {editingLabel ? (
             <input
@@ -283,13 +296,15 @@ function PhotoStackCard({
               {stack.label}
             </button>
           )}
-          <input
-            value={descDraft}
-            onChange={e => setDescDraft(e.target.value)}
-            onBlur={() => onUpdateDescription(descDraft)}
-            placeholder="Add a description…"
-            className="w-full text-[11px] text-muted-foreground bg-transparent focus:outline-none placeholder:text-muted-foreground/40 mt-0.5 leading-tight"
-          />
+          {(!collapsed || stack.description) && (
+            <input
+              value={descDraft}
+              onChange={e => setDescDraft(e.target.value)}
+              onBlur={() => onUpdateDescription(descDraft)}
+              placeholder="Add a description…"
+              className="w-full text-[11px] text-muted-foreground bg-transparent focus:outline-none placeholder:text-muted-foreground/40 mt-0.5 leading-tight"
+            />
+          )}
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <span className="text-[10px] text-muted-foreground tabular-nums">{totalPhotos} photo{totalPhotos !== 1 ? 's' : ''}</span>
@@ -312,8 +327,8 @@ function PhotoStackCard({
         </div>
       </div>
 
-      {/* Photo grid */}
-      <div className="px-3 pb-3">
+      {/* Photo grid — hidden when collapsed */}
+      {!collapsed && <div className="px-3 pb-3">
         {stack.photos.length === 0 && !uploadingThisStack ? (
           <button
             className="w-full rounded-lg border border-dashed border-border/50 py-4 flex items-center justify-center gap-2 text-muted-foreground hover:bg-muted/30 transition-colors"
@@ -398,7 +413,7 @@ function PhotoStackCard({
             </button>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Hidden file input */}
       <input
