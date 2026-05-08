@@ -1852,6 +1852,112 @@ function metricIsDollar(k: MetricKey): boolean {
   return ['revenue', 'expenses', 'net', 'quoteValue'].includes(k)
 }
 
+// ── Jobs-done counting: subscription occurrences + finished leads ─────────────
+
+/**
+ * Count subscription service occurrences within a bucket where the date ≤ today.
+ * Mirrors the scheduling math in CalendarPage generateSubEvents but works across
+ * an arbitrary date range rather than a single month.
+ */
+function countSubOccurrencesInBucket(subs: Subscription[], b: Bucket): number {
+  const todayEnd = new Date()
+  todayEnd.setHours(23, 59, 59, 999)
+  const windowEnd = b.end < todayEnd ? b.end : todayEnd
+  if (b.start > windowEnd) return 0
+
+  let count = 0
+
+  subs.forEach(sub => {
+    if (sub.status !== 'ACTIVE') return
+
+    const schedules = sub.serviceSchedules ?? []
+
+    const countSchedule = (
+      sy: number, sm: number, sd: number,
+      freq: string,
+      dayOfWeekTarget: number | null, // null = use startDate DOW (fallback path)
+    ) => {
+      const schStart = new Date(sy, sm - 1, sd, 12, 0, 0, 0)
+      const isDateBased = freq.includes('quarter') || freq.includes('annual')
+      const effectiveStart = schStart > b.start ? schStart : new Date(b.start)
+      effectiveStart.setHours(12, 0, 0, 0)
+      const endCap = new Date(windowEnd)
+      endCap.setHours(12, 0, 0, 0)
+
+      const dow = dayOfWeekTarget ?? new Date(sy, sm - 1, sd).getDay()
+
+      const cursor = new Date(effectiveStart)
+      while (cursor <= endCap) {
+        const year  = cursor.getFullYear()
+        const month = cursor.getMonth()
+        const day   = cursor.getDate()
+        const daysInMonth = new Date(year, month + 1, 0).getDate()
+
+        if (isDateBased) {
+          const totalMonths = (year - sy) * 12 + ((month + 1) - sm)
+          const interval = freq.includes('quarter') ? 3 : 12
+          if (totalMonths % interval === 0 && day === sd) count++
+        } else {
+          if (cursor.getDay() === dow) {
+            if (freq.includes('bi') && freq.includes('week')) {
+              const startSunday = new Date(sy, sm - 1, sd - new Date(sy, sm - 1, sd).getDay())
+              const thisSunday  = new Date(year, month, day - cursor.getDay())
+              const weekDiff = Math.round((thisSunday.getTime() - startSunday.getTime()) / (7 * 86400000))
+              if (weekDiff % 2 === 0) count++
+            } else if (freq.includes('month')) {
+              // Monthly: only the weekday occurrence closest to the original day-of-month
+              const occs: number[] = []
+              for (let d2 = 1; d2 <= daysInMonth; d2++) {
+                if (new Date(year, month, d2).getDay() === dow) occs.push(d2)
+              }
+              const best = occs.reduce((a, b2) => Math.abs(a - sd) <= Math.abs(b2 - sd) ? a : b2)
+              if (day === best) {
+                if (freq.includes('bi')) {
+                  const totalMonths = (year - sy) * 12 + ((month + 1) - sm)
+                  if (totalMonths % 2 === 0) count++
+                } else {
+                  count++
+                }
+              }
+            } else {
+              // Weekly (every matching weekday)
+              count++
+            }
+          }
+        }
+        cursor.setDate(cursor.getDate() + 1)
+      }
+    }
+
+    if (schedules.length > 0) {
+      for (const sch of schedules) {
+        const [sy, sm, sd] = sch.startDate.split('-').map(Number)
+        countSchedule(sy, sm, sd, (sch.frequency ?? '').toLowerCase(), sch.dayOfWeek)
+      }
+    } else {
+      // Fallback: subs with services[] but no serviceSchedules yet
+      const [sy, sm, sd] = (sub.startDate ?? '').split('-').map(Number)
+      if (!sy) return
+      for (const svc of sub.services ?? []) {
+        countSchedule(sy, sm, sd, (svc.frequency ?? '').toLowerCase(), null)
+      }
+    }
+  })
+
+  return count
+}
+
+/**
+ * Jobs-done count for a bucket: subscription occurrences (date passed)
+ * + one-time leads that have reached a finished stage (using createdAt as proxy).
+ */
+function countJobsDone(leads: Lead[], subs: Subscription[], b: Bucket): number {
+  const finishedLeads = leads.filter(l =>
+    (l.stage === 'finished_paid' || l.stage === 'finished_unpaid') && inBucket(l.createdAt, b)
+  ).length
+  return finishedLeads + countSubOccurrencesInBucket(subs, b)
+}
+
 function computeMetric(
   k: MetricKey,
   b: Bucket,
@@ -1860,6 +1966,7 @@ function computeMetric(
   leads: Lead[],
   jobs: Job[],
   contacts: Contact[],
+  subs: Subscription[],
 ): number {
   switch (k) {
     case 'revenue':   return txs.filter(t => t.type === 'Income'  && inBucket(t.date, b)).reduce((s, t) => s + Number(t.amount), 0)
@@ -1871,7 +1978,7 @@ function computeMetric(
     }
     case 'quoteValue':    return quotes.filter(q => !q.trashedAt && inBucket(q.createdAt, b)).reduce((s, q) => s + (q.total || 0), 0)
     case 'leadsCreated':  return leads.filter(l => inBucket(l.createdAt, b)).length
-    case 'jobsCompleted': return jobs.filter(j => j.status === 'completed' && inBucket(j.completedAt ?? j.scheduledDate ?? j.createdAt, b)).length
+    case 'jobsCompleted': return countJobsDone(leads, subs, b)
     case 'newContacts':   return contacts.filter(c => inBucket(c.createdAt, b)).length
     case 'quotesCreated': return quotes.filter(q => !q.trashedAt && inBucket(q.createdAt, b)).length
   }
@@ -1885,9 +1992,10 @@ function computeKpiForWindow(
   leads: Lead[],
   jobs: Job[],
   contacts: Contact[],
+  subs: Subscription[],
 ): number {
   const fakeBucket: Bucket = { label: '', start: win.start, end: win.end }
-  return computeMetric(k, fakeBucket, txs, quotes, leads, jobs, contacts)
+  return computeMetric(k, fakeBucket, txs, quotes, leads, jobs, contacts, subs)
 }
 
 function deltaBadge(cur: number, prior: number): { pct: number; up: boolean } | null {
@@ -1940,13 +2048,11 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
   const txsInRange     = useMemo(() => transactions.filter(t => inWindow(t.date, curWin)), [transactions, curWin])
   const quotesInRange  = useMemo(() => quotes.filter(q => !q.trashedAt && inWindow(q.createdAt, curWin)), [quotes, curWin])
   const leadsInRange   = useMemo(() => leads.filter(l => inWindow(l.createdAt, curWin)), [leads, curWin])
-  // Jobs completed: prefer completedAt, fall back to scheduledDate, then createdAt.
-  // This ensures older jobs with no completedAt/scheduledDate still count.
-  const jobsInRange = useMemo(() => jobs.filter(j => {
-    if (j.status !== 'completed') return false
-    const dateToCheck = j.completedAt ?? j.scheduledDate ?? j.createdAt ?? ''
-    return dateToCheck ? inWindow(dateToCheck, curWin) : true
-  }), [jobs, curWin])
+  // Jobs done: subscription service occurrences where date has passed + finished-stage leads
+  const jobsInRange = useMemo(() => {
+    const fakeBucket: Bucket = { label: '', start: curWin.start, end: curWin.end }
+    return countJobsDone(leads, subs, fakeBucket)
+  }, [leads, subs, curWin])
   const contactsInRange = useMemo(() => contacts.filter(c => inWindow(c.createdAt, curWin)), [contacts, curWin])
 
   const txsPrior    = useMemo(() => transactions.filter(t => inWindow(t.date, priorWin)), [transactions, priorWin])
@@ -1980,12 +2086,10 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
   const priorExpenses = useMemo(() => txsPrior.filter(t => t.type === 'Expense').reduce((s, t) => s + Number(t.amount), 0), [txsPrior])
   const priorNet      = priorRevenue - priorExpenses
   const priorLeads    = useMemo(() => leads.filter(l => inWindow(l.createdAt, priorWin)).length, [leads, priorWin])
-  // Bug 9 fix (prior period): same completedAt ?? scheduledDate fallback
-  const priorJobs     = useMemo(() => jobs.filter(j => {
-    if (j.status !== 'completed') return false
-    const dateToCheck = j.completedAt ?? j.scheduledDate ?? j.createdAt ?? ''
-    return dateToCheck ? inWindow(dateToCheck, priorWin) : true
-  }).length, [jobs, priorWin])
+  const priorJobs     = useMemo(() => {
+    const fakeBucket: Bucket = { label: '', start: priorWin.start, end: priorWin.end }
+    return countJobsDone(leads, subs, fakeBucket)
+  }, [leads, subs, priorWin])
   const priorWinDenom = useMemo(() => quotes.filter(q => !q.trashedAt && inWindow(q.createdAt, priorWin) && ['sent','accepted','declined'].includes(q.status)).length, [quotes, priorWin])
   const priorAccepted = useMemo(() => quotes.filter(q => q.status === 'accepted' && !q.trashedAt && inWindow(q.createdAt, priorWin)).length, [quotes, priorWin])
   const priorWinRate  = priorWinDenom > 0 ? (priorAccepted / priorWinDenom) * 100 : 0
@@ -1994,14 +2098,14 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
   const buckets = useMemo(() => getBuckets(range, granularity), [range, granularity])
 
   const heroData = useMemo(() => buckets.map(b => {
-    const pVal = computeMetric(primary, b, transactions, quotes, leads, jobs, contacts)
-    const oVal = overlay ? computeMetric(overlay, b, transactions, quotes, leads, jobs, contacts) : undefined
+    const pVal = computeMetric(primary, b, transactions, quotes, leads, jobs, contacts, subs)
+    const oVal = overlay ? computeMetric(overlay, b, transactions, quotes, leads, jobs, contacts, subs) : undefined
     return { label: b.label, primary: pVal, ...(oVal !== undefined ? { overlay: oVal } : {}) }
-  }), [buckets, primary, overlay, transactions, quotes, leads, jobs, contacts])
+  }), [buckets, primary, overlay, transactions, quotes, leads, jobs, contacts, subs])
 
   const primaryTotal   = heroData.reduce((s, d) => s + d.primary, 0)
   const primaryAvg     = heroData.length > 0 ? primaryTotal / heroData.length : 0
-  const priorPrimary   = useMemo(() => computeKpiForWindow(primary, priorWin, transactions, quotes, leads, jobs, contacts), [primary, priorWin, transactions, quotes, leads, jobs, contacts])
+  const priorPrimary   = useMemo(() => computeKpiForWindow(primary, priorWin, transactions, quotes, leads, jobs, contacts, subs), [primary, priorWin, transactions, quotes, leads, jobs, contacts, subs])
   const heroDelta      = deltaBadge(primaryTotal, priorPrimary)
 
   // ── Chart sub-data ────────────────────────────────────────────────────────
@@ -2291,7 +2395,7 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
     lines.push(`Net Profit:       ${fmtD(netProfit)}`)
     lines.push(`Quote Win Rate:   ${winRate.toFixed(1)}%`)
     lines.push(`New Leads:        ${leadsInRange.length}`)
-    lines.push(`Jobs Completed:   ${jobsInRange.length}`)
+    lines.push(`Jobs Completed:   ${jobsInRange}`)
     lines.push('')
     lines.push('── QUOTES ───────────────────────────────────────')
     lines.push(`Sent:     ${sentInRange.length}`)
@@ -2362,7 +2466,7 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
           { label: 'Net Profit', val: netProfit, prior: priorNet, dollar: true },
           { label: 'Quote Win Rate', val: winRate, prior: priorWinRate, dollar: false, suffix: '%', decimals: 1 },
           { label: 'New Leads', val: leadsInRange.length, prior: priorLeads, dollar: false },
-          { label: 'Jobs Completed', val: jobsInRange.length, prior: priorJobs, dollar: false },
+          { label: 'Jobs Completed', val: jobsInRange, prior: priorJobs, dollar: false },
         ].map(({ label, val, prior, dollar, suffix = '', decimals = 0 }) => (
           <div key={label} className="rounded-xl border bg-card p-3 space-y-0.5">
             <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
