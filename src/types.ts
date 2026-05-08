@@ -23,6 +23,18 @@ export interface LineItem {
   monthlyAmount?: number;
 }
 
+// ── Quote Option Groups ────────────────────────────────────────────────
+// Selectable scope options shown on the esign page. Customer picks which
+// ones they want before signing; total updates to reflect their choices.
+export interface QuoteOptionGroup {
+  id: string
+  label: string           // "Crack Fill", "Full Seal Coat Package"
+  description?: string    // what's included in this option
+  amount: number          // price for this option
+  isAddon: boolean        // if true, shown in a separate "Add-Ons" section
+  selectedByDefault: boolean  // pre-checked on the esign page
+}
+
 // ── Quote Amendments ──────────────────────────────────────────────────
 // Post-signing changes that preserve the original signed quote as-is.
 // 'addition'  — new charge added after signing
@@ -77,6 +89,8 @@ export interface Quote {
   amendments: QuoteAmendment[];
   originalTotal: number | null;  // frozen at signing; null = pre-amendment era
   revisedFromId: string | null;  // set on revision quotes; points to the original signed quote
+  optionGroups: QuoteOptionGroup[];
+  selectedOptionGroupIds: string[] | null;  // null = not yet signed; set at signing
 }
 
 // ── Subscription Types ─────────────────────────────────────────────────
@@ -355,6 +369,8 @@ export function rowToQuote(r: any): Quote {
     amendments: Array.isArray(r.amendments) ? r.amendments : [],
     originalTotal: r.original_total != null ? Number(r.original_total) : null,
     revisedFromId: r.revised_from_id ?? null,
+    optionGroups: Array.isArray(r.option_groups) ? r.option_groups : [],
+    selectedOptionGroupIds: Array.isArray(r.selected_option_group_ids) ? r.selected_option_group_ids : null,
   };
 }
 

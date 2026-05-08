@@ -114,10 +114,12 @@ function sigScript(token: string, buttonLabel: string, funcUrl: string): string 
     err.style.display='none';
     btn.disabled=true;
     btn.textContent='Submitting\u2026';
+    var payload={signatureData:canvas.toDataURL('image/png')};
+    if(window._getSelectedOptIds){payload.selectedOptionGroupIds=window._getSelectedOptIds();}
     fetch(FUNC_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({signatureData:canvas.toDataURL('image/png')})
+      body:JSON.stringify(payload)
     })
     .then(function(r){return r.json();})
     .then(function(d){
@@ -176,12 +178,15 @@ function buildQuotePage(opts: {
   alreadySigned: boolean
   signedAt: string | null
   isSubscriptionQuote: boolean
+  optionGroups?: Array<{ id: string; label: string; description?: string; amount: number; isAddon: boolean; selectedByDefault: boolean }>
+  selectedOptionGroupIds?: string[] | null
 }): string {
   const {
     token, customerName, customerAddress, customerPhone, customerEmail, businessName,
     companyName, companyAddress, companyPhone, companyEmail, logoUrl,
     quoteId, quoteDate, lineItems, notes, quoteFooter,
     alreadySigned, signedAt, isSubscriptionQuote,
+    optionGroups = [], selectedOptionGroupIds = null,
   } = opts
 
   const onetimeItems = lineItems.filter(i => !i.isSubscription)
@@ -228,6 +233,92 @@ function buildQuotePage(opts: {
     }
     return `<tr class="tr-total"><td colspan="2" class="td-label td-total-label">Total</td><td class="td-num td-total-val">${fmtMoney(onetimeTotal)}</td></tr>`
   })()
+
+  // ── Option Groups HTML (interactive selector shown before signature) ──
+  const baseLineTotal = onetimeTotal + monthlyTotal
+  const mainOptions = optionGroups.filter(g => !g.isAddon)
+  const addonOptions = optionGroups.filter(g => g.isAddon)
+  const hasOptions = optionGroups.length > 0
+
+  const optionGroupsHtml = hasOptions ? (() => {
+    const renderOption = (g: typeof optionGroups[0]) => {
+      const isChecked = selectedOptionGroupIds
+        ? selectedOptionGroupIds.includes(g.id)
+        : g.selectedByDefault
+      const checkedAttr = isChecked ? ' checked' : ''
+      const borderColor = isChecked ? '#16a34a' : '#e5e7eb'
+      const bgColor = isChecked ? '#f0fdf4' : '#ffffff'
+      return `
+      <label class="opt-label" data-id="${esc(g.id)}"
+        style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:2px solid ${borderColor};border-radius:10px;margin-bottom:8px;cursor:pointer;background:${bgColor};transition:border-color 0.15s,background 0.15s;"
+        onclick="toggleOpt(this)">
+        <input type="checkbox" class="opt-check" value="${esc(g.id)}" data-amount="${g.amount}"${checkedAttr}
+          style="width:18px;height:18px;margin-top:2px;flex-shrink:0;cursor:pointer;" onclick="event.stopPropagation();">
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <span style="font-size:14px;font-weight:700;color:#111827;">${esc(g.label)}</span>
+            <span style="font-size:14px;font-weight:700;color:#16a34a;white-space:nowrap;">${fmtMoney(g.amount)}</span>
+          </div>
+          ${g.description ? `<p style="margin:4px 0 0;font-size:12px;color:#6b7280;line-height:1.4;">${esc(g.description)}</p>` : ''}
+        </div>
+      </label>`
+    }
+
+    const alreadySignedNote = alreadySigned && selectedOptionGroupIds
+      ? `<p style="font-size:12px;color:#6b7280;margin-top:8px;font-style:italic;">Selections recorded at signing.</p>`
+      : ''
+
+    const mainSection = mainOptions.length > 0 ? `
+      <p style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;margin:0 0 10px;">Choose Your Services</p>
+      ${mainOptions.map(renderOption).join('')}` : ''
+
+    const addonSection = addonOptions.length > 0 ? `
+      <p style="font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;margin:16px 0 10px;">Available Add-Ons</p>
+      ${addonOptions.map(renderOption).join('')}` : ''
+
+    return `
+    <div style="margin:20px 0;padding-top:20px;border-top:1px solid #f0f0f0;">
+      <p style="margin:0 0 14px;font-size:15px;font-weight:700;color:#111827;">Select Your Scope of Work</p>
+      <p style="margin:0 0 16px;font-size:13px;color:#6b7280;">Check the services you'd like to include. Your total will update automatically.</p>
+      ${mainSection}
+      ${addonSection}
+      ${alreadySignedNote}
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px;background:#f9fafb;border-radius:10px;margin-top:8px;border:1px solid #e5e7eb;">
+        <span style="font-size:13px;font-weight:600;color:#374151;">${baseLineTotal > 0 ? 'Base Services + ' : ''}Selected Options Total</span>
+        <span id="opts-grand-total" style="font-size:18px;font-weight:800;color:#111827;">${fmtMoney(baseLineTotal + optionGroups.filter(g => selectedOptionGroupIds ? selectedOptionGroupIds.includes(g.id) : g.selectedByDefault).reduce((s, g) => s + g.amount, 0))}</span>
+      </div>
+    </div>
+    <script>
+    (function(){
+      var BASE=${baseLineTotal};
+      function updateOpts(){
+        var t=BASE;
+        document.querySelectorAll('.opt-check').forEach(function(cb){
+          if(cb.checked) t+=parseFloat(cb.dataset.amount||'0');
+        });
+        var el=document.getElementById('opts-grand-total');
+        if(el) el.textContent='$'+t.toFixed(2);
+      }
+      function toggleOpt(label){
+        var cb=label.querySelector('.opt-check');
+        if(cb){
+          cb.checked=!cb.checked;
+          label.style.borderColor=cb.checked?'#16a34a':'#e5e7eb';
+          label.style.background=cb.checked?'#f0fdf4':'#ffffff';
+          updateOpts();
+        }
+      }
+      window.toggleOpt=toggleOpt;
+      // Capture selections into hidden field before fetch (in sigScript)
+      window._getSelectedOptIds=function(){
+        var ids=[];
+        document.querySelectorAll('.opt-check:checked').forEach(function(cb){ids.push(cb.value);});
+        return ids;
+      };
+      updateOpts();
+    })();
+    <\/script>`
+  })() : ''
 
   const logoHtml = logoUrl
     ? `<img src="${esc(logoUrl)}" alt="${esc(companyName)}" style="max-height:56px;max-width:140px;object-fit:contain;display:block;margin-bottom:8px;">`
@@ -359,6 +450,8 @@ function buildQuotePage(opts: {
         <p class="label-xs">Notes</p>
         <p style="margin:0;font-size:13px;color:#374151;white-space:pre-wrap;">${esc(notes)}</p>
       </div>` : ''}
+
+      ${optionGroupsHtml}
 
       ${quoteFooter ? `<div style="margin-top:20px;text-align:center;">
         <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.5;">${esc(quoteFooter)}</p>
@@ -1157,6 +1250,9 @@ export const handler: Handler = async (event) => {
       // ── Quote page ───────────────────────────────────────────────────────
       if (quoteRow) {
         const lineItems: LineItemData[] = Array.isArray(quoteRow.line_items) ? quoteRow.line_items : []
+        const optionGroups: Array<{ id: string; label: string; description?: string; amount: number; isAddon: boolean; selectedByDefault: boolean }> =
+          Array.isArray(quoteRow.option_groups) ? quoteRow.option_groups : []
+        const selectedOptionGroupIds: string[] | null = Array.isArray(quoteRow.selected_option_group_ids) ? quoteRow.selected_option_group_ids : null
         const html = buildQuotePage({
           token,
           customerName:    quoteRow.customer_name    ?? '',
@@ -1177,6 +1273,8 @@ export const handler: Handler = async (event) => {
           alreadySigned:      !!quoteRow.signed_at,
           signedAt:           quoteRow.signed_at ?? null,
           isSubscriptionQuote: isSubscriptionQuote(quoteRow.quote_type),
+          optionGroups,
+          selectedOptionGroupIds,
         })
         return { statusCode: 200, headers: HTML_HEADERS, body: html }
       }
@@ -1293,7 +1391,7 @@ export const handler: Handler = async (event) => {
         return { statusCode: 404, headers: JSON_HEADERS, body: JSON.stringify({ success: false, message: 'Invalid token' }) }
       }
 
-      let body: { signatureData?: string; printedName?: string } = {}
+      let body: { signatureData?: string; printedName?: string; selectedOptionGroupIds?: string[] } = {}
       try { body = JSON.parse(event.body ?? '{}') } catch (_e) { /* ignore */ }
 
       if (!body.signatureData) {
@@ -1307,13 +1405,31 @@ export const handler: Handler = async (event) => {
         if (quoteRow.signed_at) {
           return { statusCode: 409, headers: JSON_HEADERS, body: JSON.stringify({ success: false, message: 'Already signed' }) }
         }
+        // Compute final total: lineItems total + selected option groups
+        const optGroups: Array<{ id: string; amount: number; selectedByDefault: boolean }> =
+          Array.isArray(quoteRow.option_groups) ? quoteRow.option_groups : []
+        const selectedIds: string[] = Array.isArray(body.selectedOptionGroupIds)
+          ? body.selectedOptionGroupIds
+          : optGroups.filter(g => g.selectedByDefault).map(g => g.id)
+        const lineItemsTotal = Array.isArray(quoteRow.line_items)
+          ? (quoteRow.line_items as Array<{lineTotal?: number; isSubscription?: boolean}>)
+              .reduce((s, li) => s + (li.isSubscription ? 0 : Number(li.lineTotal ?? 0)), 0)
+          : Number(quoteRow.total)
+        const optionsTotal = optGroups
+          .filter(g => selectedIds.includes(g.id))
+          .reduce((s, g) => s + g.amount, 0)
+        const finalTotal = optGroups.length > 0 ? lineItemsTotal + optionsTotal : Number(quoteRow.total)
+
         const { error } = await supabase.from('quotes').update({
-          status:         'accepted',
-          signed_at:      signedAt,
-          signature_data: body.signatureData,
-          signed_ip:      signedIp,
-          // Freeze the original total at signing — amendments layer on top of this
+          status:                   'accepted',
+          signed_at:                signedAt,
+          signature_data:           body.signatureData,
+          signed_ip:                signedIp,
           ...(quoteRow.original_total == null ? { original_total: quoteRow.total } : {}),
+          ...(optGroups.length > 0 ? {
+            selected_option_group_ids: selectedIds,
+            total: finalTotal,
+          } : {}),
         }).eq('id', quoteRow.id)
         if (error) throw new Error(error.message)
 

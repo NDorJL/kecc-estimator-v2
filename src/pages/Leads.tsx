@@ -4,7 +4,7 @@ import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import { quoCallUrl, quoTextUrl } from '@/lib/utils'
 import { useQuoteContext } from '@/lib/quote-context'
-import { Lead, Quote, Job, LeadStage, LineItem, Contact, QuoteAttachment, LeadPhotoStack, QuoteAmendment, AmendmentType } from '@/types'
+import { Lead, Quote, Job, LeadStage, LineItem, Contact, QuoteAttachment, LeadPhotoStack, QuoteAmendment, AmendmentType, QuoteOptionGroup } from '@/types'
 import {
   DndContext,
   DragEndEvent,
@@ -750,6 +750,53 @@ function QuoteDetailPanel({ quote }: { quote: Quote }) {
         </div>
       </div>
 
+      {/* Option Groups — shown when quote has selectable scope options */}
+      {quote.optionGroups.length > 0 && (
+        <div className="px-3 pb-3 space-y-1.5">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="h-px flex-1 bg-border/50" />
+            <span className="text-[10px] text-violet-600 font-semibold uppercase tracking-wide">Scope Options</span>
+            <div className="h-px flex-1 bg-border/50" />
+          </div>
+          {quote.optionGroups.filter(g => !g.isAddon).map(g => {
+            const selected = quote.selectedOptionGroupIds
+              ? quote.selectedOptionGroupIds.includes(g.id)
+              : g.selectedByDefault
+            return (
+              <div key={g.id} className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 border text-xs ${selected ? 'border-violet-300/50 bg-violet-50/20' : 'border-border/40 opacity-60'}`}>
+                <span className={`h-4 w-4 rounded shrink-0 flex items-center justify-center border ${selected ? 'bg-violet-600 border-violet-600 text-white' : 'border-muted-foreground/40'}`}>
+                  {selected && <CheckCircle2 className="h-3 w-3" />}
+                </span>
+                <span className="flex-1 font-medium truncate">{g.label}</span>
+                <span className={`font-bold tabular-nums shrink-0 ${selected ? 'text-violet-600' : 'text-muted-foreground'}`}>{fmtMoney(g.amount)}</span>
+              </div>
+            )
+          })}
+          {quote.optionGroups.filter(g => g.isAddon).length > 0 && (
+            <>
+              <p className="text-[10px] text-muted-foreground font-semibold uppercase mt-1">Add-Ons</p>
+              {quote.optionGroups.filter(g => g.isAddon).map(g => {
+                const selected = quote.selectedOptionGroupIds
+                  ? quote.selectedOptionGroupIds.includes(g.id)
+                  : g.selectedByDefault
+                return (
+                  <div key={g.id} className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 border text-xs ${selected ? 'border-violet-300/50 bg-violet-50/20' : 'border-border/40 opacity-60'}`}>
+                    <span className={`h-4 w-4 rounded shrink-0 flex items-center justify-center border ${selected ? 'bg-violet-600 border-violet-600 text-white' : 'border-muted-foreground/40'}`}>
+                      {selected && <CheckCircle2 className="h-3 w-3" />}
+                    </span>
+                    <span className="flex-1 font-medium truncate">{g.label}</span>
+                    <span className={`font-bold tabular-nums shrink-0 ${selected ? 'text-violet-600' : 'text-muted-foreground'}`}>{fmtMoney(g.amount)}</span>
+                  </div>
+                )
+              })}
+            </>
+          )}
+          {!quote.selectedOptionGroupIds && (
+            <p className="text-[10px] text-muted-foreground italic">Customer selects their preferred scope when signing</p>
+          )}
+        </div>
+      )}
+
       {/* Status + date */}
       <div className="px-3 pb-3 flex items-center justify-between">
         <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${QUOTE_STATUS_COLORS[quote.status] ?? 'bg-muted text-muted-foreground'}`}>
@@ -907,6 +954,15 @@ function LeadDetailSheet({
   const [amendDetails, setAmendDetails] = useState('')
   const [amendAmount, setAmendAmount] = useState('')
   const [amendLineItemId, setAmendLineItemId] = useState('')
+
+  // Quote option groups
+  const [showOptionForm, setShowOptionForm] = useState(false)
+  const [optionLabel, setOptionLabel] = useState('')
+  const [optionDescription, setOptionDescription] = useState('')
+  const [optionAmount, setOptionAmount] = useState('')
+  const [optionIsAddon, setOptionIsAddon] = useState(false)
+  const [optionSelectedByDefault, setOptionSelectedByDefault] = useState(true)
+  const [editingOptionId, setEditingOptionId] = useState<string | null>(null)
 
   // Fetch existing jobs for this lead's quote so we can show what's already scheduled
   // Use lead.quoteId (the primary quote) as the stable reference for querying jobs
@@ -1189,6 +1245,58 @@ function LeadDetailSheet({
     },
     onError: (err: Error) => toast({ title: 'Failed', description: err.message, variant: 'destructive' }),
   })
+
+  // Save quote option groups
+  const saveOptionGroupsMutation = useMutation({
+    mutationFn: (groups: QuoteOptionGroup[]) => {
+      if (!effectiveQuote) throw new Error('No quote linked')
+      return apiRequest('PATCH', `/quotes/${effectiveQuote.id}`, { optionGroups: groups })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/quotes'] })
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+    },
+    onError: (err: Error) => toast({ title: 'Failed to save options', description: err.message, variant: 'destructive' }),
+  })
+
+  function saveOptionGroup() {
+    if (!effectiveQuote || !optionLabel.trim() || !optionAmount) return
+    const existing = effectiveQuote.optionGroups ?? []
+    const newGroup: QuoteOptionGroup = {
+      id: editingOptionId ?? `opt_${Date.now()}`,
+      label: optionLabel.trim(),
+      description: optionDescription.trim() || undefined,
+      amount: parseFloat(optionAmount),
+      isAddon: optionIsAddon,
+      selectedByDefault: optionSelectedByDefault,
+    }
+    const updated = editingOptionId
+      ? existing.map(g => g.id === editingOptionId ? newGroup : g)
+      : [...existing, newGroup]
+    saveOptionGroupsMutation.mutate(updated)
+    setShowOptionForm(false)
+    setOptionLabel('')
+    setOptionDescription('')
+    setOptionAmount('')
+    setOptionIsAddon(false)
+    setOptionSelectedByDefault(true)
+    setEditingOptionId(null)
+  }
+
+  function deleteOptionGroup(id: string) {
+    if (!effectiveQuote) return
+    saveOptionGroupsMutation.mutate((effectiveQuote.optionGroups ?? []).filter(g => g.id !== id))
+  }
+
+  function editOptionGroup(g: QuoteOptionGroup) {
+    setEditingOptionId(g.id)
+    setOptionLabel(g.label)
+    setOptionDescription(g.description ?? '')
+    setOptionAmount(g.amount.toFixed(2))
+    setOptionIsAddon(g.isAddon)
+    setOptionSelectedByDefault(g.selectedByDefault)
+    setShowOptionForm(true)
+  }
 
   // Generate QB invoice
   const generateInvoiceMutation = useMutation({
@@ -1633,6 +1741,101 @@ function LeadDetailSheet({
               )}
             </div>
           )}
+
+          {/* ── Quote Options (scope selector) ───────────────────────────── */}
+          {effectiveQuote && !effectiveQuote.signedAt && (() => {
+            const groups = effectiveQuote.optionGroups ?? []
+            const mainGroups = groups.filter(g => !g.isAddon)
+            const addonGroups = groups.filter(g => g.isAddon)
+            return (
+              <div className="rounded-xl border border-dashed border-violet-400/40 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide flex items-center gap-1.5">
+                      <ChevronRight className="h-3.5 w-3.5 text-violet-500" />
+                      Scope Options
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">Customer selects these on the esign page — total updates automatically</p>
+                  </div>
+                  <Button
+                    variant="outline" size="sm"
+                    className="gap-1.5 h-8 text-xs border-violet-400/40 text-violet-600 hover:bg-violet-50/20"
+                    onClick={() => { setShowOptionForm(true); setEditingOptionId(null); setOptionLabel(''); setOptionDescription(''); setOptionAmount(''); setOptionIsAddon(false); setOptionSelectedByDefault(true) }}
+                  >
+                    <Plus className="h-3.5 w-3.5" />Add Option
+                  </Button>
+                </div>
+
+                {/* Existing options */}
+                {(mainGroups.length > 0 || addonGroups.length > 0) && (
+                  <div className="space-y-1">
+                    {mainGroups.length > 0 && (
+                      <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wide mt-1">Services</p>
+                    )}
+                    {mainGroups.map(g => (
+                      <div key={g.id} className={`flex items-center gap-2 rounded-lg px-2.5 py-2 border ${g.selectedByDefault ? 'border-violet-300/50 bg-violet-50/20' : 'border-border/50'}`}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold truncate">{g.label}</p>
+                          {g.description && <p className="text-[10px] text-muted-foreground truncate">{g.description}</p>}
+                        </div>
+                        <span className="text-xs font-bold text-violet-600 shrink-0">{fmtMoney(g.amount)}</span>
+                        {g.selectedByDefault && <span className="text-[9px] text-violet-500 font-semibold shrink-0">Default</span>}
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => editOptionGroup(g)}><FileSignature className="h-3 w-3" /></Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-destructive/70 hover:text-destructive" onClick={() => deleteOptionGroup(g.id)}><XIcon className="h-3 w-3" /></Button>
+                      </div>
+                    ))}
+                    {addonGroups.length > 0 && (
+                      <p className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wide mt-2">Add-Ons</p>
+                    )}
+                    {addonGroups.map(g => (
+                      <div key={g.id} className="flex items-center gap-2 rounded-lg px-2.5 py-2 border border-border/50">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold truncate">{g.label}</p>
+                          {g.description && <p className="text-[10px] text-muted-foreground truncate">{g.description}</p>}
+                        </div>
+                        <span className="text-xs font-bold shrink-0">{fmtMoney(g.amount)}</span>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => editOptionGroup(g)}><FileSignature className="h-3 w-3" /></Button>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0 text-destructive/70 hover:text-destructive" onClick={() => deleteOptionGroup(g.id)}><XIcon className="h-3 w-3" /></Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Add/edit form */}
+                {showOptionForm && (
+                  <div className="space-y-2 pt-2 border-t border-border/40">
+                    <p className="text-xs font-semibold">{editingOptionId ? 'Edit Option' : 'New Option'}</p>
+                    <Input value={optionLabel} onChange={e => setOptionLabel(e.target.value)} placeholder="Option name (e.g. Seal Coat)" className="h-9 text-sm" />
+                    <Textarea value={optionDescription} onChange={e => setOptionDescription(e.target.value)} placeholder="What's included in this option…" rows={2} className="text-sm resize-none" />
+                    <Input type="number" min="0" step="0.01" value={optionAmount} onChange={e => setOptionAmount(e.target.value)} placeholder="Price ($)" className="h-9 text-sm" />
+                    <div className="flex items-center gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={optionIsAddon} onChange={e => setOptionIsAddon(e.target.checked)} className="h-4 w-4" />
+                        <span className="text-xs">Add-On</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={optionSelectedByDefault} onChange={e => setOptionSelectedByDefault(e.target.checked)} className="h-4 w-4" />
+                        <span className="text-xs">Pre-selected</span>
+                      </label>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" className="flex-1"
+                        onClick={() => { setShowOptionForm(false); setEditingOptionId(null) }}>Cancel</Button>
+                      <Button size="sm" className="flex-1 bg-violet-600 hover:bg-violet-700 text-white"
+                        disabled={!optionLabel.trim() || !optionAmount || saveOptionGroupsMutation.isPending}
+                        onClick={saveOptionGroup}>
+                        {saveOptionGroupsMutation.isPending ? 'Saving…' : editingOptionId ? 'Save Changes' : 'Add Option'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {groups.length === 0 && !showOptionForm && (
+                  <p className="text-[10px] text-muted-foreground italic">No options yet. Add options the customer can choose from when reviewing their quote.</p>
+                )}
+              </div>
+            )
+          })()}
 
           {/* ── Quote Amendments ──────────────────────────────────────────── */}
           {effectiveQuote && (() => {

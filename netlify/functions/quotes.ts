@@ -121,7 +121,9 @@ export const handler: Handler = async (event) => {
       if (body.sentAt !== undefined)         update.sent_at = body.sentAt
       if (body.amendments !== undefined)     update.amendments = body.amendments
       if (body.originalTotal !== undefined)  update.original_total = body.originalTotal !== null ? Number(body.originalTotal) : null
-      if (body.revisedFromId !== undefined)  update.revised_from_id = body.revisedFromId
+      if (body.revisedFromId !== undefined)         update.revised_from_id = body.revisedFromId
+      if (body.optionGroups !== undefined)           update.option_groups = body.optionGroups
+      if (body.selectedOptionGroupIds !== undefined) update.selected_option_group_ids = body.selectedOptionGroupIds
       if (Object.keys(update).length === 0) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'No fields to update' }) }
       const { data, error } = await supabase.from('quotes').update(update).eq('id', id).select().single()
       if (error) {

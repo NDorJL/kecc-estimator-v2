@@ -163,6 +163,76 @@ export const handler: Handler = async (event) => {
     doc.text(fmt(quote.total), 485, y, { width: 75, align: 'right' })
     y += 28
 
+    // ── Option Groups ────────────────────────────────────────────────────────
+    const optionGroups: Array<{ id: string; label: string; description?: string; amount: number; isAddon: boolean; selectedByDefault: boolean }> =
+      Array.isArray((quote as any).optionGroups) ? (quote as any).optionGroups : []
+    if (optionGroups.length > 0) {
+      const selectedIds: string[] | null = Array.isArray((quote as any).selectedOptionGroupIds)
+        ? (quote as any).selectedOptionGroupIds : null
+      if (y > 600) { doc.addPage(); y = 50 }
+      y += 6
+      doc.moveTo(50, y).lineTo(562, y).strokeColor('#dddddd').lineWidth(0.5).stroke()
+      y += 14
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#888888').text('SCOPE OPTIONS', 50, y)
+      y += 14
+
+      const mainOpts = optionGroups.filter(g => !g.isAddon)
+      const addonOpts = optionGroups.filter(g => g.isAddon)
+
+      const renderOptGroup = (g: typeof optionGroups[0], isSelected: boolean) => {
+        if (y > 680) { doc.addPage(); y = 50 }
+        const boxH = g.description ? 42 : 28
+        const borderColor = isSelected ? '#16a34a' : '#d1d5db'
+        const bgColor = isSelected ? '#f0fdf4' : '#f9fafb'
+        doc.rect(50, y, 512, boxH).fillColor(bgColor).fill()
+        doc.rect(50, y, 512, boxH).strokeColor(borderColor).lineWidth(1).stroke()
+        // Checkbox indicator
+        doc.rect(62, y + (boxH / 2) - 6, 12, 12).strokeColor(borderColor).lineWidth(1).stroke()
+        if (isSelected) {
+          doc.fontSize(9).font('Helvetica-Bold').fillColor('#16a34a').text('✓', 63, y + (boxH / 2) - 5, { width: 10 })
+        }
+        doc.fontSize(10).font('Helvetica-Bold').fillColor('#111827').text(g.label, 82, y + 7, { width: 380 })
+        doc.fontSize(10).font('Helvetica-Bold').fillColor(isSelected ? '#16a34a' : '#111827')
+           .text(fmt(g.amount), 430, y + 7, { width: 120, align: 'right' })
+        if (g.description) {
+          doc.fontSize(8).font('Helvetica').fillColor('#6b7280').text(g.description, 82, y + 21, { width: 380 })
+        }
+        y += boxH + 4
+      }
+
+      if (mainOpts.length > 0) {
+        doc.fontSize(8).font('Helvetica-Bold').fillColor('#374151').text('CHOOSE YOUR SERVICES', 50, y)
+        y += 12
+        mainOpts.forEach(g => {
+          const isSelected = selectedIds ? selectedIds.includes(g.id) : g.selectedByDefault
+          renderOptGroup(g, isSelected)
+        })
+      }
+      if (addonOpts.length > 0) {
+        y += 6
+        doc.fontSize(8).font('Helvetica-Bold').fillColor('#374151').text('AVAILABLE ADD-ONS', 50, y)
+        y += 12
+        addonOpts.forEach(g => {
+          const isSelected = selectedIds ? selectedIds.includes(g.id) : g.selectedByDefault
+          renderOptGroup(g, isSelected)
+        })
+      }
+
+      if (selectedIds) {
+        const optionsTotal = optionGroups.filter(g => selectedIds.includes(g.id)).reduce((s, g) => s + g.amount, 0)
+        y += 6
+        doc.fontSize(10).font('Helvetica-Bold').fillColor('#000000')
+        doc.text('Selected Options Total:', 350, y, { width: 130, align: 'right' })
+        doc.text(fmt(optionsTotal), 485, y, { width: 75, align: 'right' })
+        y += 16
+      } else {
+        y += 6
+        doc.fontSize(8).font('Helvetica').fillColor('#6b7280')
+           .text('Please check the services you wish to include. Your final total will reflect your selections.', 50, y, { width: pageW })
+        y += 20
+      }
+    }
+
     if (quote.notes) {
       doc.fontSize(8).font('Helvetica-Bold').fillColor('#888888').text('NOTES', 50, y)
       y += 14
