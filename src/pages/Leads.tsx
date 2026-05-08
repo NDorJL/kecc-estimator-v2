@@ -467,6 +467,11 @@ function LeadDetailSheet({
   const [contractorCost, setContractorCost] = useState(lead?.contractorCost?.toString() ?? '')
   const [showSchedule, setShowSchedule] = useState(false)
 
+  // Supplemental charge form state
+  const [showSupplemental, setShowSupplemental] = useState(false)
+  const [suppDesc, setSuppDesc] = useState('Supplemental Service')
+  const [suppAmount, setSuppAmount] = useState('')
+
   // Fetch existing jobs for this lead's quote so we can show what's already scheduled
   // Use lead.quoteId (the primary quote) as the stable reference for querying jobs
   const primaryQuoteId = lead?.quoteId ?? quote?.id
@@ -620,6 +625,38 @@ function LeadDetailSheet({
       setShowSendConfirm(false)
       toast({ title: 'Failed to send agreement', description: err.message, variant: 'destructive' })
     },
+  })
+
+  // Add supplemental charge to the linked quote
+  const supplementalMutation = useMutation({
+    mutationFn: ({ desc, amount }: { desc: string; amount: number }) => {
+      if (!effectiveQuote) throw new Error('No quote linked')
+      const newItem: LineItem = {
+        serviceId:   `supp_${Date.now()}`,
+        serviceName: desc,
+        category:    'Supplemental',
+        quantity:    1,
+        unitPrice:   amount,
+        lineTotal:   amount,
+        isSubscription: false,
+      }
+      const updatedItems = [...effectiveQuote.lineItems, newItem]
+      const newTotal = updatedItems.reduce((s, li) => s + li.lineTotal, 0)
+        - (effectiveQuote.discount ?? 0)
+      return apiRequest('PATCH', `/quotes/${effectiveQuote.id}`, {
+        lineItems: updatedItems,
+        total: newTotal,
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/quotes'] })
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      setShowSupplemental(false)
+      setSuppDesc('Supplemental Service')
+      setSuppAmount('')
+      toast({ title: 'Charge added', description: `The updated total is reflected on the quote.` })
+    },
+    onError: (err: Error) => toast({ title: 'Failed', description: err.message, variant: 'destructive' }),
   })
 
   // Generate QB invoice
@@ -896,20 +933,25 @@ function LeadDetailSheet({
                 className="mt-1 h-9 text-sm"
               />
             </div>
-            {/* Profit margin preview — only shown when both values are filled */}
-            {estimatedValue && contractorCost && (
+            {/* Profit margin preview — uses quote total if a quote is linked, else estimatedValue */}
+            {contractorCost && (effectiveQuote || estimatedValue) && (
               <div className="flex flex-col justify-end pb-0.5">
-                <Label className="text-xs text-muted-foreground">Est. Profit</Label>
                 {(() => {
-                  const rev = parseFloat(estimatedValue) || 0
                   const cost = parseFloat(contractorCost) || 0
+                  const usingQuote = !!effectiveQuote
+                  const rev = usingQuote ? (effectiveQuote!.total ?? 0) : (parseFloat(estimatedValue) || 0)
                   const profit = rev - cost
                   const margin = rev > 0 ? (profit / rev) * 100 : 0
                   return (
-                    <p className={`text-sm font-bold mt-1 ${profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
-                      {profit >= 0 ? '+' : ''}{fmtMoney(profit)}
-                      <span className="text-xs font-normal text-muted-foreground ml-1">({margin.toFixed(0)}%)</span>
-                    </p>
+                    <>
+                      <Label className="text-xs text-muted-foreground">
+                        {usingQuote ? 'Profit (from quote)' : 'Est. Profit'}
+                      </Label>
+                      <p className={`text-sm font-bold mt-1 ${profit >= 0 ? 'text-green-600 dark:text-green-400' : 'text-destructive'}`}>
+                        {profit >= 0 ? '+' : ''}{fmtMoney(profit)}
+                        <span className="text-xs font-normal text-muted-foreground ml-1">({margin.toFixed(0)}%)</span>
+                      </p>
+                    </>
                   )
                 })()}
               </div>
@@ -1028,6 +1070,76 @@ function LeadDetailSheet({
                         </span>
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Supplemental charge ───────────────────────────────────────── */}
+          {effectiveQuote && (
+            <div className="rounded-xl border border-dashed border-primary/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide">Add to Quote</p>
+                  <p className="text-[10px] text-muted-foreground">Extra work or materials not in the original scope</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 h-8 text-xs border-primary/40 text-primary hover:bg-primary/5"
+                  onClick={() => setShowSupplemental(v => !v)}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Add Charge
+                </Button>
+              </div>
+
+              {showSupplemental && (
+                <div className="space-y-2 pt-1">
+                  <div>
+                    <Label className="text-xs">Description</Label>
+                    <Input
+                      value={suppDesc}
+                      onChange={e => setSuppDesc(e.target.value)}
+                      placeholder="Supplemental Service"
+                      className="mt-1 h-9 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Amount ($)</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={suppAmount}
+                      onChange={e => setSuppAmount(e.target.value)}
+                      placeholder="0.00"
+                      className="mt-1 h-9 text-sm"
+                    />
+                  </div>
+                  {suppAmount && parseFloat(suppAmount) > 0 && (
+                    <p className="text-[10px] text-muted-foreground">
+                      New quote total: <strong>{fmtMoney((effectiveQuote.total ?? 0) + parseFloat(suppAmount))}</strong>
+                    </p>
+                  )}
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => { setShowSupplemental(false); setSuppDesc('Supplemental Service'); setSuppAmount('') }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="flex-1"
+                      disabled={!suppDesc.trim() || !suppAmount || parseFloat(suppAmount) <= 0 || supplementalMutation.isPending}
+                      onClick={() => supplementalMutation.mutate({ desc: suppDesc.trim(), amount: parseFloat(suppAmount) })}
+                    >
+                      {supplementalMutation.isPending ? 'Saving…' : 'Add to Quote'}
+                    </Button>
                   </div>
                 </div>
               )}
