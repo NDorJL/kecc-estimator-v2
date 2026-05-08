@@ -470,6 +470,7 @@ function LeadDetailSheet({
   // Supplemental charge form state
   const [showSupplemental, setShowSupplemental] = useState(false)
   const [suppDesc, setSuppDesc] = useState('Supplemental Service')
+  const [suppNotes, setSuppNotes] = useState('')
   const [suppAmount, setSuppAmount] = useState('')
 
   // Fetch existing jobs for this lead's quote so we can show what's already scheduled
@@ -629,12 +630,13 @@ function LeadDetailSheet({
 
   // Add supplemental charge to the linked quote
   const supplementalMutation = useMutation({
-    mutationFn: ({ desc, amount }: { desc: string; amount: number }) => {
+    mutationFn: ({ desc, notes, amount }: { desc: string; notes: string; amount: number }) => {
       if (!effectiveQuote) throw new Error('No quote linked')
       const newItem: LineItem = {
         serviceId:   `supp_${Date.now()}`,
         serviceName: desc,
         category:    'Supplemental',
+        description: notes || undefined,
         quantity:    1,
         unitPrice:   amount,
         lineTotal:   amount,
@@ -653,6 +655,7 @@ function LeadDetailSheet({
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
       setShowSupplemental(false)
       setSuppDesc('Supplemental Service')
+      setSuppNotes('')
       setSuppAmount('')
       toast({ title: 'Charge added', description: `The updated total is reflected on the quote.` })
     },
@@ -1098,12 +1101,22 @@ function LeadDetailSheet({
               {showSupplemental && (
                 <div className="space-y-2 pt-1">
                   <div>
-                    <Label className="text-xs">Description</Label>
+                    <Label className="text-xs">Charge Name</Label>
                     <Input
                       value={suppDesc}
                       onChange={e => setSuppDesc(e.target.value)}
                       placeholder="Supplemental Service"
                       className="mt-1 h-9 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs">Details <span className="text-muted-foreground font-normal">(visible to customer)</span></Label>
+                    <Textarea
+                      value={suppNotes}
+                      onChange={e => setSuppNotes(e.target.value)}
+                      placeholder="e.g. Replaced damaged irrigation valve discovered during service — parts and labor included."
+                      rows={3}
+                      className="mt-1 text-sm resize-none"
                     />
                   </div>
                   <div>
@@ -1128,7 +1141,7 @@ function LeadDetailSheet({
                       variant="outline"
                       size="sm"
                       className="flex-1"
-                      onClick={() => { setShowSupplemental(false); setSuppDesc('Supplemental Service'); setSuppAmount('') }}
+                      onClick={() => { setShowSupplemental(false); setSuppDesc('Supplemental Service'); setSuppNotes(''); setSuppAmount('') }}
                     >
                       Cancel
                     </Button>
@@ -1136,7 +1149,7 @@ function LeadDetailSheet({
                       size="sm"
                       className="flex-1"
                       disabled={!suppDesc.trim() || !suppAmount || parseFloat(suppAmount) <= 0 || supplementalMutation.isPending}
-                      onClick={() => supplementalMutation.mutate({ desc: suppDesc.trim(), amount: parseFloat(suppAmount) })}
+                      onClick={() => supplementalMutation.mutate({ desc: suppDesc.trim(), notes: suppNotes.trim(), amount: parseFloat(suppAmount) })}
                     >
                       {supplementalMutation.isPending ? 'Saving…' : 'Add to Quote'}
                     </Button>
