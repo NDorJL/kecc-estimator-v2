@@ -77,8 +77,26 @@ export const handler: Handler = async (event) => {
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToLead(data)) }
     }
 
+    // POST — upload a photo for a lead (must come before generic POST create)
+    if (method === 'POST' && action === 'upload-photo' && id) {
+      const { file, mimeType, fileName } = await parseMultipart(event as Parameters<typeof parseMultipart>[0])
+      if (!file.length) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'No file received' }) }
+
+      const ext = fileName.split('.').pop()?.toLowerCase() ?? 'jpg'
+      const path = `${id}/${randomUUID()}.${ext}`
+
+      const { error: uploadErr } = await supabase.storage.from('lead-photos').upload(path, file, {
+        contentType: mimeType,
+        upsert: false,
+      })
+      if (uploadErr) throw uploadErr
+
+      const { data: { publicUrl } } = supabase.storage.from('lead-photos').getPublicUrl(path)
+      return { statusCode: 200, headers: CORS, body: JSON.stringify({ url: publicUrl }) }
+    }
+
     // CREATE lead
-    if (method === 'POST') {
+    if (method === 'POST' && !action) {
       const body = JSON.parse(event.body ?? '{}')
       const { data, error } = await supabase
         .from('leads')
@@ -112,7 +130,7 @@ export const handler: Handler = async (event) => {
       if (body.serviceInterest !== undefined)  updates.service_interest = body.serviceInterest
       if (body.quoteId !== undefined)          updates.quote_id = body.quoteId
       if (body.contactId !== undefined)        updates.contact_id = body.contactId
-      if (body.photos !== undefined)           updates.photos = body.photos
+      if (body.photoStacks !== undefined)      updates.photo_stacks = body.photoStacks
       // Stamp contacted_at whenever a lead is manually moved to 'contacted'
       if (body.stage === 'contacted')         updates.contacted_at = new Date().toISOString()
 
@@ -193,51 +211,17 @@ export const handler: Handler = async (event) => {
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToLead(data)) }
     }
 
-    // POST — upload a photo for a lead
-    if (method === 'POST' && action === 'upload-photo' && id) {
-      const { file, mimeType, fileName } = await parseMultipart(event as Parameters<typeof parseMultipart>[0])
-      if (!file.length) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'No file received' }) }
-
-      const ext = fileName.split('.').pop()?.toLowerCase() ?? 'jpg'
-      const path = `${id}/${randomUUID()}.${ext}`
-
-      const { error: uploadErr } = await supabase.storage.from('lead-photos').upload(path, file, {
-        contentType: mimeType,
-        upsert: false,
-      })
-      if (uploadErr) throw uploadErr
-
-      const { data: { publicUrl } } = supabase.storage.from('lead-photos').getPublicUrl(path)
-
-      // Append URL to lead's photos array
-      const { data: lead, error: fetchErr } = await supabase.from('leads').select('photos').eq('id', id).single()
-      if (fetchErr) throw fetchErr
-      const existing: string[] = Array.isArray(lead.photos) ? lead.photos : []
-      const { data, error } = await supabase.from('leads').update({ photos: [...existing, publicUrl] }).eq('id', id).select().single()
-      if (error) throw error
-      return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToLead(data)) }
-    }
-
-    // DELETE — remove a single photo from a lead
+    // DELETE — remove a single photo from storage (stacks are managed client-side via PATCH)
     if (method === 'DELETE' && action === 'delete-photo' && id) {
       const body = JSON.parse(event.body ?? '{}')
       const { url } = body as { url: string }
       if (!url) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'url required' }) }
-
-      // Extract the storage path from the public URL
       const marker = '/object/public/lead-photos/'
       const storagePath = url.includes(marker) ? url.split(marker)[1] : null
       if (storagePath) {
         await supabase.storage.from('lead-photos').remove([storagePath])
       }
-
-      // Remove URL from the photos array
-      const { data: lead, error: fetchErr } = await supabase.from('leads').select('photos').eq('id', id).single()
-      if (fetchErr) throw fetchErr
-      const updated = (Array.isArray(lead.photos) ? lead.photos as string[] : []).filter((u: string) => u !== url)
-      const { data, error } = await supabase.from('leads').update({ photos: updated }).eq('id', id).select().single()
-      if (error) throw error
-      return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToLead(data)) }
+      return { statusCode: 200, headers: CORS, body: JSON.stringify({ ok: true }) }
     }
 
     // DELETE lead

@@ -4,7 +4,7 @@ import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import { quoCallUrl, quoTextUrl } from '@/lib/utils'
 import { useQuoteContext } from '@/lib/quote-context'
-import { Lead, Quote, Job, LeadStage, LineItem, Contact, QuoteAttachment } from '@/types'
+import { Lead, Quote, Job, LeadStage, LineItem, Contact, QuoteAttachment, LeadPhotoStack } from '@/types'
 import {
   DndContext,
   DragEndEvent,
@@ -211,6 +211,208 @@ function QuoteCardGhost({ quote }: { quote: Quote }) {
       <p className="text-xs font-semibold truncate">{quote.customerName}</p>
       <p className="text-sm font-bold">{fmtMoney(quote.total)}</p>
       <p className="text-[10px] opacity-75 mt-0.5">Drop into stage →</p>
+    </div>
+  )
+}
+
+// ── Photo Stack Card ──────────────────────────────────────────────────────────
+
+function PhotoStackCard({
+  stack, allStacks, uploadingThisStack,
+  onUpload, onDelete, onMove, onReorder,
+  onUpdateLabel, onUpdateDescription, onDeleteStack, onViewPhoto,
+}: {
+  stack: LeadPhotoStack
+  allStacks: LeadPhotoStack[]
+  uploadingThisStack: boolean
+  onUpload: (stackId: string, file: File) => void
+  onDelete: (url: string) => void
+  onMove: (url: string, toStackId: string) => void
+  onReorder: (from: number, to: number) => void
+  onUpdateLabel: (label: string) => void
+  onUpdateDescription: (desc: string) => void
+  onDeleteStack: () => void
+  onViewPhoto: (url: string) => void
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [editingLabel, setEditingLabel] = useState(false)
+  const [labelDraft, setLabelDraft] = useState(stack.label)
+  const [descDraft, setDescDraft] = useState(stack.description)
+  const [dragOver, setDragOver] = useState(false)
+  const [movingPhoto, setMovingPhoto] = useState<string | null>(null)
+
+  // DnD: drag a photo within the stack to reorder
+  const [dragSrc, setDragSrc] = useState<number | null>(null)
+
+  const otherStacks = allStacks.filter(s => s.id !== stack.id)
+  const totalPhotos = stack.photos.length + (uploadingThisStack ? 1 : 0)
+
+  return (
+    <div
+      className={`rounded-xl border bg-card transition-colors ${dragOver ? 'border-primary ring-1 ring-primary' : 'border-border/60'}`}
+      onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={e => {
+        e.preventDefault()
+        setDragOver(false)
+        // Photo dragged from another stack
+        const url = e.dataTransfer.getData('photo-url')
+        const fromStack = e.dataTransfer.getData('from-stack')
+        if (url && fromStack && fromStack !== stack.id) {
+          onMove(url, stack.id)
+        }
+      }}
+    >
+      {/* Stack header */}
+      <div className="flex items-start gap-2 p-3 pb-2">
+        <div className="flex-1 min-w-0">
+          {editingLabel ? (
+            <input
+              autoFocus
+              value={labelDraft}
+              onChange={e => setLabelDraft(e.target.value)}
+              onBlur={() => { setEditingLabel(false); if (labelDraft.trim()) onUpdateLabel(labelDraft.trim()) }}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') { setEditingLabel(false); if (labelDraft.trim()) onUpdateLabel(labelDraft.trim()) } }}
+              className="w-full text-sm font-semibold bg-muted/40 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          ) : (
+            <button
+              className="text-sm font-semibold text-left hover:text-primary transition-colors leading-tight"
+              onClick={() => { setLabelDraft(stack.label); setEditingLabel(true) }}
+            >
+              {stack.label}
+            </button>
+          )}
+          <input
+            value={descDraft}
+            onChange={e => setDescDraft(e.target.value)}
+            onBlur={() => onUpdateDescription(descDraft)}
+            placeholder="Add a description…"
+            className="w-full text-[11px] text-muted-foreground bg-transparent focus:outline-none placeholder:text-muted-foreground/40 mt-0.5 leading-tight"
+          />
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <span className="text-[10px] text-muted-foreground tabular-nums">{totalPhotos} photo{totalPhotos !== 1 ? 's' : ''}</span>
+          <Button
+            variant="ghost" size="icon"
+            className="h-6 w-6 text-muted-foreground hover:text-primary"
+            onClick={() => fileInputRef.current?.click()}
+            title="Add photo to this stack"
+          >
+            <Camera className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost" size="icon"
+            className="h-6 w-6 text-muted-foreground hover:text-destructive"
+            onClick={onDeleteStack}
+            title="Delete stack"
+          >
+            <XIcon className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Photo grid */}
+      <div className="px-3 pb-3">
+        {stack.photos.length === 0 && !uploadingThisStack ? (
+          <button
+            className="w-full rounded-lg border border-dashed border-border/50 py-4 flex items-center justify-center gap-2 text-muted-foreground hover:bg-muted/30 transition-colors"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Camera className="h-4 w-4 opacity-50" />
+            <span className="text-xs">Tap to add a photo</span>
+          </button>
+        ) : (
+          <div className="grid grid-cols-3 gap-1.5">
+            {stack.photos.map((url, i) => (
+              <div
+                key={url}
+                draggable
+                className="relative group aspect-square rounded-lg overflow-hidden border border-border/50 cursor-grab active:cursor-grabbing"
+                onDragStart={e => {
+                  setDragSrc(i)
+                  e.dataTransfer.setData('photo-url', url)
+                  e.dataTransfer.setData('from-stack', stack.id)
+                }}
+                onDragOver={e => { e.preventDefault(); e.stopPropagation() }}
+                onDrop={e => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  // Reorder within this stack
+                  const fromUrl = e.dataTransfer.getData('photo-url')
+                  const fromStack = e.dataTransfer.getData('from-stack')
+                  if (fromStack === stack.id && dragSrc !== null && dragSrc !== i) {
+                    onReorder(dragSrc, i)
+                  } else if (fromStack !== stack.id && fromUrl) {
+                    onMove(fromUrl, stack.id)
+                  }
+                  setDragSrc(null)
+                }}
+                onDragEnd={() => setDragSrc(null)}
+              >
+                <img
+                  src={url}
+                  alt={`Photo ${i + 1}`}
+                  className="w-full h-full object-cover"
+                  onClick={() => onViewPhoto(url)}
+                />
+                {/* Delete button */}
+                <button
+                  className="absolute top-1 right-1 h-5 w-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 active:opacity-100 transition-opacity"
+                  onClick={e => { e.stopPropagation(); onDelete(url) }}
+                >
+                  <XIcon className="h-3 w-3" />
+                </button>
+                {/* Move-to-stack button (only when other stacks exist) */}
+                {otherStacks.length > 0 && (
+                  <div className="absolute bottom-1 left-1 opacity-0 group-hover:opacity-100 active:opacity-100 transition-opacity">
+                    <select
+                      className="text-[9px] bg-black/70 text-white rounded px-1 py-0.5 cursor-pointer max-w-[80px]"
+                      value=""
+                      onClick={e => e.stopPropagation()}
+                      onChange={e => {
+                        if (e.target.value) onMove(url, e.target.value)
+                      }}
+                    >
+                      <option value="" disabled>Move to…</option>
+                      {otherStacks.map(s => (
+                        <option key={s.id} value={s.id}>{s.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+            ))}
+            {/* Uploading placeholder */}
+            {uploadingThisStack && (
+              <div className="aspect-square rounded-lg border border-dashed border-border/60 flex items-center justify-center bg-muted/30">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+            {/* Add another photo tile */}
+            <button
+              className="aspect-square rounded-lg border border-dashed border-border/40 flex items-center justify-center hover:bg-muted/30 transition-colors text-muted-foreground"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Plus className="h-4 w-4 opacity-50" />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={e => {
+          const file = e.target.files?.[0]
+          if (file) onUpload(stack.id, file)
+          e.target.value = ''
+        }}
+      />
     </div>
   )
 }
@@ -468,14 +670,48 @@ function LeadDetailSheet({
   const [contractorCost, setContractorCost] = useState(lead?.contractorCost?.toString() ?? '')
   const [showSchedule, setShowSchedule] = useState(false)
 
-  // Photo upload
-  const photoInputRef = useRef<HTMLInputElement>(null)
-  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  // ── Photo stacks ─────────────────────────────────────────────────────────
+  const [stacks, setStacks] = useState<LeadPhotoStack[]>(lead?.photoStacks ?? [])
   const [viewPhoto, setViewPhoto] = useState<string | null>(null)
+  const [uploadingStackId, setUploadingStackId] = useState<string | null>(null)
 
-  const uploadPhoto = useCallback(async (file: File) => {
+  // Sync stacks when a different lead is opened
+  useEffect(() => {
+    setStacks(lead?.photoStacks ?? [])
+  }, [lead?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveStacks = useCallback(async (next: LeadPhotoStack[]) => {
     if (!lead) return
-    setUploadingPhoto(true)
+    setStacks(next)
+    try {
+      await apiRequest('PATCH', `/leads/${lead.id}`, { photoStacks: next })
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+    } catch (err) {
+      toast({ title: 'Failed to save', description: String(err), variant: 'destructive' })
+    }
+  }, [lead, queryClient, toast])
+
+  const addStack = useCallback(() => {
+    const next = [...stacks, { id: `s_${Date.now()}`, label: 'New Stack', description: '', photos: [] }]
+    saveStacks(next)
+  }, [stacks, saveStacks])
+
+  const updateStack = useCallback((stackId: string, patch: Partial<LeadPhotoStack>) => {
+    saveStacks(stacks.map(s => s.id === stackId ? { ...s, ...patch } : s))
+  }, [stacks, saveStacks])
+
+  const deleteStack = useCallback((stackId: string) => {
+    const stack = stacks.find(s => s.id === stackId)
+    // Delete all photos from storage (fire-and-forget)
+    stack?.photos.forEach(url => {
+      apiRequest('DELETE', `/leads/${lead?.id}?action=delete-photo`, { url }).catch(() => {})
+    })
+    saveStacks(stacks.filter(s => s.id !== stackId))
+  }, [stacks, saveStacks, lead])
+
+  const uploadToStack = useCallback(async (stackId: string, file: File) => {
+    if (!lead) return
+    setUploadingStackId(stackId)
     try {
       const formData = new FormData()
       formData.append('photo', file)
@@ -483,25 +719,47 @@ function LeadDetailSheet({
         method: 'POST',
         body: formData,
       })
-      if (!res.ok) throw new Error(await res.text())
-      queryClient.invalidateQueries({ queryKey: ['/leads'] })
-      toast({ title: 'Photo added' })
+      if (!res.ok) {
+        const text = await res.text()
+        throw new Error(text)
+      }
+      const { url } = await res.json() as { url: string }
+      const next = stacks.map(s =>
+        s.id === stackId ? { ...s, photos: [...s.photos, url] } : s
+      )
+      saveStacks(next)
     } catch (err) {
       toast({ title: 'Upload failed', description: String(err), variant: 'destructive' })
     } finally {
-      setUploadingPhoto(false)
+      setUploadingStackId(null)
     }
-  }, [lead, queryClient, toast])
+  }, [lead, stacks, saveStacks, toast])
 
-  const deletePhotoMutation = useMutation({
-    mutationFn: (url: string) =>
-      apiRequest('DELETE', `/leads/${lead?.id}?action=delete-photo`, { url }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/leads'] })
-      toast({ title: 'Photo removed' })
-    },
-    onError: (err: Error) => toast({ title: 'Failed', description: err.message, variant: 'destructive' }),
-  })
+  const deletePhoto = useCallback((stackId: string, url: string) => {
+    apiRequest('DELETE', `/leads/${lead?.id}?action=delete-photo`, { url }).catch(() => {})
+    saveStacks(stacks.map(s =>
+      s.id === stackId ? { ...s, photos: s.photos.filter(u => u !== url) } : s
+    ))
+  }, [stacks, saveStacks, lead])
+
+  const movePhoto = useCallback((url: string, fromStackId: string, toStackId: string) => {
+    if (fromStackId === toStackId) return
+    saveStacks(stacks.map(s => {
+      if (s.id === fromStackId) return { ...s, photos: s.photos.filter(u => u !== url) }
+      if (s.id === toStackId)   return { ...s, photos: [...s.photos, url] }
+      return s
+    }))
+  }, [stacks, saveStacks])
+
+  // Reorder photos within a stack via DnD
+  const reorderPhotos = useCallback((stackId: string, fromIdx: number, toIdx: number) => {
+    const stack = stacks.find(s => s.id === stackId)
+    if (!stack) return
+    const photos = [...stack.photos]
+    const [moved] = photos.splice(fromIdx, 1)
+    photos.splice(toIdx, 0, moved)
+    saveStacks(stacks.map(s => s.id === stackId ? { ...s, photos } : s))
+  }, [stacks, saveStacks])
 
   // Supplemental charge form state
   const [showSupplemental, setShowSupplemental] = useState(false)
@@ -1369,76 +1627,49 @@ function LeadDetailSheet({
             </div>
           )}
 
-          {/* ── Photos ───────────────────────────────────────────────────── */}
+          {/* ── Photo Stacks ─────────────────────────────────────────────── */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
                 <ImageIcon className="h-3.5 w-3.5" />
-                Photos {lead.photos.length > 0 && `(${lead.photos.length})`}
+                Photos
+                {stacks.length > 0 && (
+                  <span className="text-muted-foreground/60 font-normal">
+                    · {stacks.reduce((n, s) => n + s.photos.length, 0)} photos in {stacks.length} {stacks.length === 1 ? 'stack' : 'stacks'}
+                  </span>
+                )}
               </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs gap-1.5"
-                disabled={uploadingPhoto}
-                onClick={() => photoInputRef.current?.click()}
-              >
-                {uploadingPhoto
-                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading…</>
-                  : <><Camera className="h-3.5 w-3.5" />Add Photo</>
-                }
+              <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={addStack}>
+                <Plus className="h-3.5 w-3.5" />New Stack
               </Button>
-              {/* Hidden file input — capture="environment" opens camera on mobile */}
-              <input
-                ref={photoInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                className="hidden"
-                onChange={e => {
-                  const file = e.target.files?.[0]
-                  if (file) uploadPhoto(file)
-                  e.target.value = ''
-                }}
-              />
             </div>
 
-            {lead.photos.length === 0 && !uploadingPhoto && (
+            {stacks.length === 0 && (
               <button
                 className="w-full rounded-xl border border-dashed border-border/60 py-6 flex flex-col items-center gap-2 text-muted-foreground hover:bg-muted/30 transition-colors"
-                onClick={() => photoInputRef.current?.click()}
+                onClick={addStack}
               >
-                <Camera className="h-6 w-6 opacity-40" />
-                <span className="text-xs">Tap to add a photo</span>
+                <ImageIcon className="h-6 w-6 opacity-40" />
+                <span className="text-xs">Create a stack to start adding photos</span>
               </button>
             )}
 
-            {lead.photos.length > 0 && (
-              <div className="grid grid-cols-3 gap-1.5">
-                {lead.photos.map((url, i) => (
-                  <div key={url} className="relative group aspect-square rounded-lg overflow-hidden border border-border/50">
-                    <img
-                      src={url}
-                      alt={`Lead photo ${i + 1}`}
-                      className="w-full h-full object-cover cursor-pointer"
-                      onClick={() => setViewPhoto(url)}
-                    />
-                    <button
-                      className="absolute top-1 right-1 h-5 w-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 active:opacity-100 transition-opacity"
-                      onClick={e => { e.stopPropagation(); deletePhotoMutation.mutate(url) }}
-                      title="Remove photo"
-                    >
-                      <XIcon className="h-3 w-3" />
-                    </button>
-                  </div>
-                ))}
-                {uploadingPhoto && (
-                  <div className="aspect-square rounded-lg border border-dashed border-border/60 flex items-center justify-center bg-muted/30">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                  </div>
-                )}
-              </div>
-            )}
+            {stacks.map(stack => (
+              <PhotoStackCard
+                key={stack.id}
+                stack={stack}
+                allStacks={stacks}
+                uploadingThisStack={uploadingStackId === stack.id}
+                onUpload={uploadToStack}
+                onDelete={(url) => deletePhoto(stack.id, url)}
+                onMove={(url, toStackId) => movePhoto(url, stack.id, toStackId)}
+                onReorder={(from, to) => reorderPhotos(stack.id, from, to)}
+                onUpdateLabel={(label) => updateStack(stack.id, { label })}
+                onUpdateDescription={(description) => updateStack(stack.id, { description })}
+                onDeleteStack={() => deleteStack(stack.id)}
+                onViewPhoto={setViewPhoto}
+              />
+            ))}
           </div>
 
           {/* ── Lead actions (delete) ─────────────────────────────────────── */}
