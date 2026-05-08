@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
@@ -35,6 +35,7 @@ import {
   Trash2, Archive, PhoneCall, MessageSquare, FileSignature,
   Send, Receipt, CheckCircle2, XCircle, RotateCcw, TrendingDown,
   Users, DollarSign, ChevronRight, CalendarCheck, ChevronDown, ChevronUp,
+  Camera, X as XIcon, ImageIcon, Loader2,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { ScheduleQuoteSheet } from '@/components/ScheduleQuoteSheet'
@@ -466,6 +467,41 @@ function LeadDetailSheet({
   const [estimatedValue, setEstimatedValue] = useState(lead?.estimatedValue?.toString() ?? '')
   const [contractorCost, setContractorCost] = useState(lead?.contractorCost?.toString() ?? '')
   const [showSchedule, setShowSchedule] = useState(false)
+
+  // Photo upload
+  const photoInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
+  const [viewPhoto, setViewPhoto] = useState<string | null>(null)
+
+  const uploadPhoto = useCallback(async (file: File) => {
+    if (!lead) return
+    setUploadingPhoto(true)
+    try {
+      const formData = new FormData()
+      formData.append('photo', file)
+      const res = await fetch(`/.netlify/functions/leads/${lead.id}?action=upload-photo`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!res.ok) throw new Error(await res.text())
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      toast({ title: 'Photo added' })
+    } catch (err) {
+      toast({ title: 'Upload failed', description: String(err), variant: 'destructive' })
+    } finally {
+      setUploadingPhoto(false)
+    }
+  }, [lead, queryClient, toast])
+
+  const deletePhotoMutation = useMutation({
+    mutationFn: (url: string) =>
+      apiRequest('DELETE', `/leads/${lead?.id}?action=delete-photo`, { url }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      toast({ title: 'Photo removed' })
+    },
+    onError: (err: Error) => toast({ title: 'Failed', description: err.message, variant: 'destructive' }),
+  })
 
   // Supplemental charge form state
   const [showSupplemental, setShowSupplemental] = useState(false)
@@ -1333,6 +1369,78 @@ function LeadDetailSheet({
             </div>
           )}
 
+          {/* ── Photos ───────────────────────────────────────────────────── */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                <ImageIcon className="h-3.5 w-3.5" />
+                Photos {lead.photos.length > 0 && `(${lead.photos.length})`}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs gap-1.5"
+                disabled={uploadingPhoto}
+                onClick={() => photoInputRef.current?.click()}
+              >
+                {uploadingPhoto
+                  ? <><Loader2 className="h-3.5 w-3.5 animate-spin" />Uploading…</>
+                  : <><Camera className="h-3.5 w-3.5" />Add Photo</>
+                }
+              </Button>
+              {/* Hidden file input — capture="environment" opens camera on mobile */}
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  if (file) uploadPhoto(file)
+                  e.target.value = ''
+                }}
+              />
+            </div>
+
+            {lead.photos.length === 0 && !uploadingPhoto && (
+              <button
+                className="w-full rounded-xl border border-dashed border-border/60 py-6 flex flex-col items-center gap-2 text-muted-foreground hover:bg-muted/30 transition-colors"
+                onClick={() => photoInputRef.current?.click()}
+              >
+                <Camera className="h-6 w-6 opacity-40" />
+                <span className="text-xs">Tap to add a photo</span>
+              </button>
+            )}
+
+            {lead.photos.length > 0 && (
+              <div className="grid grid-cols-3 gap-1.5">
+                {lead.photos.map((url, i) => (
+                  <div key={url} className="relative group aspect-square rounded-lg overflow-hidden border border-border/50">
+                    <img
+                      src={url}
+                      alt={`Lead photo ${i + 1}`}
+                      className="w-full h-full object-cover cursor-pointer"
+                      onClick={() => setViewPhoto(url)}
+                    />
+                    <button
+                      className="absolute top-1 right-1 h-5 w-5 rounded-full bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 active:opacity-100 transition-opacity"
+                      onClick={e => { e.stopPropagation(); deletePhotoMutation.mutate(url) }}
+                      title="Remove photo"
+                    >
+                      <XIcon className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+                {uploadingPhoto && (
+                  <div className="aspect-square rounded-lg border border-dashed border-border/60 flex items-center justify-center bg-muted/30">
+                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* ── Lead actions (delete) ─────────────────────────────────────── */}
           <div className="rounded-xl border border-dashed border-destructive/40 p-3 space-y-2">
             <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Danger Zone</p>
@@ -1518,6 +1626,25 @@ function LeadDetailSheet({
         </Dialog>
       )
     })()}
+
+    {/* ── Photo lightbox ───────────────────────────────────────────────────── */}
+    {viewPhoto && (
+      <Dialog open={!!viewPhoto} onOpenChange={v => { if (!v) setViewPhoto(null) }}>
+        <DialogContent className="max-w-screen-sm p-2 bg-black/90 border-none">
+          <img
+            src={viewPhoto}
+            alt="Lead photo"
+            className="w-full h-auto max-h-[85dvh] object-contain rounded-lg"
+          />
+          <button
+            className="absolute top-3 right-3 h-8 w-8 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-black/80"
+            onClick={() => setViewPhoto(null)}
+          >
+            <XIcon className="h-4 w-4" />
+          </button>
+        </DialogContent>
+      </Dialog>
+    )}
     </>
   )
 }

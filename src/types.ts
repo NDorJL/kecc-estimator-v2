@@ -271,6 +271,7 @@ export interface Lead {
   contactedAt: string | null;
   followUpSentAt: string | null;
   agreementSignedAt: string | null;
+  photos: string[];
 }
 
 export type ActivityType =
@@ -437,6 +438,7 @@ export function rowToLead(r: any): Lead {
     contactedAt: r.contacted_at ?? null,
     followUpSentAt: r.follow_up_sent_at ?? null,
     agreementSignedAt: r.agreement_signed_at ?? null,
+    photos: Array.isArray(r.photos) ? r.photos : [],
   };
 }
 
