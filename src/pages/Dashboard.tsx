@@ -600,9 +600,9 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* ── Dynamic Quick Nav ─────────────────────────────────────────────── */}
+      {/* ── Dynamic Quick Nav — desktop only (mobile uses bottom quick-bar) ── */}
       {quickNavItems.length > 0 && (
-        <div>
+        <div className="hidden md:block">
           <h3 className="text-xs font-bold mb-2 text-muted-foreground uppercase tracking-wider">Navigate</h3>
           <div className="grid grid-cols-4 gap-2">
             {quickNavItems.map(({ id, label, path, icon: Icon }) => (

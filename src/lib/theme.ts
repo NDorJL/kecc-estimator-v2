@@ -274,16 +274,16 @@ export function mergeNavItems(savedItems: NavItemConfig[]): NavItemConfig[] {
 }
 
 export const DEFAULT_NAV: NavItemConfig[] = [
-  { id: 'dashboard',     visible: true  },
-  { id: 'contacts',      visible: false },
-  { id: 'calendar',      visible: true  },
-  { id: 'jobs',          visible: false },
-  { id: 'calculator',    visible: true  },
-  { id: 'quotes',        visible: true  },
-  { id: 'subscriptions', visible: true  },
-  { id: 'finance',       visible: false },
-  { id: 'pricebook',     visible: false },
-  { id: 'leads',         visible: false },
-  { id: 'settings',      visible: true  },
-  { id: 'marketing',     visible: false },
+  { id: 'dashboard',     visible: true },
+  { id: 'contacts',      visible: true },
+  { id: 'calendar',      visible: true },
+  { id: 'jobs',          visible: true },
+  { id: 'calculator',    visible: true },
+  { id: 'quotes',        visible: true },
+  { id: 'subscriptions', visible: true },
+  { id: 'finance',       visible: true },
+  { id: 'pricebook',     visible: true },
+  { id: 'leads',         visible: true },
+  { id: 'settings',      visible: true },
+  { id: 'marketing',     visible: true },
 ]

@@ -630,10 +630,9 @@ function NavSection({ settings }: { settings: CompanySettings | null }) {
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">Navigation Bar</CardTitle>
+        <CardTitle className="text-base">Navigation Items</CardTitle>
         <p className="text-xs text-muted-foreground">
-          Choose which pages appear in the bottom nav. Drag with ↑↓ to reorder.
-          {visibleCount > 7 && <span className="text-amber-600"> Max 7 shown.</span>}
+          Choose which pages appear in the sidebar. Drag with ↑↓ to reorder.
         </p>
       </CardHeader>
       <CardContent className="space-y-1">
@@ -664,7 +663,7 @@ function NavSection({ settings }: { settings: CompanySettings | null }) {
         })}
         <div className="pt-2">
           <Button size="sm" className="w-full min-h-[40px]" onClick={handleSave} disabled={saving}>
-            {saving ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Saving…</> : <><Save className="h-4 w-4 mr-1" />Save Navigation</>}
+            {saving ? <><Loader2 className="h-4 w-4 mr-1 animate-spin" />Saving…</> : <><Save className="h-4 w-4 mr-1" />Save Navigation Items</>}
           </Button>
         </div>
       </CardContent>

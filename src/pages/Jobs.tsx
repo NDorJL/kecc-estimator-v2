@@ -580,27 +580,31 @@ function JobDetailSheet({
             </div>
           )}
 
-          {/* Customer info (read-only display) */}
-          <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5">
-            {job.customerAddress && (
-              <div className="flex items-center gap-2 text-sm">
-                <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <span>{job.customerAddress}</span>
+          {/* Customer identity — always first */}
+          {(job.customerName || job.customerPhone || job.customerAddress) && (
+            <div className="rounded-xl border bg-muted/30 p-3 space-y-1.5">
+              {job.customerName && (
+                <p className="font-semibold text-sm">{job.customerName}</p>
+              )}
+              <div className="flex flex-wrap gap-3">
+                {job.customerPhone && (
+                  <a href={quoCallUrl(job.customerPhone)} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                    <Phone className="h-3 w-3" />{job.customerPhone}
+                  </a>
+                )}
+                {job.customerEmail && (
+                  <a href={`mailto:${job.customerEmail}`} className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                    <Mail className="h-3 w-3" />{job.customerEmail}
+                  </a>
+                )}
               </div>
-            )}
-            {job.customerPhone && (
-              <div className="flex items-center gap-2 text-sm">
-                <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <a href={quoCallUrl(job.customerPhone)} className="text-primary">{job.customerPhone}</a>
-              </div>
-            )}
-            {job.customerEmail && (
-              <div className="flex items-center gap-2 text-sm">
-                <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <a href={`mailto:${job.customerEmail}`} className="text-primary">{job.customerEmail}</a>
-              </div>
-            )}
-          </div>
+              {job.customerAddress && (
+                <div className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                  <MapPin className="h-3 w-3 shrink-0 mt-0.5" />{job.customerAddress}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Status + Date */}
           <div className="grid grid-cols-2 gap-3">

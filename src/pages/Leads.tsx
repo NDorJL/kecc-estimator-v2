@@ -678,6 +678,18 @@ function LeadDetailSheet({
 
           {/* ── Call / Text buttons ────────────────────────────────────────── */}
           {phone && (
+            <div className="space-y-2">
+              {/* Readable contact info — quick reference without tapping */}
+              <div className="flex flex-wrap gap-3 px-0.5">
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <PhoneCall className="h-3 w-3" />{phone}
+                </span>
+                {effectiveQuote?.customerEmail && (
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground truncate">
+                    <MessageSquare className="h-3 w-3 shrink-0" />{effectiveQuote.customerEmail}
+                  </span>
+                )}
+              </div>
             <div className="flex gap-2">
               <a
                 href={quoCallUrl(phone)}
@@ -699,6 +711,7 @@ function LeadDetailSheet({
                   Text
                 </Button>
               </a>
+            </div>
             </div>
           )}
 

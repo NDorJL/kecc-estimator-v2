@@ -1,4 +1,4 @@
-import { Switch, Route, Router, Link, useLocation } from 'wouter'
+import { Switch, Route, Router, useLocation } from 'wouter'
 import { useHashLocation } from 'wouter/use-hash-location'
 import { queryClient } from './lib/queryClient'
 import { QueryClientProvider, useQuery } from '@tanstack/react-query'
@@ -8,17 +8,18 @@ import { ThemeProvider, useTheme } from '@/components/theme-provider'
 import { QuoteProvider } from '@/lib/quote-context'
 import { ServicesProvider } from '@/lib/services-context'
 import { Button } from '@/components/ui/button'
+import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
+import { AppSidebar } from '@/components/AppSidebar'
 import { useEffect } from 'react'
 import { apiGet } from '@/lib/queryClient'
 import { CompanySettings } from '@/types'
 import {
   applyTheme, clearTheme,
-  ALL_NAV_ITEMS, mergeNavItems,
 } from '@/lib/theme'
 import {
-  LayoutDashboard, Calendar, Calculator as CalcIcon, FileText,
-  Settings, Sun, Moon, RefreshCw, Users, Briefcase,
-  BookOpen, TrendingUp, Megaphone,
+  LayoutDashboard, Calendar,
+  Sun, Moon, Briefcase,
+  Target,
 } from 'lucide-react'
 import Dashboard from '@/pages/Dashboard'
 import Contacts from '@/pages/Contacts'
@@ -33,22 +34,6 @@ import PriceBook from '@/pages/PriceBook'
 import SettingsPage from '@/pages/Settings'
 import Finance from '@/pages/Finance'
 import Marketing from '@/pages/Marketing'
-
-// Map nav id → lucide icon
-const NAV_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  dashboard:     LayoutDashboard,
-  contacts:      Users,
-  calendar:      Calendar,
-  jobs:          Briefcase,
-  calculator:    CalcIcon,
-  quotes:        FileText,
-  subscriptions: RefreshCw,
-  finance:       TrendingUp,
-  pricebook:     BookOpen,
-  leads:         Megaphone,
-  settings:      Settings,
-  marketing:     TrendingUp,
-}
 
 // ── Theme applicator — runs whenever settings change ─────────────────────────
 
@@ -74,100 +59,82 @@ function ThemeApplicator() {
 
 function AppHeader() {
   const { theme, toggleTheme } = useTheme()
-  const { data: settings } = useQuery<CompanySettings>({
-    queryKey: ['/settings'],
-    queryFn: () => apiGet<CompanySettings>('/settings'),
-    staleTime: 5 * 60 * 1000,
-  })
-
   return (
-    <header className="sticky top-0 z-50 flex items-center justify-between border-b bg-card/95 backdrop-blur-sm px-4" style={{ minHeight: 52 }}>
-      <h1 className="text-[15px] font-black tracking-tight">
-        {settings?.companyName ?? 'Knox Exterior Care Co.'}
-      </h1>
-      <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-9 w-9 rounded-full">
-        {theme === 'dark' ? <Sun className="h-4.5 w-4.5" /> : <Moon className="h-4.5 w-4.5" />}
+    <header className="sticky top-0 z-50 flex items-center gap-2 border-b bg-card/95 backdrop-blur-sm px-3" style={{ minHeight: 48 }}>
+      <SidebarTrigger className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground" />
+      <div className="flex-1" />
+      <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-8 w-8 rounded-full">
+        {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
       </Button>
     </header>
-  )
-}
-
-// ── Dynamic bottom nav ───────────────────────────────────────────────────────
-
-function BottomTabBar() {
-  const [location] = useLocation()
-  const { data: settings } = useQuery<CompanySettings>({
-    queryKey: ['/settings'],
-    queryFn: () => apiGet<CompanySettings>('/settings'),
-    staleTime: 5 * 60 * 1000,
-  })
-
-  const visibleItems = mergeNavItems(settings?.navConfig?.items ?? [])
-    .filter(item => item.visible)
-    .map(item => ALL_NAV_ITEMS.find(n => n.id === item.id)!)
-    .filter(Boolean)
-    .slice(0, 7)   // hard cap at 7 to prevent overflow
-
-  return (
-    <nav
-      className="sticky bottom-0 z-50 flex items-center justify-around border-t bg-card/95 backdrop-blur-sm"
-      style={{ minHeight: 64, paddingBottom: 'env(safe-area-inset-bottom)' }}
-    >
-      {visibleItems.map(tab => {
-        const isActive = tab.path === '/' ? location === '/' : location.startsWith(tab.path)
-        const Icon = NAV_ICONS[tab.id] ?? Settings
-        return (
-          <Link
-            key={tab.path}
-            href={tab.path}
-            className={`flex flex-1 flex-col items-center justify-center gap-1 py-2 text-[11px] font-semibold transition-all min-h-[56px] ${
-              isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
-            }`}
-          >
-            <div className={`rounded-xl p-1.5 transition-all ${isActive ? 'bg-primary/10' : ''}`}>
-              <Icon className={`h-5 w-5 transition-transform ${isActive ? 'scale-110' : ''}`} />
-            </div>
-            <span className="truncate max-w-[52px] text-center leading-tight">{tab.label}</span>
-          </Link>
-        )
-      })}
-    </nav>
   )
 }
 
 // ── App layout ───────────────────────────────────────────────────────────────
 
 function AppLayout() {
-  return (
-    <div className="flex flex-col h-[100dvh]">
-      <ThemeApplicator />
-      <AppHeader />
+  const [location] = useLocation()
 
-      <main className="flex-1 overflow-y-auto">
-        <Switch>
-          <Route path="/" component={Dashboard} />
-          <Route path="/contacts" component={Contacts} />
-          <Route path="/contacts/:id" component={ContactDetail} />
-          <Route path="/leads" component={Leads} />
-          <Route path="/calendar" component={CalendarPage} />
-          <Route path="/jobs" component={Jobs} />
-          <Route path="/calculator" component={Calculator} />
-          <Route path="/quotes" component={Quotes} />
-          <Route path="/subscriptions" component={Subscriptions} />
-          <Route path="/pricebook" component={PriceBook} />
-          <Route path="/settings" component={SettingsPage} />
-          <Route path="/finance" component={Finance} />
-          <Route path="/marketing" component={Marketing} />
-          <Route>
-            <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-              <h2 className="text-2xl font-bold mb-2">Page Not Found</h2>
-              <p className="text-muted-foreground">The page you're looking for doesn't exist.</p>
-            </div>
-          </Route>
-        </Switch>
-      </main>
-      <BottomTabBar />
-    </div>
+  return (
+    <SidebarProvider defaultOpen={true}>
+      <div className="flex h-[100dvh] w-full overflow-hidden">
+        <ThemeApplicator />
+        <AppSidebar />
+        <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+          <AppHeader />
+          <main
+            key={location}
+            className="flex-1 overflow-y-auto animate-page-enter"
+          >
+            <Switch>
+              <Route path="/" component={Dashboard} />
+              <Route path="/contacts" component={Contacts} />
+              <Route path="/contacts/:id" component={ContactDetail} />
+              <Route path="/leads" component={Leads} />
+              <Route path="/calendar" component={CalendarPage} />
+              <Route path="/jobs" component={Jobs} />
+              <Route path="/calculator" component={Calculator} />
+              <Route path="/quotes" component={Quotes} />
+              <Route path="/subscriptions" component={Subscriptions} />
+              <Route path="/pricebook" component={PriceBook} />
+              <Route path="/settings" component={SettingsPage} />
+              <Route path="/finance" component={Finance} />
+              <Route path="/marketing" component={Marketing} />
+              <Route>
+                <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+                  <h2 className="text-2xl font-bold mb-2">Page Not Found</h2>
+                  <p className="text-muted-foreground">The page you're looking for doesn't exist.</p>
+                </div>
+              </Route>
+            </Switch>
+          </main>
+
+          {/* Mobile quick-nav — 4 most-used items, hidden on desktop */}
+          <nav className="md:hidden flex items-center justify-around border-t border-border bg-card/95 backdrop-blur-sm py-1" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+            {[
+              { path: '/',         icon: LayoutDashboard, label: 'Home' },
+              { path: '/leads',    icon: Target,          label: 'Leads' },
+              { path: '/calendar', icon: Calendar,        label: 'Calendar' },
+              { path: '/jobs',     icon: Briefcase,       label: 'Jobs' },
+            ].map(item => {
+              const active = item.path === '/' ? location === '/' : location.startsWith(item.path)
+              return (
+                <a
+                  key={item.path}
+                  href={`#${item.path}`}
+                  className={`flex flex-col items-center gap-0.5 px-4 py-2 min-h-[52px] justify-center transition-colors ${
+                    active ? 'text-primary' : 'text-muted-foreground'
+                  }`}
+                >
+                  <item.icon className={`h-5 w-5 transition-transform ${active ? 'scale-110' : ''}`} />
+                  <span className="text-[10px] font-semibold">{item.label}</span>
+                </a>
+              )
+            })}
+          </nav>
+        </div>
+      </div>
+    </SidebarProvider>
   )
 }
 
