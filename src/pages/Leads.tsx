@@ -10,7 +10,8 @@ import {
   DragEndEvent,
   DragOverEvent,
   DragStartEvent,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   DragOverlay,
@@ -33,7 +34,7 @@ import {
   MapPin, Phone, Mail, User, CalendarPlus,
   Trash2, Archive, PhoneCall, MessageSquare, FileSignature,
   Send, Receipt, CheckCircle2, XCircle, RotateCcw, TrendingDown,
-  Users, DollarSign, ChevronRight, CalendarCheck,
+  Users, DollarSign, ChevronRight, CalendarCheck, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { ScheduleQuoteSheet } from '@/components/ScheduleQuoteSheet'
@@ -1756,9 +1757,13 @@ export default function Leads() {
   })
 
   // ── DnD sensors ───────────────────────────────────────────────────────────
-
+  // Separate MouseSensor and TouchSensor so we can apply different constraints.
+  // MouseSensor: 8px distance — quick for desktop dragging.
+  // TouchSensor: 250ms hold + 8px tolerance — prevents accidental drags while
+  //   scrolling the kanban horizontally on mobile.
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 8 } }),
   )
 
   function handleDragStart(e: DragStartEvent) {
@@ -1844,6 +1849,9 @@ export default function Leads() {
   const lostLeads   = (leads ?? []).filter(l => l.stage === 'lost')
   const activeLeads = (leads ?? []).filter(l => l.stage !== 'lost')
 
+  // Mobile bottom quotes bar — open by default so quotes are discoverable
+  const [quotesBarOpen, setQuotesBarOpen] = useState(true)
+
   // Quotes for right panel: exclude any already in the pipeline, sort by priority
   const sortedQuotes = [...(quotes ?? [])]
     .filter(q => !quoteLeadMap[q.id])
@@ -1909,79 +1917,129 @@ export default function Leads() {
         onDragEnd={handleDragEnd}
         onDragOver={handleDragOver}
       >
-        <div className="flex flex-1 min-h-0 overflow-hidden">
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
 
-          {/* ── Left: Kanban ──────────────────────────────────────────────── */}
-          <div className="flex-1 overflow-x-auto overflow-y-hidden">
-            {loading ? (
-              <div className="flex gap-3 p-3 h-full">
-                {STAGES.map(s => (
-                  <div key={s.id} className="min-w-[180px] w-[180px]">
-                    <Skeleton className="h-8 w-full rounded-t-xl" />
-                    <Skeleton className="h-24 w-full rounded-b-xl mt-px" />
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="flex gap-3 p-3 h-full" style={{ minWidth: 'max-content' }}>
-                {STAGES.map(stage => (
-                  <KanbanColumn
-                    key={stage.id}
-                    stage={stage}
-                    leads={activeLeads.filter(l => l.stage === stage.id)}
-                    displayNames={displayNames}
-                    sublines={sublines}
-                    phones={phones}
-                    emails={emails}
-                    addresses={addresses}
-                    agreementBadgeIds={agreementBadgeIds}
-                    onCardClick={l => setSelectedLead(l)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
+          {/* ── Kanban + right panel (desktop) ────────────────────────────── */}
+          <div className="flex flex-1 min-h-0 overflow-hidden">
 
-          {/* ── Right: Quotes panel ───────────────────────────────────────── */}
-          <div className="w-[155px] shrink-0 border-l flex flex-col overflow-hidden bg-muted/20">
-            <div className="px-2 py-2 border-b shrink-0 bg-card/80">
-              <div className="flex items-center gap-1.5">
-                <FileText className="h-3.5 w-3.5 text-primary" />
-                <span className="text-xs font-bold">Quotes</span>
-                {!quotesLoading && (
-                  <Badge variant="secondary" className="text-[10px] h-4 px-1 ml-auto">
-                    {sortedQuotes.length}
-                  </Badge>
-                )}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">Drag into a stage</p>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-2 space-y-2">
-              {quotesLoading ? (
-                <>
-                  <Skeleton className="h-20 w-full rounded-lg" />
-                  <Skeleton className="h-20 w-full rounded-lg" />
-                  <Skeleton className="h-20 w-full rounded-lg" />
-                </>
-              ) : sortedQuotes.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground text-center py-4">No quotes yet</p>
+            {/* Kanban scroll area */}
+            <div className="flex-1 overflow-x-auto overflow-y-hidden">
+              {loading ? (
+                <div className="flex gap-3 p-3 h-full">
+                  {STAGES.map(s => (
+                    <div key={s.id} className="min-w-[180px] w-[180px]">
+                      <Skeleton className="h-8 w-full rounded-t-xl" />
+                      <Skeleton className="h-24 w-full rounded-b-xl mt-px" />
+                    </div>
+                  ))}
+                </div>
               ) : (
-                sortedQuotes.map(q => {
-                  const linkedStage = quoteLeadMap[q.id]
-                  const stageLabel = linkedStage
-                    ? STAGES.find(s => s.id === linkedStage)?.label ?? null
-                    : null
-                  return (
-                    <DraggableQuoteCard
-                      key={q.id}
-                      quote={q}
-                      linkedStageLabel={stageLabel}
+                <div className="flex gap-3 p-3 h-full" style={{ minWidth: 'max-content' }}>
+                  {STAGES.map(stage => (
+                    <KanbanColumn
+                      key={stage.id}
+                      stage={stage}
+                      leads={activeLeads.filter(l => l.stage === stage.id)}
+                      displayNames={displayNames}
+                      sublines={sublines}
+                      phones={phones}
+                      emails={emails}
+                      addresses={addresses}
+                      agreementBadgeIds={agreementBadgeIds}
+                      onCardClick={l => setSelectedLead(l)}
                     />
-                  )
-                })
+                  ))}
+                </div>
               )}
             </div>
+
+            {/* ── Right: Quotes panel — desktop only ───────────────────────── */}
+            <div className="hidden md:flex w-[155px] shrink-0 border-l flex-col overflow-hidden bg-muted/20">
+              <div className="px-2 py-2 border-b shrink-0 bg-card/80">
+                <div className="flex items-center gap-1.5">
+                  <FileText className="h-3.5 w-3.5 text-primary" />
+                  <span className="text-xs font-bold">Quotes</span>
+                  {!quotesLoading && (
+                    <Badge variant="secondary" className="text-[10px] h-4 px-1 ml-auto">
+                      {sortedQuotes.length}
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">Drag into a stage</p>
+              </div>
+              <div className="flex-1 overflow-y-auto p-2 space-y-2">
+                {quotesLoading ? (
+                  <>
+                    <Skeleton className="h-20 w-full rounded-lg" />
+                    <Skeleton className="h-20 w-full rounded-lg" />
+                    <Skeleton className="h-20 w-full rounded-lg" />
+                  </>
+                ) : sortedQuotes.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground text-center py-4">No quotes yet</p>
+                ) : (
+                  sortedQuotes.map(q => {
+                    const linkedStage = quoteLeadMap[q.id]
+                    const stageLabel = linkedStage
+                      ? STAGES.find(s => s.id === linkedStage)?.label ?? null
+                      : null
+                    return (
+                      <DraggableQuoteCard key={q.id} quote={q} linkedStageLabel={stageLabel} />
+                    )
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Bottom: Quotes bar — mobile only ─────────────────────────── */}
+          <div className="md:hidden shrink-0 border-t bg-muted/20">
+            {/* Header / toggle */}
+            <button
+              className="w-full flex items-center gap-2 px-3 py-2 text-left active:bg-muted/40 transition-colors"
+              onClick={() => setQuotesBarOpen(o => !o)}
+            >
+              <FileText className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span className="text-xs font-bold flex-1">Quotes</span>
+              {!quotesLoading && (
+                <Badge variant="secondary" className="text-[10px] h-4 px-1">
+                  {sortedQuotes.length}
+                </Badge>
+              )}
+              <span className="text-[10px] text-muted-foreground mr-1">Drag into stage</span>
+              {quotesBarOpen
+                ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                : <ChevronUp className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              }
+            </button>
+
+            {/* Horizontal scrollable quote cards */}
+            {quotesBarOpen && (
+              <div
+                className="flex gap-2 px-2 pb-2 overflow-x-auto"
+                style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+              >
+                {quotesLoading ? (
+                  <>
+                    <Skeleton className="h-20 w-[140px] rounded-lg shrink-0" />
+                    <Skeleton className="h-20 w-[140px] rounded-lg shrink-0" />
+                  </>
+                ) : sortedQuotes.length === 0 ? (
+                  <p className="text-[11px] text-muted-foreground py-2 px-1">No quotes yet</p>
+                ) : (
+                  sortedQuotes.map(q => {
+                    const linkedStage = quoteLeadMap[q.id]
+                    const stageLabel = linkedStage
+                      ? STAGES.find(s => s.id === linkedStage)?.label ?? null
+                      : null
+                    return (
+                      <div key={q.id} className="shrink-0 w-[140px]">
+                        <DraggableQuoteCard quote={q} linkedStageLabel={stageLabel} />
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            )}
           </div>
         </div>
 
