@@ -250,10 +250,10 @@ function buildQuotePage(opts: {
       const bgColor = isChecked ? '#f0fdf4' : '#ffffff'
       return `
       <label class="opt-label" data-id="${esc(g.id)}"
-        style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:2px solid ${borderColor};border-radius:10px;margin-bottom:8px;cursor:pointer;background:${bgColor};transition:border-color 0.15s,background 0.15s;"
-        onclick="toggleOpt(this)">
+        style="display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:2px solid ${borderColor};border-radius:10px;margin-bottom:8px;cursor:pointer;background:${bgColor};transition:border-color 0.15s,background 0.15s;">
         <input type="checkbox" class="opt-check" value="${esc(g.id)}" data-amount="${g.amount}"${checkedAttr}
-          style="width:18px;height:18px;margin-top:2px;flex-shrink:0;cursor:pointer;" onclick="event.stopPropagation();">
+          onchange="handleOptChange(this)"
+          style="width:18px;height:18px;margin-top:2px;flex-shrink:0;cursor:pointer;">
         <div style="flex:1;min-width:0;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
             <span style="font-size:14px;font-weight:700;color:#111827;">${esc(g.label)}</span>
@@ -299,17 +299,17 @@ function buildQuotePage(opts: {
         var el=document.getElementById('opts-grand-total');
         if(el) el.textContent='$'+t.toFixed(2);
       }
-      function toggleOpt(label){
-        var cb=label.querySelector('.opt-check');
-        if(cb){
-          cb.checked=!cb.checked;
+      // onchange fires exactly once per state change regardless of where
+      // on the label the user clicks — no double-toggle risk.
+      function handleOptChange(cb){
+        var label=cb.closest('.opt-label');
+        if(label){
           label.style.borderColor=cb.checked?'#16a34a':'#e5e7eb';
           label.style.background=cb.checked?'#f0fdf4':'#ffffff';
-          updateOpts();
         }
+        updateOpts();
       }
-      window.toggleOpt=toggleOpt;
-      // Capture selections into hidden field before fetch (in sigScript)
+      window.handleOptChange=handleOptChange;
       window._getSelectedOptIds=function(){
         var ids=[];
         document.querySelectorAll('.opt-check:checked').forEach(function(cb){ids.push(cb.value);});
