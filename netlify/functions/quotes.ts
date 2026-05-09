@@ -4,6 +4,7 @@ import { rowToQuote } from '../../src/types'
 import { randomUUID } from 'crypto'
 import { advanceLeadStage } from './_leadSync'
 import { sendOpenPhoneSms, getAttachmentLinks } from './_smsHelper'
+import { sendEmail } from './_emailHelper'   // ← NEW (FIX 1)
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -263,6 +264,70 @@ export const handler: Handler = async (event) => {
       }                                                                                                    // ← NEW
 
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToQuote(data)) }
+    }
+
+    // SEND quote via email ← NEW (FIX 1)
+    if (method === 'POST' && id && action === 'send-email') {
+      const body2 = JSON.parse(event.body ?? '{}') as { recipientEmail?: string }
+
+      const { data: quote, error: qErr } = await supabase
+        .from('quotes').select('*').eq('id', id).single()
+      if (qErr || !quote) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Quote not found' }) }
+
+      const recipientEmail = body2.recipientEmail ?? quote.customer_email
+      if (!recipientEmail) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'No email address on this quote' }) }
+
+      const { data: settings } = await supabase
+        .from('company_settings').select('company_name').limit(1).single()
+      const companyName = settings?.company_name ?? 'Knox Exterior Care Co.'
+
+      const siteUrl = (process.env.URL ?? '').replace(/\/$/, '')
+      const esignUrl = quote.accept_token
+        ? `${siteUrl}/.netlify/functions/esign?token=${encodeURIComponent(quote.accept_token)}`
+        : `${siteUrl}/.netlify/functions/pdf-quote?quoteId=${id}`
+
+      // Build a short service summary for the subject line
+      const lineItems = Array.isArray(quote.line_items) ? quote.line_items as Array<{serviceName?: string}> : []
+      const firstService = lineItems[0]?.serviceName ?? null
+      const subject = `Your Quote from ${companyName}${firstService ? ` — ${firstService}` : ''}`
+
+      const firstName = (quote.customer_name ?? 'there').split(' ')[0]
+      const html = `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
+          <h2 style="margin: 0 0 16px; color: #111827;">Hi ${firstName},</h2>
+          <p style="color: #374151; line-height: 1.6;">
+            Your quote from <strong>${companyName}</strong> is ready to review.
+            Click the link below to view the full estimate and sign to accept.
+          </p>
+          <div style="margin: 28px 0; text-align: center;">
+            <a href="${esignUrl}" style="background: #e06307; color: #fff; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 15px; display: inline-block;">
+              View &amp; Sign Your Quote
+            </a>
+          </div>
+          <p style="color: #6b7280; font-size: 13px; line-height: 1.5;">
+            Or copy this link: <a href="${esignUrl}" style="color: #e06307;">${esignUrl}</a>
+          </p>
+          <p style="color: #6b7280; font-size: 13px; margin-top: 24px;">
+            Questions? Reply to this email or call/text us directly.
+          </p>
+          <p style="color: #9ca3af; font-size: 12px; margin-top: 32px; border-top: 1px solid #f3f4f6; padding-top: 16px;">
+            — ${companyName}
+          </p>
+        </div>`
+
+      await sendEmail({ to: recipientEmail, subject, html })
+
+      // Log activity on the contact (non-fatal)
+      if (quote.contact_id) {
+        try { await supabase.from('activities').insert({
+          contact_id: quote.contact_id,
+          type:       'email_sent',
+          summary:    `Quote emailed to ${recipientEmail}`,
+          metadata:   { quoteId: id },
+        }) } catch (_e) { /* non-fatal */ }
+      }
+
+      return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true }) }
     }
 
     // SEND quote via SMS — stamps sent_at and fires OpenPhone message

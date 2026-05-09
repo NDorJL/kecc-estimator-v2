@@ -169,6 +169,7 @@ export interface CompanySettings {
   googleCalExpiresAt: string | null;
   ownerSignatureData: string | null;
   ownerEmail: string | null;
+  scratchpadContent: string;   // ← NEW (FIX 2 companion)
 }
 
 export interface QuoteAttachment {
@@ -423,6 +424,7 @@ export function rowToSettings(r: any): CompanySettings {
     googleCalExpiresAt: r.google_cal_token_expires_at ?? null,
     ownerSignatureData: r.owner_signature_data ?? null,
     ownerEmail: r.owner_email ?? null,
+    scratchpadContent: r.scratchpad_content ?? '',   // ← NEW (FIX 2 companion)
   };
 }
 
