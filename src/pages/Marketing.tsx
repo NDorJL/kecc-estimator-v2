@@ -12,10 +12,10 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import type { MarketingChannel, MarketingSpend, Campaign, CampaignEvent, Lead, Quote } from '@/types'
+import type { MarketingChannel, MarketingSpend, Campaign, CampaignEvent, Lead, Quote, Job } from '@/types'
 import {
   TrendingUp, TrendingDown, Minus, DollarSign, Users, Briefcase,
-  ChevronUp, ChevronDown, Plus, Pencil, Trash2, Download, Megaphone,
+  Target, ChevronUp, ChevronDown, Plus, Pencil, Trash2, Download, Megaphone,
   Award, BarChart2,
 } from 'lucide-react'
 
@@ -109,7 +109,7 @@ function formatKpi(v: number | null, kind: MetricKind): string {
 }
 
 function KpiCard({
-  title, icon, value, prev, kind, lowerIsBetter = false,
+  title, icon, value, prev, kind, lowerIsBetter = false, isEstimated = false,
 }: {
   title: string
   icon: React.ReactNode
@@ -117,6 +117,7 @@ function KpiCard({
   prev: number | null
   kind: MetricKind
   lowerIsBetter?: boolean
+  isEstimated?: boolean
 }) {
   const dir = trendDir(value, prev)
   const isGood = dir === 'flat' ? null : lowerIsBetter ? dir === 'down' : dir === 'up'
@@ -138,7 +139,12 @@ function KpiCard({
           <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">{title}</span>
           <span className="text-muted-foreground/60">{icon}</span>
         </div>
-        <div className="text-xl font-bold tracking-tight truncate">{formatKpi(value, kind)}</div>
+        <div className="text-xl font-bold tracking-tight truncate">
+          {isEstimated && value !== null && (
+            <span className="text-base text-muted-foreground/50 mr-0.5" title="Estimate — no completed job found">~</span>
+          )}
+          {formatKpi(value, kind)}
+        </div>
         <div className={`flex items-center gap-0.5 mt-1 text-xs ${trendColor}`}>
           <TrendIcon className="h-3 w-3 shrink-0" />
           {delta !== null ? (
@@ -308,25 +314,132 @@ function SpendEntrySheet({
   )
 }
 
-// ── ChannelDetailSheet — placeholder ─────────────────────────────────────────
+// ── ChannelDetailSheet ────────────────────────────────────────────────────────
+
+const STATUS_BADGE: Record<string, string> = {
+  active: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+  paused: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
+  ended:  'bg-muted text-muted-foreground border-border',
+}
+
+const TYPE_BADGE_OUTER: Record<string, string> = {
+  digital:  'bg-blue-500/10 text-blue-600 border-blue-500/20',
+  print:    'bg-amber-500/10 text-amber-600 border-amber-500/20',
+  referral: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+  other:    'bg-muted text-muted-foreground border-border',
+}
+
+function fmtOr(v: number | null, fmt: (n: number) => string, fallback = '—'): string {
+  return v !== null ? fmt(v) : fallback
+}
 
 function ChannelDetailSheet({
-  channel, onClose,
+  channel, onClose, stats, channelCampaigns,
 }: {
   channel: MarketingChannel | null
   onClose: () => void
+  stats: {
+    spend: number; leadsCount: number; closedJobs: number
+    chRevenue: number; chRevenueEst: boolean
+    chCpl: number | null; chCpa: number | null; chRoi: number | null
+  } | null
+  channelCampaigns: Campaign[]
 }) {
+  const TYPE_BADGE = TYPE_BADGE_OUTER
+
   return (
     <Sheet open={!!channel} onOpenChange={o => { if (!o) onClose() }}>
-      <SheetContent side="right" className="w-full max-w-md">
-        <SheetHeader>
-          <SheetTitle>{channel?.name ?? 'Channel'}</SheetTitle>
+      <SheetContent side="right" className="w-full max-w-md overflow-y-auto">
+        <SheetHeader className="mb-4">
+          <div className="flex items-center gap-2">
+            <SheetTitle className="text-lg">{channel?.name ?? 'Channel'}</SheetTitle>
+            {channel && (
+              <Badge variant="outline" className={`text-[11px] px-1.5 py-0 h-5 ${TYPE_BADGE[channel.type] ?? TYPE_BADGE.other}`}>
+                {channel.type}
+              </Badge>
+            )}
+          </div>
         </SheetHeader>
-        <div className="mt-6 text-sm text-muted-foreground text-center py-12">
-          <BarChart2 className="h-10 w-10 mx-auto mb-3 opacity-30" />
-          <p className="font-medium">Channel detail coming in a future session</p>
-          <p className="text-xs mt-1">Campaign breakdown, lead timeline, and ROI trend will appear here.</p>
-        </div>
+
+        {stats ? (
+          <>
+            {/* ── Stats grid ────────────────────────────────────────────── */}
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              {[
+                { label: 'Spend',    value: fmtCurrency(stats.spend) },
+                { label: 'Leads',    value: String(stats.leadsCount || '—') },
+                { label: 'Closed',   value: String(stats.closedJobs || '—') },
+                {
+                  label: 'Revenue',
+                  value: stats.chRevenue > 0
+                    ? `${stats.chRevenueEst ? '~' : ''}${fmtCurrency(stats.chRevenue)}`
+                    : '—',
+                },
+                { label: 'CPL',      value: fmtOr(stats.chCpl, fmtCurrency) },
+                { label: 'CPA',      value: fmtOr(stats.chCpa, fmtCurrency) },
+                {
+                  label: 'ROI',
+                  value: stats.chRoi !== null ? fmtPct(stats.chRoi) : '—',
+                  color: stats.chRoi !== null
+                    ? stats.chRoi >= 0 ? 'text-emerald-600' : 'text-red-500'
+                    : undefined,
+                },
+              ].map(({ label, value, color }) => (
+                <div key={label} className="bg-muted/40 rounded-lg p-3">
+                  <div className="text-[11px] text-muted-foreground font-medium uppercase tracking-wide mb-0.5">{label}</div>
+                  <div className={`text-base font-bold tabular-nums ${color ?? ''}`}>{value}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* ── Campaigns list ─────────────────────────────────────────── */}
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">
+                Campaigns ({channelCampaigns.length})
+              </h4>
+              {channelCampaigns.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">No campaigns yet for this channel</p>
+              ) : (
+                <div className="space-y-2">
+                  {channelCampaigns.map(cam => (
+                    <div key={cam.id} className="border border-border/60 rounded-lg p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-sm font-medium leading-snug">{cam.name}</span>
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] px-1.5 py-0 h-5 shrink-0 ${STATUS_BADGE[cam.status] ?? STATUS_BADGE.ended}`}
+                        >
+                          {cam.status}
+                        </Badge>
+                      </div>
+                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
+                        <span className="text-[11px] text-muted-foreground capitalize">{cam.campaignType}</span>
+                        {cam.startDate && (
+                          <span className="text-[11px] text-muted-foreground">
+                            {cam.startDate}{cam.endDate ? ` – ${cam.endDate}` : ''}
+                          </span>
+                        )}
+                        {cam.budget != null && (
+                          <span className="text-[11px] text-muted-foreground">Budget: {fmtCurrency(cam.budget)}</span>
+                        )}
+                      </div>
+                      {cam.utmCampaign && (
+                        <div className="mt-1 font-mono text-[10px] text-muted-foreground/60 truncate">
+                          utm_campaign={cam.utmCampaign}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="mt-8 text-center text-muted-foreground">
+            <BarChart2 className="h-8 w-8 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">No data for this period</p>
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   )
@@ -416,6 +529,11 @@ export default function Marketing() {
     queryFn: () => apiGet('/campaign-events'),
   })
 
+  const { data: allJobs = [] } = useQuery<Job[]>({
+    queryKey: ['/jobs'],
+    queryFn: () => apiGet('/jobs'),
+  })
+
   // ── Attribution maps ──────────────────────────────────────────────────────
 
   // campaign_id → channel_id
@@ -424,9 +542,6 @@ export default function Marketing() {
     for (const c of allCampaigns) m[c.id] = c.channelId
     return m
   }, [allCampaigns])
-
-  // campaign_id → channel_id (for events)
-  const campaignToChannel = campaignChannelMap
 
   // source string → channel_id (fallback when no campaign_id)
   const sourceToChannelId = useMemo(() => {
@@ -493,11 +608,29 @@ export default function Marketing() {
   const periodClosed = useMemo(() => periodLeads.filter(isClosed), [periodLeads])
   const prevClosed   = useMemo(() => prevLeads.filter(isClosed),   [prevLeads])
 
-  function revenueForLeads(ls: Lead[]): number {
-    return ls.reduce((sum, l) => {
-      const q = allQuotes.find(q => q.id === l.quoteId)
-      return sum + (q?.total ?? l.estimatedValue ?? 0)
-    }, 0)
+  // Returns the revenue figure for one lead.
+  // isEstimated = true when no completed job has been found (so the number is
+  // the quote total / estimatedValue, not a confirmed invoice amount).
+  function leadRevenue(lead: Lead): { amount: number; isEstimated: boolean } {
+    const completedJob = allJobs.find(j =>
+      j.status === 'completed' &&
+      ((lead.quoteId    && j.quoteId    === lead.quoteId) ||
+       (lead.contactId  && j.contactId  === lead.contactId))
+    )
+    const q = allQuotes.find(q => q.id === lead.quoteId)
+    const amount = q?.total ?? lead.estimatedValue ?? 0
+    return { amount, isEstimated: !completedJob }
+  }
+
+  // Aggregate revenue across a list of leads.
+  function revenueFor(leads: Lead[]): { total: number; hasEstimated: boolean } {
+    let total = 0; let hasEstimated = false
+    for (const l of leads) {
+      const r = leadRevenue(l)
+      total += r.amount
+      if (r.isEstimated && r.amount > 0) hasEstimated = true
+    }
+    return { total, hasEstimated }
   }
 
   // ── KPI computations ──────────────────────────────────────────────────────
@@ -511,8 +644,12 @@ export default function Marketing() {
   const closedCount   = periodClosed.length
   const prevClosedCount = prevClosed.length
 
-  const revenue       = useMemo(() => revenueForLeads(periodClosed), [periodClosed, allQuotes])
-  const prevRevenue   = useMemo(() => revenueForLeads(prevClosed),   [prevClosed,   allQuotes])
+  const { total: revenue, hasEstimated: revenueIsEst } =
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useMemo(() => revenueFor(periodClosed), [periodClosed, allQuotes, allJobs])
+  const { total: prevRevenue } =
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useMemo(() => revenueFor(prevClosed), [prevClosed, allQuotes, allJobs])
 
   const cpl           = totalLeads  > 0 && totalSpend > 0 ? totalSpend / totalLeads  : null
   const prevCpl       = prevTotalLeads > 0 && prevTotalSpend > 0 ? prevTotalSpend / prevTotalLeads : null
@@ -565,8 +702,8 @@ export default function Marketing() {
       // Close rate: closed / leads %
       const closeRate = leadsCount > 0 ? (closedJobs / leadsCount) * 100 : null
 
-      // Revenue
-      const chRevenue = revenueForLeads(closedLeads)
+      // Revenue — job-backed (real) or quote-estimated
+      const { total: chRevenue, hasEstimated: chRevenueEst } = revenueFor(closedLeads)
 
       // Cost metrics
       const chCpl = leadsCount > 0 && spend > 0 ? spend / leadsCount  : null
@@ -578,12 +715,12 @@ export default function Marketing() {
         v: allLeads.filter(l => l.createdAt.slice(0, 7) === ym && getLeadChannelId(l) === ch.id).length,
       }))
 
-      return { ch, spend, leadsCount, views, convRate, closedJobs, closeRate, chRevenue, chCpl, chCpa, chRoi, sparkline }
+      return { ch, spend, leadsCount, views, convRate, closedJobs, closeRate, chRevenue, chRevenueEst, chCpl, chCpa, chRoi, sparkline }
     })
     // Only show channels with any activity (spend or leads or events)
     .filter(r => r.spend > 0 || r.leadsCount > 0 || r.views > 0)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channels, periodSpend, periodLeads, periodEvents, allCampaigns, allLeads, allQuotes, last6Months, campaignChannelMap, sourceToChannelId])
+  }, [channels, periodSpend, periodLeads, periodEvents, allCampaigns, allLeads, allQuotes, allJobs, last6Months, campaignChannelMap, sourceToChannelId])
 
   const sortedChannelRows = useMemo(() => {
     const rows = [...channelRows]
@@ -606,6 +743,11 @@ export default function Marketing() {
     })
     return rows
   }, [channelRows, sortCol, sortDir])
+
+  // Fast lookup of per-channel stats for the detail sheet
+  const channelStatsMap = useMemo(() => {
+    return Object.fromEntries(channelRows.map(r => [r.ch.id, r]))
+  }, [channelRows])
 
   // ── Spend log data ────────────────────────────────────────────────────────
 
@@ -758,6 +900,7 @@ export default function Marketing() {
                 value={revenue}
                 prev={prevRevenue}
                 kind="currency"
+                isEstimated={revenueIsEst}
               />
               <KpiCard
                 title="Blended CPL"
@@ -884,7 +1027,9 @@ export default function Marketing() {
                             ) : '—'}
                           </td>
                           <td className="px-3 py-2.5 text-right font-medium">
-                            {chRevenue > 0 ? fmtCurrency(chRevenue) : '—'}
+                            {chRevenue > 0
+                              ? <>{chRevenueEst && <span className="text-muted-foreground/50 mr-0.5" title="Estimate">~</span>}{fmtCurrency(chRevenue)}</>
+                              : '—'}
                           </td>
                           <td className="px-3 py-2.5 text-right">
                             {chCpl !== null ? fmtCurrency(chCpl) : '—'}
@@ -1021,6 +1166,8 @@ export default function Marketing() {
       <ChannelDetailSheet
         channel={detailChannel}
         onClose={() => setDetailChannel(null)}
+        stats={detailChannel ? (channelStatsMap[detailChannel.id] ?? null) : null}
+        channelCampaigns={detailChannel ? allCampaigns.filter(c => c.channelId === detailChannel.id) : []}
       />
 
       {/* ── Delete confirmation ──────────────────────────────────────────── */}
