@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import type { Contractor } from '@/types'
+import { quoCallUrl, quoTextUrl } from '@/lib/utils'
+import type { Contractor, ContractorDoc, SubcontractorAgreement } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -9,243 +10,576 @@ import { Textarea } from '@/components/ui/textarea'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { quoCallUrl, quoTextUrl } from '@/lib/utils'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import {
-  Search, Plus, Phone, Mail, Building2, DollarSign, ChevronRight,
+  Search, Plus, Phone, Mail, Building2, DollarSign,
+  Pencil, Trash2, Upload, FileText, X, ExternalLink,
+  Download, Copy, Send, ClipboardList, HardHat,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { Switch } from '@/components/ui/switch'
 
-// ── Contractor Detail Sheet ───────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-function ContractorDetailSheet({
-  contractor,
-  open,
-  onClose,
-}: {
-  contractor: Contractor | null
-  open: boolean
-  onClose: () => void
-}) {
+const SPECIALTIES = [
+  'Lawn Care',
+  'Pressure Washing',
+  'Window Cleaning',
+  'Pet Waste Cleanup',
+  'Lawn Irrigation',
+  'Hardscaping',
+  'Tree Work',
+  'Landscaping',
+  'Pest Control',
+  'Snow Removal',
+  'General Labor',
+  'Other',
+]
+
+const DOC_TYPE_LABELS: Record<string, string> = {
+  w9: 'W-9',
+  agreement: 'Subcontractor Agreement',
+  license: 'License / Insurance',
+  other: 'Other',
+}
+
+interface ContractorForm {
+  name: string
+  phone: string
+  email: string
+  company: string
+  specialty: string
+  ratePerJob: string
+  notes: string
+  is1099: boolean
+}
+
+const EMPTY_FORM: ContractorForm = {
+  name: '', phone: '', email: '', company: '', specialty: '', ratePerJob: '', notes: '', is1099: true,
+}
+
+// ── Contractor Documents Section ──────────────────────────────────────────────
+
+function ContractorDocsSection({ contractor }: { contractor: Contractor }) {
   const queryClient = useQueryClient()
   const { toast } = useToast()
-  const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState({
-    name: '',
-    phone: '',
-    email: '',
-    company: '',
-    specialty: '',
-    ratePerJob: '',
-    notes: '',
-    is1099: true,
-  })
+  const [uploading, setUploading] = useState(false)
+  const [docName, setDocName] = useState('')
+  const [docType, setDocType] = useState('other')
 
-  // Sync form when contractor changes
-  if (contractor && !editing) {
-    const next = {
-      name:      contractor.name,
-      phone:     contractor.phone ?? '',
-      email:     contractor.email ?? '',
-      company:   contractor.company ?? '',
-      specialty: contractor.specialty ?? '',
-      ratePerJob: contractor.ratePerJob?.toString() ?? '',
-      notes:     contractor.notes ?? '',
-      is1099:    contractor.is1099,
+  const { data: contractors } = useQuery<Contractor[]>({ queryKey: ['/contractors'] })
+  const current = contractors?.find(c => c.id === contractor.id) ?? contractor
+  const docs: ContractorDoc[] = current.documents ?? []
+
+  async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const name = docName.trim() || file.name
+    setUploading(true)
+    try {
+      const arrayBuf = await file.arrayBuffer()
+      const res = await fetch(`/.netlify/functions/contractor-docs/${contractor.id}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream',
+          'X-Doc-Name': name,
+          'X-Doc-Type': docType,
+        },
+        body: arrayBuf,
+      })
+      if (!res.ok) throw new Error(await res.text())
+      queryClient.invalidateQueries({ queryKey: ['/contractors'] })
+      setDocName('')
+      toast({ title: 'Document uploaded' })
+    } catch (err) {
+      toast({ title: 'Upload failed', description: String(err), variant: 'destructive' })
+    } finally {
+      setUploading(false)
+      e.target.value = ''
     }
-    if (JSON.stringify(next) !== JSON.stringify(form)) setForm(next)
   }
 
-  const updateMutation = useMutation({
-    mutationFn: () => apiRequest('PATCH', `/contractors/${contractor?.id}`, {
-      name:      form.name,
-      phone:     form.phone || null,
-      email:     form.email || null,
-      company:   form.company || null,
-      specialty: form.specialty || null,
-      ratePerJob: form.ratePerJob ? parseFloat(form.ratePerJob) : null,
-      notes:     form.notes || null,
-      is1099:    form.is1099,
-    }),
-    onSuccess: () => {
+  async function handleDelete(docId: string) {
+    try {
+      const res = await fetch(`/.netlify/functions/contractor-docs/${contractor.id}/${docId}`, { method: 'DELETE' })
+      if (!res.ok && res.status !== 204) throw new Error(await res.text())
       queryClient.invalidateQueries({ queryKey: ['/contractors'] })
-      toast({ title: 'Contractor saved' })
-      setEditing(false)
-    },
-    onError: (e: Error) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
-  })
-
-  if (!contractor) return null
+      toast({ title: 'Document removed' })
+    } catch (err) {
+      toast({ title: 'Delete failed', description: String(err), variant: 'destructive' })
+    }
+  }
 
   return (
-    <Sheet open={open} onOpenChange={v => { if (!v) { setEditing(false); onClose() } }}>
-      <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[90dvh] overflow-y-auto">
-        <SheetHeader className="pb-3 border-b">
-          <SheetTitle className="flex items-center gap-2">
-            {contractor.name}
-            {contractor.is1099 && (
-              <Badge variant="secondary" className="text-[10px]">1099</Badge>
-            )}
-          </SheetTitle>
-          {contractor.specialty && (
-            <p className="text-xs text-muted-foreground">{contractor.specialty}</p>
-          )}
-        </SheetHeader>
+    <div className="border-t pt-4 mt-2">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Documents</p>
 
-        <div className="py-4 space-y-4">
-          {/* Quick actions */}
-          <div className="flex gap-2">
-            {contractor.phone && (
-              <a href={quoCallUrl(contractor.phone)} className="flex-1">
-                <Button variant="outline" size="sm" className="w-full">
-                  <Phone className="h-3.5 w-3.5 mr-1" />Call
-                </Button>
+      {docs.length > 0 ? (
+        <div className="space-y-2 mb-3">
+          {docs.map(doc => (
+            <div key={doc.id} className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+              <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{doc.name}</p>
+                <p className="text-xs text-muted-foreground">{DOC_TYPE_LABELS[doc.docType] ?? doc.docType} · {new Date(doc.uploadedAt).toLocaleDateString()}</p>
+              </div>
+              <a href={doc.fileUrl} target="_blank" rel="noreferrer" className="p-1 text-muted-foreground hover:text-primary">
+                <ExternalLink className="h-3.5 w-3.5" />
               </a>
-            )}
-            {contractor.phone && (
-              <a href={quoTextUrl(contractor.phone)} className="flex-1">
-                <Button variant="outline" size="sm" className="w-full">
-                  <Phone className="h-3.5 w-3.5 mr-1" />Text
-                </Button>
-              </a>
-            )}
-            {contractor.email && (
-              <a href={`mailto:${contractor.email}`} className="flex-1">
-                <Button variant="outline" size="sm" className="w-full">
-                  <Mail className="h-3.5 w-3.5 mr-1" />Email
-                </Button>
-              </a>
-            )}
-          </div>
-
-          {/* Info / Edit */}
-          <div className="rounded-xl border bg-card p-3 space-y-3">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Details</h3>
-              {!editing ? (
-                <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>Edit</Button>
-              ) : (
-                <div className="flex gap-1">
-                  <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>Cancel</Button>
-                  <Button size="sm" disabled={updateMutation.isPending} onClick={() => updateMutation.mutate()}>Save</Button>
-                </div>
-              )}
+              <button onClick={() => handleDelete(doc.id)} className="p-1 text-muted-foreground hover:text-destructive">
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground mb-3">No documents yet. Upload W-9s, agreements, licenses, and more.</p>
+      )}
 
-            {editing ? (
-              <div className="space-y-2">
-                <div><Label className="text-xs">Name</Label>
-                  <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="mt-1 h-9 text-sm" /></div>
-                <div><Label className="text-xs">Company</Label>
-                  <Input value={form.company} onChange={e => setForm(f => ({ ...f, company: e.target.value }))} className="mt-1 h-9 text-sm" /></div>
-                <div><Label className="text-xs">Specialty / Trade</Label>
-                  <Input value={form.specialty} onChange={e => setForm(f => ({ ...f, specialty: e.target.value }))} className="mt-1 h-9 text-sm" /></div>
-                <div><Label className="text-xs">Phone</Label>
-                  <Input type="tel" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="mt-1 h-9 text-sm" /></div>
-                <div><Label className="text-xs">Email</Label>
-                  <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className="mt-1 h-9 text-sm" /></div>
-                <div><Label className="text-xs">Rate per Job ($)</Label>
-                  <Input type="number" value={form.ratePerJob} onChange={e => setForm(f => ({ ...f, ratePerJob: e.target.value }))} className="mt-1 h-9 text-sm" /></div>
-                <div className="flex items-center gap-2">
-                  <Switch checked={form.is1099} onCheckedChange={v => setForm(f => ({ ...f, is1099: v }))} />
-                  <Label className="text-xs">1099 Contractor</Label>
-                </div>
-                <div><Label className="text-xs">Notes</Label>
-                  <Textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={3} className="mt-1 text-sm" /></div>
-              </div>
-            ) : (
-              <div className="space-y-1.5 text-sm">
-                {contractor.company && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Building2 className="h-3.5 w-3.5" />{contractor.company}
-                  </div>
-                )}
-                {contractor.phone && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Phone className="h-3.5 w-3.5" />{contractor.phone}
-                  </div>
-                )}
-                {contractor.email && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Mail className="h-3.5 w-3.5" />{contractor.email}
-                  </div>
-                )}
-                {contractor.ratePerJob != null && (
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <DollarSign className="h-3.5 w-3.5" />${contractor.ratePerJob.toFixed(2)} / job
-                  </div>
-                )}
-                {contractor.notes && (
-                  <p className="text-xs text-muted-foreground border-t pt-2 mt-2">{contractor.notes}</p>
-                )}
-              </div>
-            )}
+      <div className="space-y-2">
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <Label className="text-xs">Document Name</Label>
+            <Input className="mt-1" placeholder="e.g. W-9 2025" value={docName} onChange={e => setDocName(e.target.value)} />
+          </div>
+          <div>
+            <Label className="text-xs">Type</Label>
+            <Select value={docType} onValueChange={setDocType}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="w9">W-9</SelectItem>
+                <SelectItem value="agreement">Subcontractor Agreement</SelectItem>
+                <SelectItem value="license">License / Insurance</SelectItem>
+                <SelectItem value="other">Other</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
-      </SheetContent>
-    </Sheet>
+        <label className={`flex items-center justify-center gap-2 w-full rounded-lg border-2 border-dashed px-4 py-3 text-sm cursor-pointer transition-colors ${uploading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-muted/40'}`}>
+          <Upload className="h-4 w-4 text-muted-foreground" />
+          <span className="text-muted-foreground">{uploading ? 'Uploading…' : 'Choose PDF or image to upload'}</span>
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="sr-only" disabled={uploading} onChange={handleUpload} />
+        </label>
+      </div>
+    </div>
   )
 }
 
-// ── New Contractor Sheet ──────────────────────────────────────────────────────
+// ── SCA Section ───────────────────────────────────────────────────────────────
 
-function NewContractorSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+function ContractorScaSection({ contractor, scas }: { contractor: Contractor; scas: SubcontractorAgreement[] }) {
   const queryClient = useQueryClient()
   const { toast } = useToast()
-  const [form, setForm] = useState({ name: '', phone: '', email: '', company: '', specialty: '', ratePerJob: '', notes: '', is1099: true })
+  const [generating, setGenerating] = useState(false)
 
-  const createMutation = useMutation({
-    mutationFn: () => apiRequest('POST', '/contractors', {
-      name:      form.name,
-      phone:     form.phone || null,
-      email:     form.email || null,
-      company:   form.company || null,
-      specialty: form.specialty || null,
-      ratePerJob: form.ratePerJob ? parseFloat(form.ratePerJob) : null,
-      notes:     form.notes || null,
-      is1099:    form.is1099,
-    }),
+  const sca = scas.find(s => s.contractorId === contractor.id && s.status !== 'void') ?? null
+  const SITE_URL = window.location.origin
+
+  async function handleGenerate() {
+    setGenerating(true)
+    try {
+      const res = await fetch('/.netlify/functions/subcontractor-agreements?action=create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contractorId: contractor.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message ?? 'Failed to generate SCA')
+      queryClient.invalidateQueries({ queryKey: ['/subcontractor-agreements'] })
+      const via = data.sentVia === 'email' ? 'email' : data.sentVia === 'sms' ? 'SMS' : '(no email or SMS — copy link manually)'
+      toast({ title: `Agreement sent via ${via}` })
+    } catch (err) {
+      toast({ title: 'Error', description: String(err), variant: 'destructive' })
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function handleResend() {
+    if (!sca) return
+    setGenerating(true)
+    try {
+      await fetch(`/.netlify/functions/subcontractor-agreements?action=void&id=${sca.id}`, { method: 'POST' })
+      const res = await fetch('/.netlify/functions/subcontractor-agreements?action=create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contractorId: contractor.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message ?? 'Failed to resend')
+      queryClient.invalidateQueries({ queryKey: ['/subcontractor-agreements'] })
+      toast({ title: 'Agreement resent' })
+    } catch (err) {
+      toast({ title: 'Error', description: String(err), variant: 'destructive' })
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  function handleCopyLink() {
+    if (!sca) return
+    const link = `${SITE_URL}/.netlify/functions/subcontractor-agreements?token=${sca.acceptToken}`
+    navigator.clipboard.writeText(link).then(
+      () => toast({ title: 'Link copied to clipboard' }),
+      () => toast({ title: 'Copy failed — link: ' + link }),
+    )
+  }
+
+  function handleDownloadPdf() {
+    if (!sca) return
+    window.open(`/.netlify/functions/subcontractor-agreements?action=pdf&id=${sca.id}`, '_blank')
+  }
+
+  return (
+    <div className="border-t pt-4 mt-2">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1">
+        <ClipboardList className="h-3.5 w-3.5" /> Subcontractor Agreement
+      </p>
+
+      {!sca && (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">No SCA on file.</p>
+          <Button size="sm" className="w-full min-h-[40px]" disabled={generating} onClick={handleGenerate}>
+            {generating ? 'Generating…' : 'Generate & Send Agreement'}
+          </Button>
+        </div>
+      )}
+
+      {sca?.status === 'pending_signature' && (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-full px-2 py-0.5">
+            Awaiting Signature
+          </span>
+          <p className="text-xs text-muted-foreground">Sent {new Date(sca.createdAt).toLocaleDateString()}</p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="flex-1 min-h-[36px]" onClick={handleCopyLink}>
+              <Copy className="h-3.5 w-3.5 mr-1" /> Copy Link
+            </Button>
+            <Button size="sm" variant="outline" className="flex-1 min-h-[36px]" disabled={generating} onClick={handleResend}>
+              <Send className="h-3.5 w-3.5 mr-1" /> Resend
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {sca?.status === 'signed' && (
+        <div className="space-y-2">
+          <span className="text-xs font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-full px-2 py-0.5">
+            ✓ SCA Signed
+          </span>
+          <p className="text-xs text-muted-foreground">
+            Signed {sca.signedAt ? new Date(sca.signedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : ''}
+          </p>
+          <Button size="sm" variant="outline" className="w-full min-h-[36px]" onClick={handleDownloadPdf}>
+            <Download className="h-3.5 w-3.5 mr-1" /> Download Signed PDF
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Generate SCA Dialog ───────────────────────────────────────────────────────
+
+function GenerateScaDialog({
+  open, onClose, contractors, scas,
+}: {
+  open: boolean; onClose: () => void; contractors: Contractor[]; scas: SubcontractorAgreement[]
+}) {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const [selectedId, setSelectedId] = useState('')
+  const [sending, setSending] = useState(false)
+
+  const existingIds = new Set(scas.filter(s => s.status !== 'void').map(s => s.contractorId))
+  const eligible = contractors.filter(c => !existingIds.has(c.id))
+
+  useEffect(() => {
+    if (open) setSelectedId(eligible[0]?.id ?? '')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  async function handleGenerate() {
+    if (!selectedId) return
+    setSending(true)
+    try {
+      const res = await fetch('/.netlify/functions/subcontractor-agreements?action=create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contractorId: selectedId }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message ?? 'Failed')
+      queryClient.invalidateQueries({ queryKey: ['/subcontractor-agreements'] })
+      const name = contractors.find(c => c.id === selectedId)?.name ?? 'contractor'
+      const via = data.sentVia === 'email' ? 'email' : data.sentVia === 'sms' ? 'SMS' : 'link (no email/SMS on file)'
+      toast({ title: `Agreement sent to ${name} via ${via}` })
+      onClose()
+    } catch (err) {
+      toast({ title: 'Error', description: String(err), variant: 'destructive' })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader><DialogTitle>Generate Subcontractor Agreement</DialogTitle></DialogHeader>
+        {eligible.length === 0 ? (
+          <p className="text-sm text-muted-foreground">All contractors already have an active or pending SCA.</p>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground">Select Contractor</label>
+              <Select value={selectedId} onValueChange={setSelectedId}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Choose contractor…" /></SelectTrigger>
+                <SelectContent>
+                  {eligible.map(c => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}{c.company ? ` — ${c.company}` : ''}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-muted-foreground">The agreement will be sent via email if available, otherwise via SMS.</p>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          {eligible.length > 0 && (
+            <Button disabled={!selectedId || sending} onClick={handleGenerate}>
+              {sending ? 'Sending…' : 'Generate & Send'}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── Contractor Card ───────────────────────────────────────────────────────────
+
+function ContractorCard({
+  contractor, sca, onEdit, onDelete,
+}: {
+  contractor: Contractor
+  sca?: SubcontractorAgreement
+  onEdit: (c: Contractor) => void
+  onDelete: (id: string) => void
+}) {
+  const threshold1099 = contractor.is1099 && contractor.ratePerJob !== null && contractor.ratePerJob >= 600
+  return (
+    <div className="w-full rounded-xl border bg-card p-3 text-left">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+            <span className="font-medium text-sm truncate">{contractor.name}</span>
+            {contractor.is1099 && (
+              <Badge variant="outline" className={`text-xs shrink-0 ${threshold1099 ? 'border-yellow-400 text-yellow-700 dark:text-yellow-400' : ''}`}>
+                1099
+              </Badge>
+            )}
+            {contractor.specialty && (
+              <Badge variant="secondary" className="text-xs shrink-0">{contractor.specialty}</Badge>
+            )}
+            {sca?.status === 'signed' && (
+              <span className="text-xs font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-full px-2 py-0.5 shrink-0">
+                ✓ SCA Signed
+              </span>
+            )}
+            {sca?.status === 'pending_signature' && (
+              <span className="text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-full px-2 py-0.5 shrink-0">
+                Awaiting Signature
+              </span>
+            )}
+          </div>
+          {contractor.company && (
+            <p className="text-xs text-muted-foreground truncate flex items-center gap-1">
+              <Building2 className="h-3 w-3 shrink-0" />{contractor.company}
+            </p>
+          )}
+          <div className="flex items-center gap-3 mt-1 flex-wrap">
+            {contractor.phone && (
+              <a href={quoCallUrl(contractor.phone)} className="text-xs text-muted-foreground flex items-center gap-1 hover:text-foreground">
+                <Phone className="h-3 w-3" />{contractor.phone}
+              </a>
+            )}
+            {contractor.email && (
+              <a href={`mailto:${contractor.email}`} className="text-xs text-muted-foreground flex items-center gap-1 truncate hover:text-foreground">
+                <Mail className="h-3 w-3 shrink-0" />{contractor.email}
+              </a>
+            )}
+            {contractor.ratePerJob !== null && (
+              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                <DollarSign className="h-3 w-3" />${contractor.ratePerJob.toFixed(2)}/job
+              </span>
+            )}
+          </div>
+          {threshold1099 && (
+            <p className="text-xs text-yellow-700 dark:text-yellow-400 mt-1 flex items-center gap-1">
+              ⚠ Rate ≥ $600 — may require 1099-NEC. Track total annual payments.
+            </p>
+          )}
+          {contractor.notes && (
+            <p className="text-xs text-muted-foreground mt-1 italic truncate">{contractor.notes}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          <button onClick={() => onEdit(contractor)} className="p-1.5 text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted transition-colors">
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button onClick={() => onDelete(contractor.id)} className="p-1.5 text-muted-foreground hover:text-destructive rounded-lg hover:bg-muted transition-colors">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Contractor Sheet (create + edit) ──────────────────────────────────────────
+
+function ContractorSheet({
+  open, onClose, contractor, scas = [],
+}: {
+  open: boolean; onClose: () => void; contractor?: Contractor | null; scas?: SubcontractorAgreement[]
+}) {
+  const [form, setForm] = useState<ContractorForm>(EMPTY_FORM)
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  const isEdit = !!contractor
+
+  useEffect(() => {
+    if (open) {
+      setForm(contractor ? {
+        name:       contractor.name,
+        phone:      contractor.phone ?? '',
+        email:      contractor.email ?? '',
+        company:    contractor.company ?? '',
+        specialty:  contractor.specialty ?? '',
+        ratePerJob: contractor.ratePerJob !== null ? String(contractor.ratePerJob) : '',
+        notes:      contractor.notes ?? '',
+        is1099:     contractor.is1099,
+      } : EMPTY_FORM)
+    }
+  }, [open, contractor])
+
+  const mutation = useMutation({
+    mutationFn: (data: ContractorForm) => {
+      const payload = {
+        name:       data.name,
+        phone:      data.phone || null,
+        email:      data.email || null,
+        company:    data.company || null,
+        specialty:  data.specialty || null,
+        ratePerJob: data.ratePerJob !== '' ? parseFloat(data.ratePerJob) : null,
+        notes:      data.notes || null,
+        is1099:     data.is1099,
+      }
+      return isEdit
+        ? apiRequest('PATCH', `/contractors/${contractor!.id}`, payload)
+        : apiRequest('POST', '/contractors', payload)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/contractors'] })
-      toast({ title: 'Contractor added' })
-      setForm({ name: '', phone: '', email: '', company: '', specialty: '', ratePerJob: '', notes: '', is1099: true })
+      toast({ title: isEdit ? 'Contractor updated' : 'Contractor added' })
+      setForm(EMPTY_FORM)
       onClose()
     },
-    onError: (e: Error) => toast({ title: 'Error', description: e.message, variant: 'destructive' }),
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
   })
+
+  const set = <K extends keyof ContractorForm>(k: K) => (v: ContractorForm[K]) =>
+    setForm(f => ({ ...f, [k]: v }))
 
   return (
     <Sheet open={open} onOpenChange={v => { if (!v) onClose() }}>
       <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[90dvh] overflow-y-auto">
-        <SheetHeader className="pb-3 border-b">
-          <SheetTitle>New Contractor</SheetTitle>
+        <SheetHeader className="mb-4 border-b pb-3">
+          <SheetTitle>{isEdit ? 'Edit Contractor' : 'Add Contractor'}</SheetTitle>
         </SheetHeader>
-        <div className="py-4 space-y-2">
-          <div><Label className="text-xs">Name *</Label>
-            <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} className="mt-1 h-9 text-sm" /></div>
-          <div><Label className="text-xs">Company</Label>
-            <Input value={form.company} onChange={e => setForm(f => ({ ...f, company: e.target.value }))} className="mt-1 h-9 text-sm" /></div>
-          <div><Label className="text-xs">Specialty / Trade</Label>
-            <Input value={form.specialty} onChange={e => setForm(f => ({ ...f, specialty: e.target.value }))} className="mt-1 h-9 text-sm" /></div>
-          <div><Label className="text-xs">Phone</Label>
-            <Input type="tel" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} className="mt-1 h-9 text-sm" /></div>
-          <div><Label className="text-xs">Email</Label>
-            <Input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} className="mt-1 h-9 text-sm" /></div>
-          <div><Label className="text-xs">Rate per Job ($)</Label>
-            <Input type="number" value={form.ratePerJob} onChange={e => setForm(f => ({ ...f, ratePerJob: e.target.value }))} className="mt-1 h-9 text-sm" /></div>
-          <div className="flex items-center gap-2 pt-1">
-            <Switch checked={form.is1099} onCheckedChange={v => setForm(f => ({ ...f, is1099: v }))} />
-            <Label className="text-xs">1099 Contractor</Label>
+        <div className="space-y-3">
+          <div>
+            <Label className="text-xs">Name *</Label>
+            <Input placeholder="Full name" value={form.name} onChange={e => set('name')(e.target.value)} className="mt-1" />
           </div>
-          <div><Label className="text-xs">Notes</Label>
-            <Textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={3} className="mt-1 text-sm" /></div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="text-xs">Phone</Label>
+              <Input type="tel" placeholder="(xxx) xxx-xxxx" value={form.phone} onChange={e => set('phone')(e.target.value)} className="mt-1" />
+            </div>
+            <div>
+              <Label className="text-xs">Email</Label>
+              <Input type="email" placeholder="email@example.com" value={form.email} onChange={e => set('email')(e.target.value)} className="mt-1" />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Company / Business</Label>
+            <Input placeholder="Optional" value={form.company} onChange={e => set('company')(e.target.value)} className="mt-1" />
+          </div>
+          <div>
+            <Label className="text-xs">Specialty</Label>
+            <Select value={form.specialty || '__NONE__'} onValueChange={v => set('specialty')(v === '__NONE__' ? '' : v)}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Select specialty…" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__NONE__">None</SelectItem>
+                {SPECIALTIES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Rate Per Job ($)</Label>
+            <Input
+              type="number" step="0.01" min="0" placeholder="0.00"
+              value={form.ratePerJob}
+              onChange={e => set('ratePerJob')(e.target.value)}
+              className="mt-1"
+            />
+          </div>
+          <div className="flex items-center justify-between rounded-lg border px-3 py-2.5">
+            <div>
+              <p className="text-sm font-medium">1099 Contractor</p>
+              <p className="text-xs text-muted-foreground">Receives 1099-NEC if paid ≥$600/year</p>
+            </div>
+            <Switch checked={form.is1099} onCheckedChange={v => set('is1099')(v)} />
+          </div>
+          <div>
+            <Label className="text-xs">Notes</Label>
+            <Textarea placeholder="Skills, availability, vehicle info…" value={form.notes} onChange={e => set('notes')(e.target.value)} rows={2} className="mt-1" />
+          </div>
+
+          {/* Quick actions (edit mode) */}
+          {isEdit && contractor && (
+            <div className="flex gap-2 pt-1">
+              {contractor.phone && (
+                <a href={quoCallUrl(contractor.phone)} className="flex-1">
+                  <Button variant="outline" size="sm" className="w-full"><Phone className="h-3.5 w-3.5 mr-1" />Call</Button>
+                </a>
+              )}
+              {contractor.phone && (
+                <a href={quoTextUrl(contractor.phone)} className="flex-1">
+                  <Button variant="outline" size="sm" className="w-full"><Phone className="h-3.5 w-3.5 mr-1" />Text</Button>
+                </a>
+              )}
+              {contractor.email && (
+                <a href={`mailto:${contractor.email}`} className="flex-1">
+                  <Button variant="outline" size="sm" className="w-full"><Mail className="h-3.5 w-3.5 mr-1" />Email</Button>
+                </a>
+              )}
+            </div>
+          )}
+
           <Button
             className="w-full mt-2 min-h-[44px]"
-            disabled={!form.name.trim() || createMutation.isPending}
-            onClick={() => createMutation.mutate()}
+            disabled={!form.name.trim() || mutation.isPending}
+            onClick={() => mutation.mutate(form)}
           >
-            {createMutation.isPending ? 'Adding…' : 'Add Contractor'}
+            {mutation.isPending ? 'Saving…' : isEdit ? 'Save Changes' : 'Add Contractor'}
           </Button>
+
+          {isEdit && contractor && <ContractorDocsSection contractor={contractor} />}
+          {isEdit && contractor && <ContractorScaSection contractor={contractor} scas={scas} />}
         </div>
       </SheetContent>
     </Sheet>
@@ -256,12 +590,32 @@ function NewContractorSheet({ open, onClose }: { open: boolean; onClose: () => v
 
 export default function Contractors() {
   const [search, setSearch] = useState('')
-  const [selectedContractor, setSelectedContractor] = useState<Contractor | null>(null)
+  const [editContractor, setEditContractor] = useState<Contractor | null>(null)
   const [showNew, setShowNew] = useState(false)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
+  const [showGenerateSca, setShowGenerateSca] = useState(false)
+
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
 
   const { data: contractors = [], isLoading } = useQuery<Contractor[]>({
     queryKey: ['/contractors', search],
     queryFn: () => apiGet(`/contractors${search ? `?search=${encodeURIComponent(search)}` : ''}`),
+  })
+
+  const { data: scas = [] } = useQuery<SubcontractorAgreement[]>({
+    queryKey: ['/subcontractor-agreements'],
+    queryFn: () => apiGet('/subcontractor-agreements?action=list'),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiRequest('DELETE', `/contractors/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/contractors'] })
+      toast({ title: 'Contractor removed' })
+      setDeleteId(null)
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
   })
 
   return (
@@ -291,61 +645,69 @@ export default function Contractors() {
           <div className="p-4 space-y-2">
             {[1, 2, 3].map(n => <Skeleton key={n} className="h-16 w-full rounded-xl" />)}
           </div>
-        ) : contractors.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-48 gap-2 text-center p-4">
-            <p className="text-muted-foreground text-sm">
-              {search ? 'No contractors match your search.' : 'No contractors yet.'}
-            </p>
-            {!search && (
-              <Button size="sm" variant="outline" onClick={() => setShowNew(true)}>
-                <Plus className="h-3.5 w-3.5 mr-1" />Add first contractor
-              </Button>
-            )}
-          </div>
         ) : (
           <div className="p-4 space-y-2">
-            {contractors.map(c => (
-              <button
-                key={c.id}
-                className="w-full text-left rounded-xl border bg-card p-3 flex items-center gap-3 hover:bg-muted/40 active:scale-[0.99] transition-all"
-                onClick={() => setSelectedContractor(c)}
-              >
-                {/* Avatar */}
-                <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center shrink-0 text-sm font-bold text-muted-foreground">
-                  {c.name.charAt(0).toUpperCase()}
-                </div>
+            {/* Generate SCA button — always visible */}
+            <Button className="w-full" variant="outline" onClick={() => setShowGenerateSca(true)}>
+              <ClipboardList className="h-4 w-4 mr-2" /> Generate Subcontractor Agreement
+            </Button>
 
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-sm font-semibold truncate">{c.name}</span>
-                    {c.is1099 && (
-                      <Badge variant="secondary" className="text-[9px] px-1 py-0">1099</Badge>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
-                    {c.specialty && <span className="truncate">{c.specialty}</span>}
-                    {c.specialty && c.phone && <span>·</span>}
-                    {c.phone && <span>{c.phone}</span>}
-                  </div>
-                  {c.ratePerJob != null && (
-                    <p className="text-[10px] text-muted-foreground mt-0.5">${c.ratePerJob.toFixed(0)}/job</p>
-                  )}
-                </div>
-
-                <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
-              </button>
-            ))}
+            {contractors.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-48 gap-2 text-center">
+                <HardHat className="h-8 w-8 text-muted-foreground" />
+                <p className="text-muted-foreground text-sm">
+                  {search ? 'No contractors match your search.' : 'No contractors yet. Add your first one.'}
+                </p>
+                {!search && (
+                  <Button size="sm" variant="outline" onClick={() => setShowNew(true)}>
+                    <Plus className="h-3.5 w-3.5 mr-1" />Add first contractor
+                  </Button>
+                )}
+              </div>
+            ) : (
+              contractors.map(c => (
+                <ContractorCard
+                  key={c.id}
+                  contractor={c}
+                  sca={scas.find(s => s.contractorId === c.id && s.status !== 'void')}
+                  onEdit={setEditContractor}
+                  onDelete={setDeleteId}
+                />
+              ))
+            )}
           </div>
         )}
       </div>
 
-      <ContractorDetailSheet
-        contractor={selectedContractor}
-        open={!!selectedContractor}
-        onClose={() => setSelectedContractor(null)}
+      <ContractorSheet
+        open={showNew}
+        onClose={() => setShowNew(false)}
+        scas={scas}
       />
-      <NewContractorSheet open={showNew} onClose={() => setShowNew(false)} />
+      <ContractorSheet
+        open={!!editContractor}
+        onClose={() => setEditContractor(null)}
+        contractor={editContractor}
+        scas={scas}
+      />
+      <GenerateScaDialog
+        open={showGenerateSca}
+        onClose={() => setShowGenerateSca(false)}
+        contractors={contractors}
+        scas={scas}
+      />
+      <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader><DialogTitle>Remove contractor?</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">This will permanently delete the contractor record.</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteId(null)}>Cancel</Button>
+            <Button variant="destructive" disabled={deleteMutation.isPending} onClick={() => deleteId && deleteMutation.mutate(deleteId)}>
+              {deleteMutation.isPending ? 'Removing…' : 'Remove'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

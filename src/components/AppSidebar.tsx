@@ -6,7 +6,7 @@ import {
 import {
   LayoutDashboard, Users, Calendar, Briefcase, Target,
   FileText, RefreshCw, TrendingUp, Megaphone,
-  Calculator, BookOpen, Settings, NotebookPen, HardHat,   // ← HardHat added (FIX 3)
+  Calculator, BookOpen, Settings, NotebookPen, HardHat,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/lib/queryClient'
@@ -30,6 +30,7 @@ const NAV_GROUPS = [
       { id: 'subscriptions', label: 'Subscriptions', path: '/subscriptions', icon: RefreshCw },
       { id: 'finance',       label: 'Finance',       path: '/finance',       icon: TrendingUp },
       { id: 'marketing',     label: 'Marketing',     path: '/marketing',     icon: Megaphone },
+      { id: 'contractors',   label: 'Contractors',   path: '/contractors',   icon: HardHat },
     ],
   },
   {
@@ -37,8 +38,7 @@ const NAV_GROUPS = [
     items: [
       { id: 'calculator',  label: 'Calculator',  path: '/calculator',  icon: Calculator },
       { id: 'pricebook',   label: 'Price Book',  path: '/pricebook',   icon: BookOpen },
-      { id: 'scratchpad',   label: 'Scratch Pad',  path: '/scratchpad',   icon: NotebookPen },
-      { id: 'contractors',  label: 'Contractors',  path: '/contractors',  icon: HardHat },    // ← NEW (FIX 3)
+      { id: 'scratchpad',  label: 'Scratch Pad', path: '/scratchpad',  icon: NotebookPen },
     ],
   },
 ]
@@ -63,7 +63,6 @@ export function AppSidebar() {
       {/* Brand header */}
       <SidebarHeader className="border-b border-sidebar-border px-3 py-2.5">
         <div className={`flex items-center gap-3 ${isCollapsed ? 'justify-center' : ''}`}>
-          {/* Company logo — show uploaded image or fall back to initials */}
           {settings?.logoUrl ? (
             <img
               src={settings.logoUrl}
