@@ -274,6 +274,7 @@ export interface Contact {
   tags: string[];
   nextFollowup: string | null;
   createdAt: string;
+  hasLeftReview: boolean;   // ← NEW — if true, no further review requests are queued
 }
 
 export interface Property {
@@ -455,6 +456,7 @@ export function rowToContact(r: any): Contact {
     tags: Array.isArray(r.tags) ? r.tags : [],
     nextFollowup: r.next_followup,
     createdAt: r.created_at,
+    hasLeftReview: r.has_left_review ?? false,   // ← NEW
   };
 }
 

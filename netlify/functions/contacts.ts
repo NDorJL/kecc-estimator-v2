@@ -93,8 +93,9 @@ export const handler: Handler = async (event) => {
       if (body.notes !== undefined)         updates.notes = body.notes
       if (body.tags !== undefined)          updates.tags = body.tags
       if (body.customFields !== undefined)  updates.custom_fields = body.customFields
-      if (body.nextFollowup !== undefined)  updates.next_followup = body.nextFollowup
-      if (body.leadScore !== undefined)     updates.lead_score = body.leadScore
+      if (body.nextFollowup !== undefined)    updates.next_followup    = body.nextFollowup
+      if (body.leadScore !== undefined)       updates.lead_score       = body.leadScore
+      if (body.hasLeftReview !== undefined)   updates.has_left_review  = body.hasLeftReview  // ← NEW (out-of-scope companion)
 
       const { data, error } = await supabase
         .from('contacts')
