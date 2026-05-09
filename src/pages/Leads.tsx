@@ -2605,7 +2605,33 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
     source: '',
     notes: '',
   })
-  const [contactError, setContactError] = useState(false)   // ← NEW: inline validation state
+  const [contactError, setContactError] = useState(false)   // ← inline validation state
+
+  // ── Campaign attribution tracking ────────────────────────────────────────
+  // Read UTM params + kecc_campaign cookie once on mount. These are passed
+  // explicitly in the POST body (apiRequest doesn't forward browser cookies).
+  const [tracking, setTracking] = useState<{
+    utmSource: string | null
+    utmMedium: string | null
+    utmCampaign: string | null
+    campaignCookie: string | null
+  }>({ utmSource: null, utmMedium: null, utmCampaign: null, campaignCookie: null })
+
+  useEffect(() => {
+    // UTM params live in window.location.search (before the # in hash-router URLs)
+    const params = new URLSearchParams(window.location.search)
+    const utmSource   = params.get('utm_source')
+    const utmMedium   = params.get('utm_medium')
+    const utmCampaign = params.get('utm_campaign')
+
+    // kecc_campaign cookie (set by the track function on QR scan)
+    const cookieEntry = document.cookie.split(';').find(c => c.trim().startsWith('kecc_campaign='))
+    const campaignCookie = cookieEntry ? cookieEntry.trim().slice('kecc_campaign='.length) : null
+
+    setTracking({ utmSource, utmMedium, utmCampaign, campaignCookie })
+  }, [])
+  // ── End attribution ───────────────────────────────────────────────────────
+
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const [, navigate] = useLocation()
@@ -2624,6 +2650,11 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
       source: form.source || null,
       notes: form.notes || null,
       stage: 'new',
+      // Attribution — backend resolves campaign_id; UTM takes priority over cookie
+      utmSource:      tracking.utmSource,
+      utmMedium:      tracking.utmMedium,
+      utmCampaign:    tracking.utmCampaign,
+      campaignCookie: tracking.campaignCookie,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/leads'] })

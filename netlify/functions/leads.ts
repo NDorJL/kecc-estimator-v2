@@ -99,12 +99,50 @@ export const handler: Handler = async (event) => {
     // CREATE lead
     if (method === 'POST' && !action) {
       const body = JSON.parse(event.body ?? '{}')
+
+      // ── Campaign attribution ──────────────────────────────────────────────
+      // Priority: UTM params > kecc_campaign cookie. Both are passed explicitly
+      // in the request body by the frontend (cookies aren't forwarded by apiRequest).
+      let campaignId: string | null = null
+      let resolvedSource: string | null = body.source ?? null
+
+      // 1. UTM resolution — match utm_campaign value against campaigns.utm_campaign column
+      if (body.utmCampaign) {
+        const { data: cam } = await supabase
+          .from('campaigns')
+          .select('id')
+          .eq('utm_campaign', body.utmCampaign)
+          .eq('status', 'active')
+          .maybeSingle()
+        if (cam) {
+          campaignId = cam.id
+          // Prefer the utm_source value over the form-selected source
+          if (body.utmSource) resolvedSource = body.utmSource
+        }
+      }
+
+      // 2. Cookie fallback — look up by redirect_token, derive source from channel name
+      if (!campaignId && body.campaignCookie) {
+        const { data: cam } = await supabase
+          .from('campaigns')
+          .select('id, marketing_channels(name)')
+          .eq('redirect_token', body.campaignCookie)
+          .maybeSingle()
+        if (cam) {
+          campaignId = cam.id
+          // Use the channel name as source (e.g. "Door Hangers", "Facebook Ads")
+          const channelName = (cam.marketing_channels as { name?: string } | null)?.name
+          if (channelName) resolvedSource = channelName
+        }
+      }
+      // ── End attribution ───────────────────────────────────────────────────
+
       const { data, error } = await supabase
         .from('leads')
         .insert({
           contact_id: body.contactId ?? null,
           stage: body.stage ?? 'new',
-          source: body.source ?? null,
+          source: resolvedSource,
           service_interest: body.serviceInterest ?? null,
           estimated_value: body.estimatedValue ?? null,
           contractor_cost: body.contractorCost ?? null,
@@ -112,6 +150,7 @@ export const handler: Handler = async (event) => {
           lost_reason: body.lostReason ?? null,
           notes: body.notes ?? null,
           contacted_at: body.stage === 'contacted' ? new Date().toISOString() : null,
+          campaign_id: campaignId,
         })
         .select()
         .single()
