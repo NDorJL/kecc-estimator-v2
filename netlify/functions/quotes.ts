@@ -263,6 +263,39 @@ export const handler: Handler = async (event) => {
         }                                                                                                  // ← NEW
       }                                                                                                    // ← NEW
 
+      // ── Auto-create Finance income entry when a quote is accepted ──────────────  // ← NEW
+      // Fire-and-forget — never blocks the response.                                 // ← NEW
+      // ⚠️  GAP: The primary acceptance path is esign.ts (customer signs online),   // ← NEW
+      // which updates status directly in Supabase. This trigger covers the CRM-side  // ← NEW
+      // manual accept path. esign.ts is out of scope for this session.               // ← NEW
+      if (body.status === 'accepted') {                                               // ← NEW
+        ;(async () => {                                                               // ← NEW
+          try {                                                                       // ← NEW
+            // Duplicate guard — do not create a second entry for the same quote     // ← NEW
+            const { data: existing } = await supabase                               // ← NEW
+              .from('transactions').select('id').eq('source', `quote:${id}`).maybeSingle()  // ← NEW
+            if (existing) return                                                     // ← NEW
+            const acceptedDate = (data.signed_at as string | null)?.slice(0, 10)   // ← NEW
+              ?? new Date().toISOString().slice(0, 10)                               // ← NEW
+            const description = `Quote Accepted — ${data.customer_name ?? 'Customer'}`  // ← NEW
+            await supabase.from('transactions').insert({                             // ← NEW
+              date:        acceptedDate,                                              // ← NEW
+              description,                                                           // ← NEW
+              amount:      Number(data.total ?? 0),                                  // ← NEW
+              type:        'Income',                                                 // ← NEW
+              category:    'Quote Revenue',                                          // ← NEW
+              account:     'KECC Checking (TVA)',                                    // ← NEW
+              notes:       '',                                                       // ← NEW
+              review:      false,                                                    // ← NEW
+              source:      `quote:${id}`,                                            // ← NEW
+            })                                                                       // ← NEW
+            console.log(`[quotes] Finance entry created for accepted quote ${id}`)  // ← NEW
+          } catch (e) {                                                              // ← NEW
+            console.error('[quotes] Finance auto-entry (quote accepted) failed:', e instanceof Error ? e.message : e)  // ← NEW
+          }                                                                          // ← NEW
+        })()                                                                         // ← NEW
+      }                                                                              // ← NEW
+
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToQuote(data)) }
     }
 

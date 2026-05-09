@@ -268,19 +268,17 @@ export default function Dashboard() {
   )
 
   // ── KPI calculations ─────────────────────────────────────────────────────────
-  // MRR = sum of estimatedValue for every lead in the Recurring column.
-  // Single source of truth: the kanban, not the subscriptions table.
-  // This prevents double-counting when a lead has both a subscription record
-  // AND an estimatedValue in the pipeline.
-  const recurringLeads = useMemo(() =>
-    (leads ?? []).filter(l => l.stage === 'recurring'),
-  [leads])
+  // MRR = sum of inSeasonMonthlyTotal for ACTIVE subscriptions.
+  // Subscriptions table is the single source of truth — Dashboard and Subscriptions page agree.
+  const activeSubs = useMemo(() =>
+    (subs ?? []).filter(s => s.status === 'ACTIVE'),
+  [subs])
 
   const mrr = useMemo(() =>
-    recurringLeads.reduce((sum, l) => sum + (l.estimatedValue ?? 0), 0),
-  [recurringLeads])
+    activeSubs.reduce((sum, s) => sum + s.inSeasonMonthlyTotal, 0),
+  [activeSubs])
 
-  const activeSubsCount = recurringLeads.length   // "active" = in Recurring column
+  const activeSubsCount = activeSubs.length
 
   const openQuotes = (quotes ?? []).filter(q => q.status === 'draft' || q.status === 'sent')
   const openQuotesValue = openQuotes.reduce((sum, q) => sum + q.total, 0)
@@ -758,13 +756,14 @@ export default function Dashboard() {
 
       {/* ── KPI Grid ──────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 gap-3">
+        {/* MRR — uses subsLoading since mrr comes from subs, navigates to /subscriptions so number matches */}
         <KpiCard
           title="Monthly Recurring"
-          value={leadsLoading ? '—' : fmt(mrr)}
-          sub="from recurring pipeline"
+          value={subsLoading ? '—' : fmt(mrr)}
+          sub="active subscriptions"
           icon={TrendingUp}
-          loading={leadsLoading}
-          onClick={() => navigate('/leads')}
+          loading={subsLoading}
+          onClick={() => navigate('/subscriptions')}
         />
         <KpiCard
           title="Open Quotes"
@@ -774,12 +773,13 @@ export default function Dashboard() {
           loading={loading}
           onClick={() => navigate('/quotes')}
         />
+        {/* Recurring Clients — count from activeSubs, subsLoading matches the data source */}
         <KpiCard
           title="Recurring Clients"
-          value={leadsLoading ? '—' : String(activeSubsCount)}
-          sub="in recurring pipeline"
+          value={subsLoading ? '—' : String(activeSubsCount)}
+          sub="active subscriptions"
           icon={CalendarCheck}
-          loading={loading}
+          loading={subsLoading}
           onClick={() => navigate('/subscriptions')}
         />
         <KpiCard
