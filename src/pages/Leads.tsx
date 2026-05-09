@@ -858,6 +858,24 @@ function LeadDetailSheet({
   const [estimatedValue, setEstimatedValue] = useState(lead?.estimatedValue?.toString() ?? '')
   const [contractorCost, setContractorCost] = useState(lead?.contractorCost?.toString() ?? '')
   const [showSchedule, setShowSchedule] = useState(false)
+  const [emailConfirmQuote, setEmailConfirmQuote] = useState<Quote | null>(null)  // ← NEW (FIX 1)
+  const [emailSending, setEmailSending] = useState(false)                          // ← NEW (FIX 1)
+
+  // ── Send quote email (NEW — FIX 1) ────────────────────────────────────────
+  async function handleSendEmail(quote: Quote) {                                    // ← NEW
+    setEmailSending(true)                                                           // ← NEW
+    try {                                                                           // ← NEW
+      await apiRequest('POST', `/quotes/${quote.id}/send-email`, {                 // ← NEW
+        recipientEmail: quote.customerEmail,                                        // ← NEW
+      })                                                                            // ← NEW
+      toast({ title: `Email sent to ${quote.customerEmail}` })                     // ← NEW
+    } catch (err) {                                                                 // ← NEW
+      toast({ title: 'Email failed', description: (err as Error).message, variant: 'destructive' }) // ← NEW
+    } finally {                                                                     // ← NEW
+      setEmailSending(false)                                                        // ← NEW
+      setEmailConfirmQuote(null)                                                    // ← NEW
+    }                                                                               // ← NEW
+  }                                                                                 // ← NEW
 
   // ── Photo stacks ─────────────────────────────────────────────────────────
   const [stacks, setStacks] = useState<LeadPhotoStack[]>(lead?.photoStacks ?? [])
@@ -1519,21 +1537,12 @@ function LeadDetailSheet({
                                   >
                                     <FileText className="h-3 w-3 shrink-0" />Download PDF
                                   </Button>
+                                  {/* ← CHANGED (FIX 1): real email send instead of mailto: */}
                                   {q.customerEmail && (
                                     <Button
                                       variant="outline" size="sm"
                                       className="flex-1 text-xs gap-1.5"
-                                      onClick={() => {
-                                        const pdfUrl = `${window.location.origin}/.netlify/functions/pdf-quote?quoteId=${q.id}`
-                                        const esignUrl = q.acceptToken
-                                          ? `${window.location.origin}/.netlify/functions/esign?token=${q.acceptToken}`
-                                          : pdfUrl
-                                        const subject = encodeURIComponent('Your Quote from Knox Exterior Care Co.')
-                                        const body = encodeURIComponent(
-                                          `Hi ${q.customerName.split(' ')[0]},\n\nPlease find your quote attached or view it here:\n${esignUrl}\n\nThank you for the opportunity to serve you!\n\nKnox Exterior Care Co.`
-                                        )
-                                        window.location.href = `mailto:${q.customerEmail}?subject=${subject}&body=${body}`
-                                      }}
+                                      onClick={() => setEmailConfirmQuote(q)}
                                     >
                                       <Mail className="h-3 w-3 shrink-0" />Email
                                     </Button>
@@ -2430,6 +2439,39 @@ function LeadDetailSheet({
         </Dialog>
       )
     })()}
+
+    {/* ── Email confirmation dialog (NEW — FIX 1) ─────────────────────────── */}
+    {emailConfirmQuote && (
+      <Dialog open={!!emailConfirmQuote} onOpenChange={v => { if (!v) setEmailConfirmQuote(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Mail className="h-4 w-4" /> Send Quote via Email
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 py-1 text-sm">
+            <div className="flex gap-2">
+              <span className="text-muted-foreground w-16 shrink-0">To:</span>
+              <span className="font-medium truncate">{emailConfirmQuote.customerEmail}</span>
+            </div>
+            <div className="flex gap-2">
+              <span className="text-muted-foreground w-16 shrink-0">Subject:</span>
+              <span className="truncate">Your Quote from Knox Exterior Care Co.</span>
+            </div>
+            <p className="text-xs text-muted-foreground border-t pt-2">
+              The email will include a link to view and sign the quote online.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEmailConfirmQuote(null)}>Cancel</Button>
+            <Button disabled={emailSending} onClick={() => handleSendEmail(emailConfirmQuote)}>
+              <Mail className="h-3.5 w-3.5 mr-1.5" />
+              {emailSending ? 'Sending…' : 'Send Email'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )}
 
     {/* ── Photo lightbox ───────────────────────────────────────────────────── */}
     {viewPhoto && (

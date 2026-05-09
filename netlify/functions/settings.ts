@@ -75,6 +75,7 @@ export const handler: Handler = async (event) => {
       if (body.navConfig !== undefined)                update.nav_config = body.navConfig
       if (body.ownerSignatureData !== undefined)       update.owner_signature_data = body.ownerSignatureData
       if (body.ownerEmail !== undefined)               update.owner_email = body.ownerEmail
+      if (body.scratchpadContent !== undefined)        update.scratchpad_content = body.scratchpadContent  // ← NEW (FIX 2)
 
       // Get the existing settings ID
       const { data: existing } = await supabase.from('company_settings').select('id').limit(1).single()
