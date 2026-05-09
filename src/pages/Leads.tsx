@@ -2605,8 +2605,10 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
     source: '',
     notes: '',
   })
+  const [contactError, setContactError] = useState(false)   // ← NEW: inline validation state
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const [, navigate] = useLocation()
 
   const { data: contacts = [] } = useQuery<{ id: string; name: string }[]>({
     queryKey: ['/contacts'],
@@ -2627,10 +2629,21 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
       toast({ title: 'Lead created' })
       setForm({ contactId: '', serviceInterest: '', estimatedValue: '', source: '', notes: '' })
+      setContactError(false)   // ← NEW: reset on successful create
       onClose()
     },
     onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
   })
+
+  function handleCreate() {
+    if (!form.contactId) {
+      setContactError(true)   // ← NEW: show inline error
+      toast({ title: 'Contact required', description: 'Please select a contact before saving this lead.', variant: 'destructive' })
+      return
+    }
+    setContactError(false)    // ← NEW: clear on valid submit
+    createMutation.mutate()
+  }
 
   return (
     <Sheet open={open} onOpenChange={onClose}>
@@ -2638,15 +2651,34 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
         <SheetHeader className="mb-4"><SheetTitle>New Lead</SheetTitle></SheetHeader>
         <div className="space-y-3">
           <div>
-            <Label className="text-xs">Contact (optional)</Label>
-            <Select value={form.contactId} onValueChange={v => setForm(f => ({ ...f, contactId: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="Select contact…" /></SelectTrigger>
+            <Label className="text-xs">Contact <span className="text-destructive">*</span></Label>
+            <Select
+              value={form.contactId}
+              onValueChange={v => {
+                setForm(f => ({ ...f, contactId: v }))
+                setContactError(false)   // ← NEW: clear error when contact is selected
+              }}
+            >
+              <SelectTrigger className={`mt-1 ${contactError ? 'border-destructive ring-1 ring-destructive' : ''}`}>
+                <SelectValue placeholder="Select contact…" />
+              </SelectTrigger>
               <SelectContent>
                 {contacts.map(c => (
                   <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {/* ← NEW: inline validation error */}
+            {contactError && (
+              <p className="mt-1 text-xs text-destructive font-medium">A contact is required to create a lead.</p>
+            )}
+            <button
+              type="button"
+              className="mt-1 text-xs text-primary underline-offset-2 hover:underline"
+              onClick={() => { onClose(); navigate('/contacts') }}
+            >
+              + Create new contact
+            </button>
           </div>
           <div>
             <Label className="text-xs">Service Interest</Label>
@@ -2706,7 +2738,7 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
           <Button
             className="w-full"
             disabled={createMutation.isPending}
-            onClick={() => createMutation.mutate()}
+            onClick={handleCreate}
           >
             {createMutation.isPending ? 'Creating…' : 'Create Lead'}
           </Button>
