@@ -1,5 +1,6 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
+import { rowToMarketingSpend } from '../../src/types'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -16,17 +17,21 @@ const CORS = {
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS, body: '' }
 
+  const rawPath = event.path.replace(/\/.netlify\/functions\/marketing-spend\/?/, '')
+  const parts = rawPath.split('/').filter(Boolean)
+  const id = parts[0]
+  const method = event.httpMethod
   const action = event.queryStringParameters?.action
 
   try {
     // ── GET budget ──────────────────────────────────────────────────────────
-    if (event.httpMethod === 'GET' && action === 'budget') {
+    if (method === 'GET' && action === 'budget') {
       const { data } = await supabase.from('marketing_budget').select('*').limit(1).single()
       return { statusCode: 200, headers: CORS, body: JSON.stringify({ monthlyBudget: data?.monthly_budget ?? 0 }) }
     }
 
     // ── PATCH budget ─────────────────────────────────────────────────────────
-    if (event.httpMethod === 'PATCH' && action === 'budget') {
+    if (method === 'PATCH' && action === 'budget') {
       const { monthlyBudget } = JSON.parse(event.body ?? '{}')
       const { data: existing } = await supabase.from('marketing_budget').select('id').limit(1).single()
       if (existing) {
@@ -37,65 +42,106 @@ export const handler: Handler = async (event) => {
       return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true }) }
     }
 
-    // ── GET spend entries (optionally filtered by month YYYY-MM) ────────────
-    if (event.httpMethod === 'GET' && !action) {
-      const month = event.queryStringParameters?.month  // e.g. '2026-04'
-      let query = supabase.from('marketing_spend').select('*').order('channel')
-      if (month) {
-        const monthStart = `${month}-01`
-        const nextMonth = new Date(monthStart)
-        nextMonth.setMonth(nextMonth.getMonth() + 1)
-        const monthEnd = nextMonth.toISOString().slice(0, 10)
-        query = query.gte('month', monthStart).lt('month', monthEnd)
-      }
+    // ── LIST spend entries ──────────────────────────────────────────────────
+    // Optional query params: ?month=YYYY-MM  ?channelId=<uuid>
+    if (method === 'GET' && !id && !action) {
+      const month     = event.queryStringParameters?.month      // 'YYYY-MM'
+      const channelId = event.queryStringParameters?.channelId
+
+      let query = supabase
+        .from('marketing_spend')
+        .select('*')
+        .order('month', { ascending: false })
+        .order('created_at', { ascending: false })
+
+      if (month)     query = query.eq('month', month)
+      if (channelId) query = query.eq('channel_id', channelId)
+
       const { data, error } = await query
       if (error) throw error
-      return {
-        statusCode: 200, headers: CORS,
-        body: JSON.stringify((data ?? []).map(r => ({
-          id: r.id,
-          channel: r.channel,
-          amount: Number(r.amount),
-          month: r.month,
-          notes: r.notes,
-          createdAt: r.created_at,
-        }))),
-      }
+      return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToMarketingSpend)) }
     }
 
-    // ── POST upsert spend entry (channel + month = unique) ──────────────────
-    if (event.httpMethod === 'POST') {
-      const { channel, amount, month, notes } = JSON.parse(event.body ?? '{}')
-      if (!channel || !month) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'channel and month required' }) }
+    // ── GET single spend entry ──────────────────────────────────────────────
+    if (method === 'GET' && id) {
+      const { data, error } = await supabase
+        .from('marketing_spend')
+        .select('*')
+        .eq('id', id)
+        .single()
+      if (error) throw error
+      return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToMarketingSpend(data)) }
+    }
 
-      const monthDate = `${month}-01`
-      // Check if entry for this channel+month already exists
+    // ── CREATE / upsert spend entry ─────────────────────────────────────────
+    // channelId + month = logical unique key; upsert if already exists
+    if (method === 'POST' && !id) {
+      const body = JSON.parse(event.body ?? '{}')
+      const { channelId, month, amount, notes } = body
+      if (!channelId || !month) {
+        return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'channelId and month are required' }) }
+      }
+
+      // Check if entry for this channel + month already exists
       const { data: existing } = await supabase
         .from('marketing_spend')
         .select('id')
-        .eq('channel', channel)
-        .eq('month', monthDate)
-        .single()
+        .eq('channel_id', channelId)
+        .eq('month', month)
+        .maybeSingle()
 
+      let result
       if (existing) {
-        await supabase.from('marketing_spend').update({ amount: Number(amount ?? 0), notes: notes ?? null }).eq('id', existing.id)
+        const { data, error } = await supabase
+          .from('marketing_spend')
+          .update({ amount: Number(amount ?? 0), notes: notes ?? null })
+          .eq('id', existing.id)
+          .select()
+          .single()
+        if (error) throw error
+        result = data
       } else {
-        await supabase.from('marketing_spend').insert({ channel, amount: Number(amount ?? 0), month: monthDate, notes: notes ?? null })
+        const { data, error } = await supabase
+          .from('marketing_spend')
+          .insert({ channel_id: channelId, month, amount: Number(amount ?? 0), notes: notes ?? null })
+          .select()
+          .single()
+        if (error) throw error
+        result = data
       }
-      return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true }) }
+
+      return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToMarketingSpend(result)) }
+    }
+
+    // ── UPDATE spend entry ──────────────────────────────────────────────────
+    if (method === 'PATCH' && id) {
+      const body = JSON.parse(event.body ?? '{}')
+      const updates: Record<string, unknown> = {}
+      if (body.amount    !== undefined) updates.amount     = Number(body.amount)
+      if (body.notes     !== undefined) updates.notes      = body.notes
+      if (body.month     !== undefined) updates.month      = body.month
+      if (body.channelId !== undefined) updates.channel_id = body.channelId
+
+      const { data, error } = await supabase
+        .from('marketing_spend')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single()
+      if (error) throw error
+      return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToMarketingSpend(data)) }
     }
 
     // ── DELETE spend entry ──────────────────────────────────────────────────
-    if (event.httpMethod === 'DELETE') {
-      const id = event.queryStringParameters?.id
-      if (!id) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'id required' }) }
-      await supabase.from('marketing_spend').delete().eq('id', id)
-      return { statusCode: 200, headers: CORS, body: JSON.stringify({ success: true }) }
+    if (method === 'DELETE' && id) {
+      const { error } = await supabase.from('marketing_spend').delete().eq('id', id)
+      if (error) throw error
+      return { statusCode: 204, headers: CORS, body: '' }
     }
 
-    return { statusCode: 405, headers: CORS, body: JSON.stringify({ message: 'Method not allowed' }) }
-  } catch (err) {
+    return { statusCode: 405, headers: CORS, body: JSON.stringify({ error: 'Method not allowed' }) }
+  } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
-    return { statusCode: 500, headers: CORS, body: JSON.stringify({ message }) }
+    return { statusCode: 500, headers: CORS, body: JSON.stringify({ error: message }) }
   }
 }

@@ -316,6 +316,7 @@ export interface Lead {
   followUpSentAt: string | null;
   agreementSignedAt: string | null;
   photoStacks: LeadPhotoStack[];
+  campaignId: string | null;
 }
 
 export interface LeadPhotoStack {
@@ -497,6 +498,7 @@ export function rowToLead(r: any): Lead {
     followUpSentAt: r.follow_up_sent_at ?? null,
     agreementSignedAt: r.agreement_signed_at ?? null,
     photoStacks: Array.isArray(r.photo_stacks) ? r.photo_stacks : [],
+    campaignId: r.campaign_id ?? null,
   };
 }
 
@@ -645,6 +647,107 @@ export function rowToSca(r: any): SubcontractorAgreement {
     status: r.status,
     acceptToken: r.accept_token,
     signedAt: r.signed_at ?? null,
+    createdAt: r.created_at,
+  };
+}
+
+// ── Marketing Intelligence Types ───────────────────────────────────────
+
+export type ChannelType = 'digital' | 'print' | 'referral' | 'other';
+export type CampaignStatus = 'active' | 'paused' | 'ended';
+export type CampaignType = 'digital' | 'qr' | 'referral';
+export type CampaignEventType = 'view' | 'click' | 'scan';
+
+export interface MarketingChannel {
+  id: string;
+  name: string;
+  type: ChannelType;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface MarketingSpend {
+  id: string;
+  channelId: string;
+  month: string;         // 'YYYY-MM' — stored as text in DB
+  amount: number;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface Campaign {
+  id: string;
+  channelId: string;
+  name: string;
+  status: CampaignStatus;
+  startDate: string | null;
+  endDate: string | null;
+  budget: number | null;
+  utmSource: string | null;
+  utmMedium: string | null;
+  utmCampaign: string | null;
+  redirectToken: string;
+  destinationUrl: string | null;
+  campaignType: CampaignType;
+  createdAt: string;
+}
+
+export interface CampaignEvent {
+  id: string;
+  campaignId: string;
+  eventType: CampaignEventType;
+  createdAt: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function rowToMarketingChannel(r: any): MarketingChannel {
+  return {
+    id: r.id,
+    name: r.name,
+    type: r.type,
+    isActive: r.is_active,
+    createdAt: r.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function rowToMarketingSpend(r: any): MarketingSpend {
+  return {
+    id: r.id,
+    channelId: r.channel_id,
+    month: r.month,
+    amount: Number(r.amount),
+    notes: r.notes ?? null,
+    createdAt: r.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function rowToCampaign(r: any): Campaign {
+  return {
+    id: r.id,
+    channelId: r.channel_id,
+    name: r.name,
+    status: r.status,
+    startDate: r.start_date ?? null,
+    endDate: r.end_date ?? null,
+    budget: r.budget !== null && r.budget !== undefined ? Number(r.budget) : null,
+    utmSource: r.utm_source ?? null,
+    utmMedium: r.utm_medium ?? null,
+    utmCampaign: r.utm_campaign ?? null,
+    redirectToken: r.redirect_token,
+    destinationUrl: r.destination_url ?? null,
+    campaignType: r.campaign_type,
+    createdAt: r.created_at,
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function rowToCampaignEvent(r: any): CampaignEvent {
+  return {
+    id: r.id,
+    campaignId: r.campaign_id,
+    eventType: r.event_type,
     createdAt: r.created_at,
   };
 }
