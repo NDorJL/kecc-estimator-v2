@@ -223,6 +223,24 @@ export default function Dashboard() {
       setQueueActionIds(prev => { const next = new Set(prev); next.delete(item.id); return next })
     }
   }
+
+  // ── Mark contact as reviewed (NEW) ─────────────────────────────────────────
+  // Shortcut so you don't have to navigate to the contact page.
+  // Patches has_left_review = true on the contact, then dismisses the SMS card.
+  async function handleMarkReviewed(item: SmsQueueItem) {
+    if (!item.contact_id) return
+    setQueueActionIds(prev => new Set(prev).add(item.id))
+    try {
+      await apiRequest('PATCH', `/contacts/${item.contact_id}`, { hasLeftReview: true })
+      // Also dismiss the queue card so it disappears immediately
+      await apiRequest('PATCH', `/sms-queue/${item.id}`, { status: 'dismissed' })
+      await refetchQueue()
+    } catch (err) {
+      console.error('[review] mark reviewed failed:', err)
+    } finally {
+      setQueueActionIds(prev => { const next = new Set(prev); next.delete(item.id); return next })
+    }
+  }
   // ── end SMS Queue ──────────────────────────────────────────────────────────
 
   const loading = quotesLoading || subsLoading
@@ -595,6 +613,17 @@ export default function Dashboard() {
                         Dismiss
                       </button>
                     </div>
+                    {/* Mark as Reviewed shortcut — only on review_request cards (NEW) */}
+                    {item.type === 'review_request' && item.contact_id && (
+                      <button
+                        disabled={isActing}
+                        onClick={() => handleMarkReviewed(item)}
+                        className="w-full flex items-center justify-center gap-1.5 rounded-lg border border-green-400/50 text-green-700 dark:text-green-400 text-xs font-semibold py-1.5 transition-colors hover:bg-green-50 dark:hover:bg-green-950/30 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <CheckCircle2 className="h-3 w-3 shrink-0" />
+                        They Left a Review — Mark &amp; Dismiss
+                      </button>
+                    )}
                   </div>
                 )
               })}

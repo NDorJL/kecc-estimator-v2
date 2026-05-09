@@ -77,6 +77,17 @@ function InfoTab({ contact }: { contact: Contact }) {
     },
   })
 
+  // ── Mark as Reviewed mutation (NEW) ────────────────────────────────────────
+  const markReviewedMutation = useMutation({
+    mutationFn: () => apiRequest('PATCH', `/contacts/${contact.id}`, { hasLeftReview: true }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/contacts'] })
+      queryClient.invalidateQueries({ queryKey: ['/contacts', contact.id] })
+      toast({ title: 'Marked as reviewed — no further review requests will be queued.' })
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
   const set = (k: keyof typeof form) => (v: string) => setForm(f => ({ ...f, [k]: v }))
 
   return (
@@ -179,6 +190,34 @@ function InfoTab({ contact }: { contact: Contact }) {
               <p className="text-muted-foreground mt-2 text-xs border-t pt-2">{contact.notes}</p>
             )}
           </div>
+        )}
+      </div>
+
+      {/* Review status (NEW) */}
+      <div className="rounded-xl border bg-card p-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">Google Review</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            {contact.hasLeftReview
+              ? 'Review on file — no further requests will be queued.'
+              : 'No review on file yet.'}
+          </p>
+        </div>
+        {contact.hasLeftReview ? (
+          <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400 shrink-0">
+            <CheckCircle2 className="h-4 w-4" />Reviewed
+          </span>
+        ) : (
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0 text-xs h-8"
+            disabled={markReviewedMutation.isPending}
+            onClick={() => markReviewedMutation.mutate()}
+          >
+            <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+            Mark Reviewed
+          </Button>
         )}
       </div>
 
