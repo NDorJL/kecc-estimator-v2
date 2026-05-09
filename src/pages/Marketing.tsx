@@ -1,106 +1,360 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import {
-  PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid,
-} from 'recharts'
+import { LineChart, Line, ResponsiveContainer } from 'recharts'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/components/ui/sheet'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import type { Lead, Quote } from '@/types'
+import type { MarketingChannel, MarketingSpend, Campaign, CampaignEvent, Lead, Quote } from '@/types'
 import {
-  DollarSign, TrendingUp, TrendingDown, ChevronLeft, ChevronRight,
-  Download, Target, Megaphone,
+  TrendingUp, TrendingDown, Minus, DollarSign, Users, Briefcase,
+  ChevronUp, ChevronDown, Plus, Pencil, Trash2, Download, Megaphone,
+  Award, BarChart2,
 } from 'lucide-react'
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Period types ─────────────────────────────────────────────────────────────
 
-interface SpendEntry {
-  id: string
-  channel: string
-  amount: number
-  month: string  // 'YYYY-MM-01'
-  notes: string | null
-  createdAt: string
+type PeriodPreset = 'this_month' | 'last_month' | 'last_3' | 'last_6' | 'last_12' | 'custom'
+
+interface DateRange { start: string; end: string }  // 'YYYY-MM'
+
+const PRESET_LABELS: Record<PeriodPreset, string> = {
+  this_month: 'This Month',
+  last_month: 'Last Month',
+  last_3:     'Last 3M',
+  last_6:     'Last 6M',
+  last_12:    'Last 12M',
+  custom:     'Custom',
 }
 
-// ── Marketing channel definitions ────────────────────────────────────────────
+// ── Period math helpers ───────────────────────────────────────────────────────
 
-const CHANNELS = [
-  { id: 'google_ads',       label: 'Google Ads' },
-  { id: 'google_lsa',       label: 'Google LSA' },
-  { id: 'seo_organic',      label: 'SEO / Organic' },
-  { id: 'facebook_ads',     label: 'Facebook Ads' },
-  { id: 'instagram_ads',    label: 'Instagram Ads' },
-  { id: 'social_organic',   label: 'Social Media (Organic)' },
-  { id: 'mailers',          label: 'Mailers / Direct Mail' },
-  { id: 'yard_signs',       label: 'Yard Signs' },
-  { id: 'door_hangers',     label: 'Door Hangers' },
-  { id: 'referral',         label: 'Word of Mouth / Referrals' },
-  { id: 'nextdoor',         label: 'Nextdoor' },
-  { id: 'thumbtack',        label: 'Thumbtack' },
-  { id: 'yelp_ads',         label: 'Yelp Ads' },
-  { id: 'email_marketing',  label: 'Email Marketing' },
-  { id: 'community',        label: 'Community Sponsorship' },
-  { id: 'other',            label: 'Other' },
-]
-
-// Map channel id → lead source tags that match (for cross-referencing leads)
-const CHANNEL_TO_SOURCE: Record<string, string[]> = {
-  google_ads:     ['google_ads', 'google'],
-  google_lsa:     ['google_lsa', 'google'],
-  seo_organic:    ['seo_organic', 'seo', 'website', 'organic'],
-  facebook_ads:   ['facebook_ads', 'facebook', 'social'],
-  instagram_ads:  ['instagram_ads', 'instagram', 'social'],
-  social_organic: ['social_organic', 'social', 'social_media'],
-  mailers:        ['mailers', 'direct_mail'],
-  yard_signs:     ['yard_signs'],
-  door_hangers:   ['door_hangers'],
-  referral:       ['referral', 'word_of_mouth'],
-  nextdoor:       ['nextdoor'],
-  thumbtack:      ['thumbtack'],
-  yelp_ads:       ['yelp', 'yelp_ads'],
-  email_marketing:['email_marketing', 'email'],
-  community:      ['community', 'sponsorship'],
-  other:          ['other', 'cold_call', 'inbound_sms'],
-}
-
-// Chart colors (one per channel, cycles)
-const CHART_COLORS = [
-  '#1B4332', '#2D6A4F', '#40916C', '#52B788', '#74C69D',
-  '#95D5B2', '#B7E4C7', '#D8F3DC', '#1d3557', '#457b9d',
-  '#e63946', '#f4a261', '#e9c46a', '#2a9d8f', '#264653', '#6d6875',
-]
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function toMonthString(d: Date): string {
+function thisMonthStr(): string {
+  const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-function monthLabel(yyyymm: string): string {
-  const [y, m] = yyyymm.split('-').map(Number)
-  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+function addMonths(ym: string, n: number): string {
+  const [y, m] = ym.split('-').map(Number)
+  const d = new Date(y, m - 1 + n, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-function prevMonth(yyyymm: string): string {
-  const [y, m] = yyyymm.split('-').map(Number)
-  const d = new Date(y, m - 2, 1)
-  return toMonthString(d)
+function getPeriodRange(preset: PeriodPreset, custom: DateRange): DateRange {
+  const tm = thisMonthStr()
+  switch (preset) {
+    case 'this_month': return { start: tm, end: tm }
+    case 'last_month': return { start: addMonths(tm, -1), end: addMonths(tm, -1) }
+    case 'last_3':     return { start: addMonths(tm, -2), end: tm }
+    case 'last_6':     return { start: addMonths(tm, -5), end: tm }
+    case 'last_12':    return { start: addMonths(tm, -11), end: tm }
+    case 'custom':     return custom
+  }
 }
 
-function nextMonth(yyyymm: string): string {
-  const [y, m] = yyyymm.split('-').map(Number)
-  const d = new Date(y, m, 1)
-  return toMonthString(d)
+function getPrevRange(preset: PeriodPreset, range: DateRange): DateRange | null {
+  if (preset === 'custom') return null
+  const [sy, sm] = range.start.split('-').map(Number)
+  const [ey, em] = range.end.split('-').map(Number)
+  const months = (ey - sy) * 12 + (em - sm) + 1
+  return {
+    start: addMonths(range.start, -months),
+    end:   addMonths(range.end,   -months),
+  }
 }
 
-function fmt(n: number): string {
+function getLast6Months(): string[] {
+  const tm = thisMonthStr()
+  return Array.from({ length: 6 }, (_, i) => addMonths(tm, -(5 - i)))
+}
+
+function monthLabel(ym: string): string {
+  const [y, m] = ym.split('-').map(Number)
+  return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+}
+
+// ── Formatting helpers ────────────────────────────────────────────────────────
+
+function fmtCurrency(n: number): string {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+}
+function fmtPct(n: number): string { return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%` }
+function fmtNum(n: number): string { return n.toLocaleString() }
+
+// ── KpiCard ───────────────────────────────────────────────────────────────────
+
+type MetricKind = 'currency' | 'number' | 'percent' | 'text'
+type TrendDir = 'up' | 'down' | 'flat'
+
+function trendDir(cur: number | null, prev: number | null): TrendDir {
+  if (cur === null || prev === null) return 'flat'
+  if (cur > prev) return 'up'
+  if (cur < prev) return 'down'
+  return 'flat'
+}
+
+function formatKpi(v: number | null, kind: MetricKind): string {
+  if (v === null) return '—'
+  if (kind === 'currency') return fmtCurrency(v)
+  if (kind === 'percent')  return `${v.toFixed(1)}%`
+  if (kind === 'number')   return fmtNum(Math.round(v))
+  return String(v)
+}
+
+function KpiCard({
+  title, icon, value, prev, kind, lowerIsBetter = false,
+}: {
+  title: string
+  icon: React.ReactNode
+  value: number | null
+  prev: number | null
+  kind: MetricKind
+  lowerIsBetter?: boolean
+}) {
+  const dir = trendDir(value, prev)
+  const isGood = dir === 'flat' ? null : lowerIsBetter ? dir === 'down' : dir === 'up'
+
+  const TrendIcon = dir === 'up' ? TrendingUp : dir === 'down' ? TrendingDown : Minus
+  const trendColor =
+    isGood === null ? 'text-muted-foreground' :
+    isGood          ? 'text-emerald-500'      : 'text-red-500'
+
+  const delta =
+    prev !== null && prev !== 0 && value !== null
+      ? ((value - prev) / Math.abs(prev)) * 100
+      : null
+
+  return (
+    <Card className="shrink-0 w-[160px] sm:w-auto">
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">{title}</span>
+          <span className="text-muted-foreground/60">{icon}</span>
+        </div>
+        <div className="text-xl font-bold tracking-tight truncate">{formatKpi(value, kind)}</div>
+        <div className={`flex items-center gap-0.5 mt-1 text-xs ${trendColor}`}>
+          <TrendIcon className="h-3 w-3 shrink-0" />
+          {delta !== null ? (
+            <span>{Math.abs(delta).toFixed(0)}% vs prior</span>
+          ) : (
+            <span className="text-muted-foreground">no prior data</span>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ── TextKpiCard — for "Best Channel" (string value, no trend) ────────────────
+
+function TextKpiCard({ title, icon, value }: { title: string; icon: React.ReactNode; value: string | null }) {
+  return (
+    <Card className="shrink-0 w-[160px] sm:w-auto">
+      <CardContent className="p-4">
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide leading-tight">{title}</span>
+          <span className="text-muted-foreground/60">{icon}</span>
+        </div>
+        <div className="text-base font-bold tracking-tight leading-snug">{value ?? '—'}</div>
+        <div className="mt-1 text-xs text-muted-foreground">lowest CPA this period</div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ── SparklineChart ────────────────────────────────────────────────────────────
+
+function SparklineChart({ data }: { data: { v: number }[] }) {
+  const hasData = data.some(d => d.v > 0)
+  if (!hasData) return <span className="text-xs text-muted-foreground/40">—</span>
+  return (
+    <div style={{ width: 72, height: 28 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
+          <Line
+            type="monotone"
+            dataKey="v"
+            stroke="hsl(var(--primary))"
+            strokeWidth={1.5}
+            dot={false}
+            isAnimationActive={false}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+// ── SpendEntrySheet ───────────────────────────────────────────────────────────
+
+function SpendEntrySheet({
+  open, onClose, channels, initialChannelId, initialMonth, editEntry,
+}: {
+  open: boolean
+  onClose: () => void
+  channels: MarketingChannel[]
+  initialChannelId?: string
+  initialMonth?: string
+  editEntry?: MarketingSpend
+}) {
+  const qc = useQueryClient()
+  const { toast } = useToast()
+  const tm = thisMonthStr()
+
+  const [channelId, setChannelId] = useState(editEntry?.channelId ?? initialChannelId ?? '')
+  const [month,     setMonth]     = useState(editEntry?.month ?? initialMonth ?? tm)
+  const [amount,    setAmount]    = useState(editEntry ? String(editEntry.amount) : '')
+  const [notes,     setNotes]     = useState(editEntry?.notes ?? '')
+
+  // Reset when sheet opens
+  const handleOpen = (o: boolean) => {
+    if (o) {
+      setChannelId(editEntry?.channelId ?? initialChannelId ?? '')
+      setMonth(editEntry?.month ?? initialMonth ?? tm)
+      setAmount(editEntry ? String(editEntry.amount) : '')
+      setNotes(editEntry?.notes ?? '')
+    } else {
+      onClose()
+    }
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: () => {
+      const payload = { channelId, month, amount: parseFloat(amount) || 0, notes: notes || null }
+      if (editEntry) {
+        return apiRequest('PATCH', `/marketing-spend/${editEntry.id}`, payload)
+      }
+      return apiRequest('POST', '/marketing-spend', payload)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/marketing-spend'] })
+      toast({ title: editEntry ? 'Spend updated' : 'Spend entry saved' })
+      onClose()
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  const isValid = channelId && month && amount && parseFloat(amount) >= 0
+
+  return (
+    <Sheet open={open} onOpenChange={handleOpen}>
+      <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[85dvh] overflow-y-auto">
+        <SheetHeader className="mb-4">
+          <SheetTitle>{editEntry ? 'Edit Spend Entry' : 'Add Spend Entry'}</SheetTitle>
+        </SheetHeader>
+        <div className="space-y-4">
+          <div>
+            <Label className="text-xs">Channel</Label>
+            <Select value={channelId} onValueChange={setChannelId}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Select channel…" /></SelectTrigger>
+              <SelectContent>
+                {channels.map(ch => (
+                  <SelectItem key={ch.id} value={ch.id}>{ch.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Month</Label>
+            <Input
+              type="month"
+              className="mt-1"
+              value={month}
+              onChange={e => setMonth(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Amount ($)</Label>
+            <Input
+              type="number"
+              className="mt-1"
+              placeholder="0.00"
+              min="0"
+              step="0.01"
+              value={amount}
+              onChange={e => setAmount(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Notes (optional)</Label>
+            <Textarea
+              className="mt-1"
+              placeholder="Campaign details, invoice #, etc."
+              rows={2}
+              value={notes}
+              onChange={e => setNotes(e.target.value)}
+            />
+          </div>
+        </div>
+        <SheetFooter className="mt-5 flex flex-row gap-2">
+          <Button variant="ghost" className="flex-1" onClick={onClose}>Cancel</Button>
+          <Button
+            className="flex-1"
+            disabled={!isValid || saveMutation.isPending}
+            onClick={() => saveMutation.mutate()}
+          >
+            {saveMutation.isPending ? 'Saving…' : 'Save'}
+          </Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+// ── ChannelDetailSheet — placeholder ─────────────────────────────────────────
+
+function ChannelDetailSheet({
+  channel, onClose,
+}: {
+  channel: MarketingChannel | null
+  onClose: () => void
+}) {
+  return (
+    <Sheet open={!!channel} onOpenChange={o => { if (!o) onClose() }}>
+      <SheetContent side="right" className="w-full max-w-md">
+        <SheetHeader>
+          <SheetTitle>{channel?.name ?? 'Channel'}</SheetTitle>
+        </SheetHeader>
+        <div className="mt-6 text-sm text-muted-foreground text-center py-12">
+          <BarChart2 className="h-10 w-10 mx-auto mb-3 opacity-30" />
+          <p className="font-medium">Channel detail coming in a future session</p>
+          <p className="text-xs mt-1">Campaign breakdown, lead timeline, and ROI trend will appear here.</p>
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+// ── Sort helpers ──────────────────────────────────────────────────────────────
+
+type SortCol = 'name' | 'spend' | 'leads' | 'views' | 'convRate' | 'closedJobs' | 'closeRate' | 'revenue' | 'cpl' | 'cpa' | 'roi'
+
+function SortTh({
+  col, label, active, dir, onSort, className = '',
+}: {
+  col: SortCol; label: string; active: boolean; dir: 'asc' | 'desc'
+  onSort: (c: SortCol) => void; className?: string
+}) {
+  return (
+    <th
+      className={`px-3 py-2 text-right text-[11px] font-medium text-muted-foreground cursor-pointer select-none whitespace-nowrap hover:text-foreground transition-colors ${className}`}
+      onClick={() => onSort(col)}
+    >
+      <span className="inline-flex items-center gap-0.5 justify-end">
+        {label}
+        {active
+          ? (dir === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)
+          : <ChevronDown className="h-3 w-3 opacity-30" />}
+      </span>
+    </th>
+  )
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -109,498 +363,691 @@ export default function Marketing() {
   const { toast } = useToast()
   const qc = useQueryClient()
 
-  const [selectedMonth, setSelectedMonth] = useState<string>(toMonthString(new Date()))
-  const [budgetDraft, setBudgetDraft] = useState<string>('')
-  const [editingBudget, setEditingBudget] = useState(false)
+  // ── Period state ──────────────────────────────────────────────────────────
+  const [preset, setPreset] = useState<PeriodPreset>('this_month')
+  const [customStart, setCustomStart] = useState(addMonths(thisMonthStr(), -2))
+  const [customEnd,   setCustomEnd]   = useState(thisMonthStr())
 
-  // ── Budget ──────────────────────────────────────────────────────────────────
-  const { data: budgetData } = useQuery<{ monthlyBudget: number }>({
-    queryKey: ['marketing-budget'],
-    queryFn: () => apiGet('/marketing-spend?action=budget'),
-  })
-  const monthlyBudget = budgetData?.monthlyBudget ?? 0
+  const range    = useMemo(() => getPeriodRange(preset, { start: customStart, end: customEnd }), [preset, customStart, customEnd])
+  const prevRange = useMemo(() => getPrevRange(preset, range), [preset, range])
 
-  const saveBudgetMutation = useMutation({
-    mutationFn: (v: number) =>
-      apiRequest('PATCH', '/marketing-spend?action=budget', { monthlyBudget: v }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['marketing-budget'] })
-      setEditingBudget(false)
-      toast({ title: 'Budget saved' })
-    },
-  })
+  // ── UI state ──────────────────────────────────────────────────────────────
+  const [sortCol, setSortCol] = useState<SortCol>('spend')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [detailChannel, setDetailChannel] = useState<MarketingChannel | null>(null)
+  const [showAddSpend,  setShowAddSpend]  = useState(false)
+  const [editSpend,     setEditSpend]     = useState<MarketingSpend | undefined>(undefined)
+  const [spendChannelPreset, setSpendChannelPreset] = useState<string | undefined>(undefined)
+  const [deleteId, setDeleteId] = useState<string | null>(null)
 
-  // ── Spend entries for selected month ────────────────────────────────────────
-  const { data: spendEntries = [] } = useQuery<SpendEntry[]>({
-    queryKey: ['marketing-spend', selectedMonth],
-    queryFn: () => apiGet(`/marketing-spend?month=${selectedMonth}`),
-  })
-
-  // Build a map: channel → amount for fast lookup
-  const spendByChannel = useMemo(() => {
-    const m: Record<string, number> = {}
-    for (const e of spendEntries) {
-      const ch = e.channel
-      m[ch] = (m[ch] ?? 0) + Number(e.amount)
-    }
-    return m
-  }, [spendEntries])
-
-  const totalSpend = useMemo(() =>
-    Object.values(spendByChannel).reduce((a, b) => a + b, 0), [spendByChannel])
-
-  // ── Save spend entry ─────────────────────────────────────────────────────────
-  const saveSpendMutation = useMutation({
-    mutationFn: ({ channel, amount }: { channel: string; amount: number }) =>
-      apiRequest('POST', '/marketing-spend', {
-        channel,
-        amount,
-        month: selectedMonth,
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['marketing-spend', selectedMonth] })
-    },
-    onError: () => toast({ title: 'Failed to save', variant: 'destructive' }),
-  })
-
-  // Local draft state for inline editing
-  const [draftAmounts, setDraftAmounts] = useState<Record<string, string>>({})
-
-  function getDraftValue(channelId: string): string {
-    if (channelId in draftAmounts) return draftAmounts[channelId]
-    const existing = spendByChannel[channelId]
-    return existing ? String(existing) : ''
+  function handleSort(col: SortCol) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('desc') }
   }
 
-  function handleBlurChannel(channelId: string) {
-    const raw = draftAmounts[channelId]
-    if (raw === undefined) return  // no change
-    const val = parseFloat(raw) || 0
-    const current = spendByChannel[channelId] ?? 0
-    if (val !== current) {
-      saveSpendMutation.mutate({ channel: channelId, amount: val })
-    }
-    setDraftAmounts(prev => { const n = { ...prev }; delete n[channelId]; return n })
-  }
+  // ── Data queries ──────────────────────────────────────────────────────────
+  const { data: channels = [], isLoading: loadingChannels } = useQuery<MarketingChannel[]>({
+    queryKey: ['/marketing-channels'],
+    queryFn: () => apiGet('/marketing-channels'),
+  })
 
-  // ── Leads & Quotes for effectiveness ─────────────────────────────────────────
+  const { data: allSpend = [], isLoading: loadingSpend } = useQuery<MarketingSpend[]>({
+    queryKey: ['/marketing-spend'],
+    queryFn: () => apiGet('/marketing-spend'),
+  })
+
   const { data: allLeads = [] } = useQuery<Lead[]>({
     queryKey: ['/leads'],
     queryFn: () => apiGet('/leads'),
   })
+
   const { data: allQuotes = [] } = useQuery<Quote[]>({
     queryKey: ['/quotes'],
     queryFn: () => apiGet('/quotes'),
   })
 
-  // Effectiveness table: per channel — leads, spend, CPL, quotes sent, win rate, est revenue
-  const effectivenessData = useMemo(() => {
-    return CHANNELS.map(ch => {
-      const sourceTags = CHANNEL_TO_SOURCE[ch.id] ?? [ch.id]
-      const channelLeads = allLeads.filter(l => l.source && sourceTags.includes(l.source))
-      const leadsCount = channelLeads.length
-      const quotesFromLeads = allQuotes.filter(q =>
-        channelLeads.some(l => l.quoteId === q.id)
-      )
-      const quotesSent = quotesFromLeads.filter(q => q.status === 'sent' || q.status === 'accepted').length
-      const quotesAccepted = quotesFromLeads.filter(q => q.status === 'accepted').length
-      const winRate = quotesSent > 0 ? Math.round((quotesAccepted / quotesSent) * 100) : null
-      const estRevenue = quotesFromLeads
-        .filter(q => q.status === 'accepted')
-        .reduce((sum, q) => sum + (q.total ?? 0), 0)
-      const spend = spendByChannel[ch.id] ?? 0
-      const cpl = leadsCount > 0 ? spend / leadsCount : null
-
-      return { ...ch, leadsCount, quotesSent, quotesAccepted, winRate, estRevenue, spend, cpl }
-    }).filter(row => row.leadsCount > 0 || row.spend > 0)
-  }, [allLeads, allQuotes, spendByChannel])
-
-  // ── ROI per channel ──────────────────────────────────────────────────────────
-  const roiData = useMemo(() => {
-    return effectivenessData
-      .filter(row => row.spend > 0)
-      .map(row => {
-        const roi = row.estRevenue / row.spend
-        return { ...row, roi }
-      })
-      .sort((a, b) => b.roi - a.roi)
-  }, [effectivenessData])
-
-  // ── Pie chart data ────────────────────────────────────────────────────────────
-  const pieData = useMemo(() =>
-    CHANNELS
-      .filter(ch => (spendByChannel[ch.id] ?? 0) > 0)
-      .map((ch, i) => ({
-        name: ch.label,
-        value: spendByChannel[ch.id] ?? 0,
-        fill: CHART_COLORS[i % CHART_COLORS.length],
-      })),
-    [spendByChannel]
-  )
-
-  // ── Historical spend (last 6 months) ─────────────────────────────────────────
-  // We only have current month loaded; for the bar chart we'd need to load more months.
-  // Simple approach: query last 6 months worth of entries.
-  const last6Months = useMemo(() => {
-    const months = []
-    const [y, m] = selectedMonth.split('-').map(Number)
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(y, m - 1 - i, 1)
-      months.push(toMonthString(d))
-    }
-    return months
-  }, [selectedMonth])
-
-  const { data: historicalEntries = [] } = useQuery<SpendEntry[]>({
-    queryKey: ['marketing-spend-history', last6Months[0], last6Months[5]],
-    queryFn: async () => {
-      const results = await Promise.all(
-        last6Months.map(mo => apiGet<SpendEntry[]>(`/marketing-spend?month=${mo}`))
-      )
-      return results.flat()
-    },
+  const { data: allCampaigns = [] } = useQuery<Campaign[]>({
+    queryKey: ['/campaigns'],
+    queryFn: () => apiGet('/campaigns'),
   })
 
-  const historicalChartData = useMemo(() => {
-    return last6Months.map(mo => {
-      const monthEntries = historicalEntries.filter(e => e.month.startsWith(mo))
-      const total = monthEntries.reduce((sum, e) => sum + Number(e.amount), 0)
-      return { month: monthLabel(mo), total }
-    })
-  }, [last6Months, historicalEntries])
+  const { data: allEvents = [] } = useQuery<CampaignEvent[]>({
+    queryKey: ['/campaign-events'],
+    queryFn: () => apiGet('/campaign-events'),
+  })
 
-  // ── Generate Report (text export) ────────────────────────────────────────────
-  function generateReport() {
-    const lines: string[] = []
-    lines.push(`MARKETING REPORT — ${monthLabel(selectedMonth).toUpperCase()}`)
-    lines.push('='.repeat(50))
-    lines.push('')
-    lines.push(`Monthly Budget:   ${fmt(monthlyBudget)}`)
-    lines.push(`Total Spend:      ${fmt(totalSpend)}`)
-    const diff = monthlyBudget - totalSpend
-    lines.push(`Over/Under:       ${diff >= 0 ? `Under by ${fmt(diff)}` : `Over by ${fmt(Math.abs(diff))}`}`)
-    lines.push('')
-    lines.push('SPEND BY CHANNEL')
-    lines.push('-'.repeat(40))
-    for (const ch of CHANNELS) {
-      const amt = spendByChannel[ch.id]
-      if (amt && amt > 0) {
-        lines.push(`  ${ch.label.padEnd(28)} ${fmt(amt).padStart(10)}`)
-      }
-    }
-    lines.push('')
-    lines.push('CHANNEL EFFECTIVENESS')
-    lines.push('-'.repeat(40))
-    for (const row of effectivenessData) {
-      if (row.leadsCount === 0 && row.spend === 0) continue
-      lines.push(`  ${row.label}`)
-      lines.push(`    Leads: ${row.leadsCount}  |  Spend: ${fmt(row.spend)}  |  CPL: ${row.cpl != null ? fmt(row.cpl) : 'N/A'}`)
-      lines.push(`    Quotes Sent: ${row.quotesSent}  |  Win Rate: ${row.winRate != null ? row.winRate + '%' : 'N/A'}  |  Revenue: ${fmt(row.estRevenue)}`)
-    }
-    lines.push('')
-    lines.push('ROI TRACKER')
-    lines.push('-'.repeat(40))
-    for (const row of roiData) {
-      const roiStr = row.roi >= 100 ? '∞' : `${row.roi.toFixed(1)}×`
-      lines.push(`  ${row.label.padEnd(28)} ROI: ${roiStr}`)
-    }
-    lines.push('')
-    lines.push(`Generated: ${new Date().toLocaleDateString('en-US', { dateStyle: 'long' })}`)
+  // ── Attribution maps ──────────────────────────────────────────────────────
 
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `marketing-report-${selectedMonth}.txt`
-    a.click()
-    URL.revokeObjectURL(url)
-    toast({ title: 'Report downloaded' })
+  // campaign_id → channel_id
+  const campaignChannelMap = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const c of allCampaigns) m[c.id] = c.channelId
+    return m
+  }, [allCampaigns])
+
+  // campaign_id → channel_id (for events)
+  const campaignToChannel = campaignChannelMap
+
+  // source string → channel_id (fallback when no campaign_id)
+  const sourceToChannelId = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const ch of channels) {
+      // Exact name match (e.g. "Door Hangers" from cookie tracking)
+      m[ch.name.toLowerCase()] = ch.id
+      // snake_case variant (e.g. "door_hangers" from UTM source)
+      m[ch.name.toLowerCase().replace(/[\s/]+/g, '_')] = ch.id
+    }
+    // Common manual aliases for UTM sources people type
+    const manualAliases: Record<string, string[]> = {
+      'facebook ads':           ['facebook', 'fb', 'facebook_ads'],
+      'google ads':             ['google', 'google_ads', 'gads'],
+      'google business profile':['google_business', 'gbp', 'gmb'],
+      'nextdoor':               ['nextdoor'],
+      'instagram':              ['instagram', 'instagram_ads', 'ig'],
+      'direct mail':            ['mailers', 'direct_mail'],
+      'yard signs':             ['yard_signs'],
+      'door hangers':           ['door_hangers'],
+      'truck wrap':             ['truck_wrap', 'truck'],
+      'referral':               ['referral', 'word_of_mouth', 'wom'],
+      'word of mouth':          ['word_of_mouth', 'wom', 'referral'],
+    }
+    for (const ch of channels) {
+      const name = ch.name.toLowerCase()
+      const aliases = manualAliases[name]
+      if (aliases) for (const a of aliases) m[a] = ch.id
+    }
+    return m
+  }, [channels])
+
+  function getLeadChannelId(lead: Lead): string | null {
+    if (lead.campaignId) return campaignChannelMap[lead.campaignId] ?? null
+    if (lead.source)     return sourceToChannelId[lead.source.toLowerCase()] ?? null
+    return null
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  // ── Period-filtered data ──────────────────────────────────────────────────
 
-  const budgetPct = monthlyBudget > 0 ? Math.min((totalSpend / monthlyBudget) * 100, 100) : 0
-  const budgetDiff = monthlyBudget - totalSpend
-  const isOver = budgetDiff < 0
+  const periodSpend = useMemo(
+    () => allSpend.filter(s => s.month >= range.start && s.month <= range.end),
+    [allSpend, range],
+  )
 
-  const isCurrentOrFuture = selectedMonth >= toMonthString(new Date())
+  const prevSpend = useMemo(
+    () => prevRange ? allSpend.filter(s => s.month >= prevRange.start && s.month <= prevRange.end) : [],
+    [allSpend, prevRange],
+  )
+
+  function inRange(isoTs: string, r: DateRange): boolean {
+    const ym = isoTs.slice(0, 7)
+    return ym >= r.start && ym <= r.end
+  }
+
+  const periodLeads = useMemo(() => allLeads.filter(l => inRange(l.createdAt, range)), [allLeads, range])
+  const prevLeads   = useMemo(() => prevRange ? allLeads.filter(l => inRange(l.createdAt, prevRange)) : [], [allLeads, prevRange])
+
+  const periodEvents = useMemo(() => allEvents.filter(e => inRange(e.createdAt, range)), [allEvents, range])
+
+  // Closed leads = finished_paid or finished_unpaid
+  const isClosed = (l: Lead) => l.stage === 'finished_paid' || l.stage === 'finished_unpaid'
+
+  const periodClosed = useMemo(() => periodLeads.filter(isClosed), [periodLeads])
+  const prevClosed   = useMemo(() => prevLeads.filter(isClosed),   [prevLeads])
+
+  function revenueForLeads(ls: Lead[]): number {
+    return ls.reduce((sum, l) => {
+      const q = allQuotes.find(q => q.id === l.quoteId)
+      return sum + (q?.total ?? l.estimatedValue ?? 0)
+    }, 0)
+  }
+
+  // ── KPI computations ──────────────────────────────────────────────────────
+
+  const totalSpend    = useMemo(() => periodSpend.reduce((s, e) => s + e.amount, 0), [periodSpend])
+  const prevTotalSpend = useMemo(() => prevSpend.reduce((s, e) => s + e.amount, 0), [prevSpend])
+
+  const totalLeads    = periodLeads.length
+  const prevTotalLeads = prevLeads.length
+
+  const closedCount   = periodClosed.length
+  const prevClosedCount = prevClosed.length
+
+  const revenue       = useMemo(() => revenueForLeads(periodClosed), [periodClosed, allQuotes])
+  const prevRevenue   = useMemo(() => revenueForLeads(prevClosed),   [prevClosed,   allQuotes])
+
+  const cpl           = totalLeads  > 0 && totalSpend > 0 ? totalSpend / totalLeads  : null
+  const prevCpl       = prevTotalLeads > 0 && prevTotalSpend > 0 ? prevTotalSpend / prevTotalLeads : null
+
+  const cpa           = closedCount > 0 && totalSpend > 0 ? totalSpend / closedCount : null
+  const prevCpa       = prevClosedCount > 0 && prevTotalSpend > 0 ? prevTotalSpend / prevClosedCount : null
+
+  const roi           = totalSpend > 0 ? ((revenue - totalSpend) / totalSpend) * 100 : null
+  const prevRoi       = prevTotalSpend > 0 ? ((prevRevenue - prevTotalSpend) / prevTotalSpend) * 100 : null
+
+  // Best channel: lowest CPA with ≥1 closed job
+  const bestChannel = useMemo(() => {
+    let best: { name: string; cpa: number } | null = null
+    for (const ch of channels) {
+      const chClosed = periodClosed.filter(l => getLeadChannelId(l) === ch.id)
+      if (chClosed.length === 0) continue
+      const chSpend = periodSpend.filter(s => s.channelId === ch.id).reduce((s, e) => s + e.amount, 0)
+      if (chSpend === 0) continue
+      const chCpa = chSpend / chClosed.length
+      if (best === null || chCpa < best.cpa) best = { name: ch.name, cpa: chCpa }
+    }
+    return best?.name ?? null
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channels, periodClosed, periodSpend, campaignChannelMap, sourceToChannelId])
+
+  // ── Channel performance table data ────────────────────────────────────────
+
+  const last6Months = useMemo(() => getLast6Months(), [])
+
+  const channelRows = useMemo(() => {
+    return channels.map(ch => {
+      // Spend
+      const spend = periodSpend.filter(s => s.channelId === ch.id).reduce((s, e) => s + e.amount, 0)
+
+      // Leads attributed to this channel in period
+      const leads = periodLeads.filter(l => getLeadChannelId(l) === ch.id)
+      const leadsCount = leads.length
+
+      // Views = campaign_events for campaigns belonging to this channel, in period
+      const chCampaignIds = new Set(allCampaigns.filter(c => c.channelId === ch.id).map(c => c.id))
+      const views = periodEvents.filter(e => chCampaignIds.has(e.campaignId)).length
+
+      // Conversion rate: leads / views %
+      const convRate = views > 0 ? (leadsCount / views) * 100 : null
+
+      // Closed jobs
+      const closedLeads = leads.filter(isClosed)
+      const closedJobs = closedLeads.length
+
+      // Close rate: closed / leads %
+      const closeRate = leadsCount > 0 ? (closedJobs / leadsCount) * 100 : null
+
+      // Revenue
+      const chRevenue = revenueForLeads(closedLeads)
+
+      // Cost metrics
+      const chCpl = leadsCount > 0 && spend > 0 ? spend / leadsCount  : null
+      const chCpa = closedJobs > 0 && spend > 0 ? spend / closedJobs  : null
+      const chRoi = spend > 0                   ? ((chRevenue - spend) / spend) * 100 : null
+
+      // 6-month sparkline (total leads per month, channel-scoped, all leads not just period)
+      const sparkline = last6Months.map(ym => ({
+        v: allLeads.filter(l => l.createdAt.slice(0, 7) === ym && getLeadChannelId(l) === ch.id).length,
+      }))
+
+      return { ch, spend, leadsCount, views, convRate, closedJobs, closeRate, chRevenue, chCpl, chCpa, chRoi, sparkline }
+    })
+    // Only show channels with any activity (spend or leads or events)
+    .filter(r => r.spend > 0 || r.leadsCount > 0 || r.views > 0)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channels, periodSpend, periodLeads, periodEvents, allCampaigns, allLeads, allQuotes, last6Months, campaignChannelMap, sourceToChannelId])
+
+  const sortedChannelRows = useMemo(() => {
+    const rows = [...channelRows]
+    const dir = sortDir === 'asc' ? 1 : -1
+    rows.sort((a, b) => {
+      switch (sortCol) {
+        case 'name':      return dir * a.ch.name.localeCompare(b.ch.name)
+        case 'spend':     return dir * (a.spend - b.spend)
+        case 'leads':     return dir * (a.leadsCount - b.leadsCount)
+        case 'views':     return dir * (a.views - b.views)
+        case 'convRate':  return dir * ((a.convRate ?? -1) - (b.convRate ?? -1))
+        case 'closedJobs':return dir * (a.closedJobs - b.closedJobs)
+        case 'closeRate': return dir * ((a.closeRate ?? -1) - (b.closeRate ?? -1))
+        case 'revenue':   return dir * (a.chRevenue - b.chRevenue)
+        case 'cpl':       return dir * ((a.chCpl ?? Infinity) - (b.chCpl ?? Infinity))
+        case 'cpa':       return dir * ((a.chCpa ?? Infinity) - (b.chCpa ?? Infinity))
+        case 'roi':       return dir * ((a.chRoi ?? -Infinity) - (b.chRoi ?? -Infinity))
+        default:          return 0
+      }
+    })
+    return rows
+  }, [channelRows, sortCol, sortDir])
+
+  // ── Spend log data ────────────────────────────────────────────────────────
+
+  const sortedSpendLog = useMemo(() => {
+    return [...periodSpend].sort((a, b) => {
+      if (b.month !== a.month) return b.month.localeCompare(a.month)
+      return b.createdAt.localeCompare(a.createdAt)
+    })
+  }, [periodSpend])
+
+  // Group by month for subtotals
+  const spendMonths = useMemo(() => {
+    const months: string[] = []
+    for (const e of sortedSpendLog) {
+      if (!months.includes(e.month)) months.push(e.month)
+    }
+    return months
+  }, [sortedSpendLog])
+
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiRequest('DELETE', `/marketing-spend/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/marketing-spend'] })
+      setDeleteId(null)
+      toast({ title: 'Entry deleted' })
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  // CSV export
+  function exportCSV() {
+    const channelMap = Object.fromEntries(channels.map(c => [c.id, c.name]))
+    const rows = [
+      ['Channel', 'Month', 'Amount', 'Notes'],
+      ...sortedSpendLog.map(e => [
+        channelMap[e.channelId] ?? e.channelId,
+        e.month,
+        String(e.amount),
+        e.notes ?? '',
+      ]),
+    ]
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `spend-${range.start}-${range.end}.csv`; a.click()
+    URL.revokeObjectURL(url)
+    toast({ title: 'CSV downloaded' })
+  }
+
+  // ── Type badge helper ─────────────────────────────────────────────────────
+
+  const TYPE_BADGE: Record<string, string> = {
+    digital:  'bg-blue-500/10 text-blue-600 border-blue-500/20',
+    print:    'bg-amber-500/10 text-amber-600 border-amber-500/20',
+    referral: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+    other:    'bg-muted text-muted-foreground border-border',
+  }
+
+  const isLoading = loadingChannels || loadingSpend
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-col min-h-full">
-      {/* ── Page header ─────────────────────────────────────────────────────── */}
+
+      {/* ── Page header ─────────────────────────────────────────────────── */}
       <div className="sticky top-0 z-10 bg-background border-b px-4 py-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <Megaphone className="h-5 w-5 text-primary" />
           <h2 className="text-lg font-bold">Marketing</h2>
         </div>
-        <Button size="sm" variant="outline" onClick={generateReport} className="gap-1.5">
-          <Download className="h-4 w-4" />
-          Export Report
-        </Button>
       </div>
 
-      <div className="p-4 space-y-5 pb-8">
+      <div className="p-4 space-y-6 pb-12">
 
-        {/* ── Month selector ───────────────────────────────────────────────── */}
-        <div className="flex items-center justify-center gap-3">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedMonth(prevMonth(selectedMonth))}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <span className="font-semibold text-base min-w-[120px] text-center">{monthLabel(selectedMonth)}</span>
-          <Button
-            variant="ghost" size="icon" className="h-8 w-8"
-            onClick={() => setSelectedMonth(nextMonth(selectedMonth))}
-            disabled={isCurrentOrFuture}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+        {/* ── Period selector ──────────────────────────────────────────── */}
+        <div>
+          <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+            {(Object.keys(PRESET_LABELS) as PeriodPreset[]).map(p => (
+              <Button
+                key={p}
+                size="sm"
+                variant={preset === p ? 'default' : 'outline'}
+                className="shrink-0 h-8 text-xs px-3"
+                onClick={() => setPreset(p)}
+              >
+                {PRESET_LABELS[p]}
+              </Button>
+            ))}
+          </div>
+          {preset === 'custom' && (
+            <div className="flex gap-2 mt-2">
+              <div className="flex-1">
+                <Label className="text-xs text-muted-foreground">From</Label>
+                <Input type="month" className="mt-0.5 h-8 text-sm" value={customStart} onChange={e => setCustomStart(e.target.value)} />
+              </div>
+              <div className="flex-1">
+                <Label className="text-xs text-muted-foreground">To</Label>
+                <Input type="month" className="mt-0.5 h-8 text-sm" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+              </div>
+            </div>
+          )}
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            {range.start === range.end
+              ? monthLabel(range.start)
+              : `${monthLabel(range.start)} – ${monthLabel(range.end)}`}
+          </p>
         </div>
 
-        {/* ── A. Budget overview ───────────────────────────────────────────── */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold flex items-center justify-between">
-              <span className="flex items-center gap-1.5"><Target className="h-4 w-4" /> Monthly Budget</span>
-              {!editingBudget && (
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => {
-                  setBudgetDraft(String(monthlyBudget || ''))
-                  setEditingBudget(true)
-                }}>
-                  {monthlyBudget > 0 ? 'Edit' : 'Set Budget'}
-                </Button>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {editingBudget ? (
-              <div className="flex gap-2 items-end">
-                <div className="flex-1">
-                  <Label className="text-xs">Monthly Budget ($)</Label>
-                  <Input
-                    type="number"
-                    className="mt-1"
-                    value={budgetDraft}
-                    onChange={e => setBudgetDraft(e.target.value)}
-                    placeholder="e.g. 1500"
-                    autoFocus
-                  />
-                </div>
-                <Button size="sm" onClick={() => saveBudgetMutation.mutate(parseFloat(budgetDraft) || 0)} disabled={saveBudgetMutation.isPending}>
-                  Save
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => setEditingBudget(false)}>Cancel</Button>
-              </div>
-            ) : (
-              <>
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Spent</span>
-                  <span className="font-semibold">{fmt(totalSpend)}</span>
-                </div>
-                {monthlyBudget > 0 && (
-                  <>
-                    <div className="w-full bg-muted rounded-full h-2.5 overflow-hidden">
-                      <div
-                        className={`h-2.5 rounded-full transition-all ${isOver ? 'bg-destructive' : budgetPct > 80 ? 'bg-amber-500' : 'bg-primary'}`}
-                        style={{ width: `${budgetPct}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Budget: {fmt(monthlyBudget)}</span>
-                      <span className={isOver ? 'text-destructive font-semibold' : 'text-emerald-600 font-semibold'}>
-                        {isOver
-                          ? `Over by ${fmt(Math.abs(budgetDiff))}`
-                          : `Under by ${fmt(budgetDiff)}`}
-                      </span>
-                    </div>
-                  </>
-                )}
-                {monthlyBudget === 0 && (
-                  <p className="text-xs text-muted-foreground">No budget set for this month.</p>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* ── B. Spend by channel ──────────────────────────────────────────── */}
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
-              <DollarSign className="h-4 w-4" /> Spend by Channel
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {CHANNELS.map(ch => (
-              <div key={ch.id} className="flex items-center gap-2">
-                <span className="flex-1 text-sm truncate">{ch.label}</span>
-                <div className="relative w-28">
-                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground text-xs pointer-events-none">$</span>
-                  <Input
-                    type="number"
-                    className="pl-5 h-8 text-sm"
-                    placeholder="0"
-                    value={getDraftValue(ch.id)}
-                    onChange={e => setDraftAmounts(prev => ({ ...prev, [ch.id]: e.target.value }))}
-                    onBlur={() => handleBlurChannel(ch.id)}
-                    onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                    min="0"
-                    step="1"
-                  />
-                </div>
-              </div>
-            ))}
-            <div className="flex justify-between items-center pt-2 border-t mt-2">
-              <span className="text-sm font-semibold">Total</span>
-              <span className="text-sm font-bold">{fmt(totalSpend)}</span>
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* Section 1 — KPI Bar                                           */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Performance</h3>
+          {isLoading ? (
+            <div className="flex gap-3 overflow-x-auto pb-1">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <Skeleton key={i} className="shrink-0 w-[160px] h-[88px] rounded-xl" />
+              ))}
             </div>
-          </CardContent>
-        </Card>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:flex sm:overflow-x-auto sm:pb-1">
+              <KpiCard
+                title="Total Spend"
+                icon={<DollarSign className="h-3.5 w-3.5" />}
+                value={totalSpend}
+                prev={prevTotalSpend}
+                kind="currency"
+                lowerIsBetter
+              />
+              <KpiCard
+                title="Total Leads"
+                icon={<Users className="h-3.5 w-3.5" />}
+                value={totalLeads}
+                prev={prevTotalLeads}
+                kind="number"
+              />
+              <KpiCard
+                title="Closed Jobs"
+                icon={<Briefcase className="h-3.5 w-3.5" />}
+                value={closedCount}
+                prev={prevClosedCount}
+                kind="number"
+              />
+              <KpiCard
+                title="Revenue"
+                icon={<TrendingUp className="h-3.5 w-3.5" />}
+                value={revenue}
+                prev={prevRevenue}
+                kind="currency"
+              />
+              <KpiCard
+                title="Blended CPL"
+                icon={<Target className="h-3.5 w-3.5" />}
+                value={cpl}
+                prev={prevCpl}
+                kind="currency"
+                lowerIsBetter
+              />
+              <KpiCard
+                title="Blended CPA"
+                icon={<Target className="h-3.5 w-3.5" />}
+                value={cpa}
+                prev={prevCpa}
+                kind="currency"
+                lowerIsBetter
+              />
+              <KpiCard
+                title="Blended ROI"
+                icon={<BarChart2 className="h-3.5 w-3.5" />}
+                value={roi}
+                prev={prevRoi}
+                kind="percent"
+              />
+              <TextKpiCard
+                title="Best Channel"
+                icon={<Award className="h-3.5 w-3.5" />}
+                value={bestChannel}
+              />
+            </div>
+          )}
+        </section>
 
-        {/* ── Pie chart: spend ratio ────────────────────────────────────────── */}
-        {pieData.length > 0 && (
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* Section 2 — Channel Performance Table                         */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Channel Performance</h3>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold">Spend Breakdown</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={55}
-                    outerRadius={85}
-                    paddingAngle={2}
-                    dataKey="value"
-                  >
-                    {pieData.map((entry, i) => (
-                      <Cell key={entry.name} fill={entry.fill} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(v: any) => fmt(Number(v))} />
-                  <Legend
-                    iconSize={10}
-                    formatter={(value) => <span className="text-xs">{value}</span>}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* ── Month-over-month bar chart ────────────────────────────────────── */}
-        {historicalChartData.some(d => d.total > 0) && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold">Monthly Spend (Last 6 Months)</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ResponsiveContainer width="100%" height={160}>
-                <BarChart data={historicalChartData} margin={{ top: 0, right: 4, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="month" tick={{ fontSize: 10 }} />
-                  <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `$${(v/1000).toFixed(0)}k`} />
-                  <Tooltip formatter={(v: any) => fmt(Number(v))} />
-                  <Bar dataKey="total" fill="hsl(var(--primary))" radius={[3, 3, 0, 0]} name="Total Spend" />
-                </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* ── C. Lead source effectiveness ─────────────────────────────────── */}
-        {effectivenessData.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold">Lead Source Effectiveness</CardTitle>
-            </CardHeader>
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b">
-                      <th className="text-left px-4 py-2 font-medium text-muted-foreground">Channel</th>
-                      <th className="text-right px-3 py-2 font-medium text-muted-foreground">Leads</th>
-                      <th className="text-right px-3 py-2 font-medium text-muted-foreground">Spend</th>
-                      <th className="text-right px-3 py-2 font-medium text-muted-foreground">CPL</th>
-                      <th className="text-right px-3 py-2 font-medium text-muted-foreground">Quotes</th>
-                      <th className="text-right px-3 py-2 font-medium text-muted-foreground">Win%</th>
-                      <th className="text-right px-4 py-2 font-medium text-muted-foreground">Revenue</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {effectivenessData.map(row => (
-                      <tr key={row.id} className="border-b last:border-0 hover:bg-muted/30">
-                        <td className="px-4 py-2 font-medium">{row.label}</td>
-                        <td className="px-3 py-2 text-right">{row.leadsCount}</td>
-                        <td className="px-3 py-2 text-right">{row.spend > 0 ? fmt(row.spend) : '—'}</td>
-                        <td className="px-3 py-2 text-right">{row.cpl != null ? fmt(row.cpl) : '—'}</td>
-                        <td className="px-3 py-2 text-right">{row.quotesSent}</td>
-                        <td className="px-3 py-2 text-right">
-                          {row.winRate != null ? (
-                            <span className={row.winRate >= 50 ? 'text-emerald-600' : row.winRate >= 25 ? 'text-amber-600' : 'text-destructive'}>
-                              {row.winRate}%
-                            </span>
-                          ) : '—'}
-                        </td>
-                        <td className="px-4 py-2 text-right font-medium">{row.estRevenue > 0 ? fmt(row.estRevenue) : '—'}</td>
+              {isLoading ? (
+                <div className="p-4 space-y-2">
+                  {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full rounded-lg" />)}
+                </div>
+              ) : sortedChannelRows.length === 0 ? (
+                <div className="py-12 text-center text-muted-foreground">
+                  <Megaphone className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm font-medium">No channel activity yet</p>
+                  <p className="text-xs mt-1">Add spend entries or tag leads with a source to see data here</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b">
+                        {/* Channel name — left aligned */}
+                        <th
+                          className="px-3 py-2.5 text-left text-[11px] font-medium text-muted-foreground cursor-pointer select-none whitespace-nowrap hover:text-foreground"
+                          onClick={() => handleSort('name')}
+                        >
+                          <span className="inline-flex items-center gap-0.5">
+                            Channel
+                            {sortCol === 'name'
+                              ? (sortDir === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)
+                              : <ChevronDown className="h-3 w-3 opacity-30" />}
+                          </span>
+                        </th>
+                        <SortTh col="spend"      label="Spend"    active={sortCol==='spend'}      dir={sortDir} onSort={handleSort} />
+                        <SortTh col="leads"      label="Leads"    active={sortCol==='leads'}      dir={sortDir} onSort={handleSort} />
+                        <SortTh col="views"      label="Views"    active={sortCol==='views'}      dir={sortDir} onSort={handleSort} />
+                        <SortTh col="convRate"   label="Conv%"    active={sortCol==='convRate'}   dir={sortDir} onSort={handleSort} />
+                        <SortTh col="closedJobs" label="Closed"   active={sortCol==='closedJobs'} dir={sortDir} onSort={handleSort} />
+                        <SortTh col="closeRate"  label="Close%"   active={sortCol==='closeRate'}  dir={sortDir} onSort={handleSort} />
+                        <SortTh col="revenue"    label="Revenue"  active={sortCol==='revenue'}    dir={sortDir} onSort={handleSort} />
+                        <SortTh col="cpl"        label="CPL"      active={sortCol==='cpl'}        dir={sortDir} onSort={handleSort} />
+                        <SortTh col="cpa"        label="CPA"      active={sortCol==='cpa'}        dir={sortDir} onSort={handleSort} />
+                        <SortTh col="roi"        label="ROI"      active={sortCol==='roi'}        dir={sortDir} onSort={handleSort} />
+                        <th className="px-3 py-2.5 text-right text-[11px] font-medium text-muted-foreground whitespace-nowrap">6M Leads</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {sortedChannelRows.map(({ ch, spend, leadsCount, views, convRate, closedJobs, closeRate, chRevenue, chCpl, chCpa, chRoi, sparkline }) => (
+                        <tr
+                          key={ch.id}
+                          className="border-b last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
+                          onClick={e => {
+                            // Don't open detail if clicking spend cell button
+                            if ((e.target as HTMLElement).closest('[data-spend-cell]')) return
+                            setDetailChannel(ch)
+                          }}
+                        >
+                          {/* Channel name + type badge */}
+                          <td className="px-3 py-2.5 min-w-[140px]">
+                            <div className="font-medium leading-tight">{ch.name}</div>
+                            <Badge variant="outline" className={`mt-0.5 text-[10px] px-1 py-0 h-4 ${TYPE_BADGE[ch.type] ?? TYPE_BADGE.other}`}>
+                              {ch.type}
+                            </Badge>
+                          </td>
+                          {/* Spend — click to edit */}
+                          <td className="px-3 py-2.5 text-right" data-spend-cell="">
+                            <button
+                              className="font-medium hover:text-primary hover:underline transition-colors"
+                              onClick={e => {
+                                e.stopPropagation()
+                                setSpendChannelPreset(ch.id)
+                                setEditSpend(undefined)
+                                setShowAddSpend(true)
+                              }}
+                            >
+                              {spend > 0 ? fmtCurrency(spend) : <span className="text-muted-foreground/60">+ add</span>}
+                            </button>
+                          </td>
+                          <td className="px-3 py-2.5 text-right">{leadsCount || '—'}</td>
+                          <td className="px-3 py-2.5 text-right">{views || '—'}</td>
+                          <td className="px-3 py-2.5 text-right">
+                            {convRate !== null ? `${convRate.toFixed(1)}%` : '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-right">{closedJobs || '—'}</td>
+                          <td className="px-3 py-2.5 text-right">
+                            {closeRate !== null ? (
+                              <span className={closeRate >= 50 ? 'text-emerald-600' : closeRate >= 25 ? 'text-amber-600' : 'text-red-500'}>
+                                {closeRate.toFixed(0)}%
+                              </span>
+                            ) : '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-medium">
+                            {chRevenue > 0 ? fmtCurrency(chRevenue) : '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            {chCpl !== null ? fmtCurrency(chCpl) : '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            {chCpa !== null ? fmtCurrency(chCpa) : '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            {chRoi !== null ? (
+                              <span className={chRoi >= 0 ? 'text-emerald-600' : 'text-red-500'}>
+                                {fmtPct(chRoi)}
+                              </span>
+                            ) : '—'}
+                          </td>
+                          <td className="px-3 py-2.5 text-right">
+                            <div className="flex justify-end">
+                              <SparklineChart data={sparkline} />
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </CardContent>
           </Card>
-        )}
+        </section>
 
-        {/* ── D. ROI tracker ───────────────────────────────────────────────── */}
-        {roiData.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
-                <TrendingUp className="h-4 w-4" /> ROI Tracker
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {roiData.map(row => {
-                const roiDisplay = row.roi >= 100 ? '∞' : `${row.roi.toFixed(1)}×`
-                const isGreen  = row.roi >= 3
-                const isYellow = row.roi >= 1 && row.roi < 3
-                return (
-                  <div key={row.id} className="flex items-center gap-2">
-                    <span className="flex-1 text-sm truncate">{row.label}</span>
-                    <span className="text-xs text-muted-foreground">{fmt(row.estRevenue)} / {fmt(row.spend)}</span>
-                    <Badge
-                      className={`text-xs font-bold min-w-[48px] justify-center ${
-                        isGreen  ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
-                        isYellow ? 'bg-amber-100 text-amber-800 border-amber-300' :
-                                   'bg-red-100 text-red-800 border-red-300'
-                      }`}
-                      variant="outline"
-                    >
-                      {isGreen ? <TrendingUp className="h-3 w-3 mr-0.5" /> : <TrendingDown className="h-3 w-3 mr-0.5" />}
-                      {roiDisplay}
-                    </Badge>
-                  </div>
-                )
-              })}
-              <p className="text-[10px] text-muted-foreground pt-1">
-                Green ≥3× · Yellow 1–3× · Red &lt;1× return on spend
-              </p>
-            </CardContent>
-          </Card>
-        )}
-
-        {effectivenessData.length === 0 && roiData.length === 0 && (
-          <div className="text-center py-8 text-muted-foreground text-sm">
-            <Megaphone className="h-8 w-8 mx-auto mb-2 opacity-30" />
-            <p>Enter spend above and tag leads with their source</p>
-            <p className="text-xs mt-1">Effectiveness data will appear once leads are linked to channels</p>
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* Section 3 — Spend Log                                         */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        <section>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Spend Log</h3>
+            <div className="flex gap-1.5">
+              <Button size="sm" variant="outline" className="h-7 text-xs gap-1 px-2" onClick={exportCSV} disabled={sortedSpendLog.length === 0}>
+                <Download className="h-3.5 w-3.5" /> CSV
+              </Button>
+              <Button size="sm" className="h-7 text-xs gap-1 px-2" onClick={() => { setEditSpend(undefined); setSpendChannelPreset(undefined); setShowAddSpend(true) }}>
+                <Plus className="h-3.5 w-3.5" /> Add Spend
+              </Button>
+            </div>
           </div>
-        )}
+
+          <Card>
+            <CardContent className="p-0">
+              {isLoading ? (
+                <div className="p-4 space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-10 w-full rounded-lg" />)}
+                </div>
+              ) : sortedSpendLog.length === 0 ? (
+                <div className="py-10 text-center text-muted-foreground">
+                  <DollarSign className="h-7 w-7 mx-auto mb-2 opacity-30" />
+                  <p className="text-sm">No spend recorded for this period</p>
+                  <Button
+                    size="sm" variant="outline" className="mt-3 h-7 text-xs gap-1"
+                    onClick={() => { setEditSpend(undefined); setSpendChannelPreset(undefined); setShowAddSpend(true) }}
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add your first entry
+                  </Button>
+                </div>
+              ) : (
+                <div>
+                  {spendMonths.map(month => {
+                    const monthEntries = sortedSpendLog.filter(e => e.month === month)
+                    const subtotal = monthEntries.reduce((s, e) => s + e.amount, 0)
+                    const channelMap = Object.fromEntries(channels.map(c => [c.id, c.name]))
+
+                    return (
+                      <div key={month}>
+                        {/* Month header */}
+                        <div className="flex items-center justify-between px-4 py-2 bg-muted/40 border-b">
+                          <span className="text-xs font-semibold">{monthLabel(month)}</span>
+                          <span className="text-xs font-bold tabular-nums">{fmtCurrency(subtotal)}</span>
+                        </div>
+                        {/* Entries */}
+                        {monthEntries.map(entry => (
+                          <div
+                            key={entry.id}
+                            className="flex items-center gap-2 px-4 py-3 border-b last:border-0 hover:bg-muted/20 group transition-colors"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="text-sm font-medium truncate">
+                                {channelMap[entry.channelId] ?? '—'}
+                              </div>
+                              {entry.notes && (
+                                <div className="text-xs text-muted-foreground truncate mt-0.5">{entry.notes}</div>
+                              )}
+                            </div>
+                            <span className="text-sm font-semibold tabular-nums shrink-0">{fmtCurrency(entry.amount)}</span>
+                            <div className="flex gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7"
+                                onClick={() => { setEditSpend(entry); setSpendChannelPreset(undefined); setShowAddSpend(true) }}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-destructive hover:text-destructive"
+                                onClick={() => setDeleteId(entry.id)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </section>
 
       </div>
+
+      {/* ── Spend Entry Sheet ────────────────────────────────────────────── */}
+      <SpendEntrySheet
+        open={showAddSpend}
+        onClose={() => { setShowAddSpend(false); setEditSpend(undefined); setSpendChannelPreset(undefined) }}
+        channels={channels}
+        initialChannelId={spendChannelPreset}
+        initialMonth={range.end}
+        editEntry={editSpend}
+      />
+
+      {/* ── Channel Detail Sheet ─────────────────────────────────────────── */}
+      <ChannelDetailSheet
+        channel={detailChannel}
+        onClose={() => setDetailChannel(null)}
+      />
+
+      {/* ── Delete confirmation ──────────────────────────────────────────── */}
+      {deleteId && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-4">
+          <Card className="w-full max-w-sm">
+            <CardHeader>
+              <CardTitle className="text-base">Delete spend entry?</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">This cannot be undone.</p>
+              <div className="flex gap-2 mt-4">
+                <Button variant="outline" className="flex-1" onClick={() => setDeleteId(null)}>Cancel</Button>
+                <Button
+                  variant="destructive"
+                  className="flex-1"
+                  disabled={deleteMutation.isPending}
+                  onClick={() => deleteMutation.mutate(deleteId)}
+                >
+                  {deleteMutation.isPending ? 'Deleting…' : 'Delete'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
     </div>
   )
 }
