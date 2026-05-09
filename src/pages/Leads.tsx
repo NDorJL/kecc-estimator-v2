@@ -755,7 +755,10 @@ function QuoteDetailPanel({ quote }: { quote: Quote }) {
         <div className="px-3 pb-3 space-y-1.5">
           <div className="flex items-center gap-2 mb-2">
             <div className="h-px flex-1 bg-border/50" />
-            <span className="text-[10px] text-violet-600 font-semibold uppercase tracking-wide">Scope Options</span>
+            {/* ← CHANGED: label reflects signing state */}
+            <span className="text-[10px] text-violet-600 font-semibold uppercase tracking-wide">
+              {quote.signedAt && quote.selectedOptionGroupIds ? 'Customer Selections' : 'Scope Options'}
+            </span>
             <div className="h-px flex-1 bg-border/50" />
           </div>
           {quote.optionGroups.filter(g => !g.isAddon).map(g => {
@@ -1193,40 +1196,11 @@ function LeadDetailSheet({
         return d
       }, 0)
 
-      // Save amendments to original quote
+      // Save amendments to original quote.
+      // The quotes.ts PATCH handler now auto-generates/updates the revision quote
+      // server-side when amendments are present on a signed quote — no second
+      // API call needed here. (Duplicate revision creation removed — Flag #1.)
       await apiRequest('PATCH', `/quotes/${effectiveQuote.id}`, { amendments: updatedAmendments, total: newTotal })
-
-      // Build clean revised line items with amendments baked in
-      const revisedItems = buildRevisedLineItems(effectiveQuote, updatedAmendments)
-      const revisedPayload = {
-        customerName:    effectiveQuote.customerName,
-        customerAddress: effectiveQuote.customerAddress,
-        customerPhone:   effectiveQuote.customerPhone,
-        customerEmail:   effectiveQuote.customerEmail,
-        businessName:    effectiveQuote.businessName,
-        quoteType:       effectiveQuote.quoteType,
-        lineItems:       revisedItems,
-        subtotal:        newTotal,
-        discount:        null,
-        total:           newTotal,
-        notes:           effectiveQuote.notes,
-        status:          'draft',
-        contactId:       effectiveQuote.contactId,
-        leadId:          lead?.id,
-        revisedFromId:   effectiveQuote.id,
-      }
-
-      // Update existing revision if one exists, otherwise create new
-      const existingRevision = allLeadQuotes.find(q => q.revisedFromId === effectiveQuote.id)
-      if (existingRevision) {
-        await apiRequest('PATCH', `/quotes/${existingRevision.id}`, {
-          lineItems: revisedItems,
-          subtotal: newTotal,
-          total: newTotal,
-        })
-      } else {
-        await apiRequest('POST', '/quotes', revisedPayload)
-      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
@@ -1441,6 +1415,8 @@ function LeadDetailSheet({
                     const summary = servicesSummary(q.lineItems)
                     const isRevision = !!q.revisedFromId
                     const isCurrent = isRevision  // revisions are always the "current" version
+                    // ← NEW: flag the original when a revision exists in this lead's quotes
+                    const hasRevision = !isRevision && allLeadQuotes.some(other => other.revisedFromId === q.id)
                     return (
                       <div key={q.id} className={`rounded-xl border overflow-hidden ${isCurrent ? 'border-green-500/50' : isPrimary ? 'border-primary/40' : ''}`}>
                         {/* Quote row header */}
@@ -1452,7 +1428,13 @@ function LeadDetailSheet({
                                   Current
                                 </span>
                               )}
-                              {isPrimary && !isCurrent && (
+                              {/* ← NEW: "Original" badge replaces "Primary" when a revision exists */}
+                              {hasRevision && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
+                                  Original
+                                </span>
+                              )}
+                              {isPrimary && !isCurrent && !hasRevision && (
                                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground">
                                   Primary
                                 </span>
