@@ -19,6 +19,7 @@ import type { Quote, Subscription, Lead, Job, Contact } from '@/types'
 import {
   Lock, AlertTriangle, Upload, Plus, Pencil, Trash2,
   Check, X, RefreshCw, Download, TrendingUp, TrendingDown, Settings2,
+  BarChart2,   // ← NEW: for Send Monthly Report button
 } from 'lucide-react'
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3185,7 +3186,35 @@ export default function Finance() {
   const [period, setPeriod] = useState<Period>(getInitialPeriod)
   const [showClearDialog, setShowClearDialog] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [showReportDialog, setShowReportDialog] = useState(false)   // ← NEW
+  const [sendingReport, setSendingReport] = useState(false)          // ← NEW
   const { toast } = useToast()
+
+  // ── Send monthly KPI report (NEW) ──────────────────────────────────────────
+  async function handleSendMonthlyReport() {                          // ← NEW
+    setSendingReport(true)                                            // ← NEW
+    setShowReportDialog(false)                                        // ← NEW
+    try {                                                             // ← NEW
+      const res = await fetch('/.netlify/functions/monthly-report', {  // ← NEW
+        method: 'POST',                                               // ← NEW
+        headers: { 'Content-Type': 'application/json' },             // ← NEW
+        body: JSON.stringify({}),                                     // ← NEW
+      })                                                              // ← NEW
+      const data = await res.json() as { message?: string }          // ← NEW
+      if (res.status === 409) {                                       // ← NEW
+        // Already sent for this period                               // ← NEW
+        toast({ title: 'Already sent', description: data.message })  // ← NEW
+      } else if (!res.ok) {                                          // ← NEW
+        throw new Error(data.message ?? `HTTP ${res.status}`)        // ← NEW
+      } else {                                                        // ← NEW
+        toast({ title: 'Monthly report sent to your phone 📊' })     // ← NEW
+      }                                                               // ← NEW
+    } catch (e) {                                                     // ← NEW
+      toast({ title: 'Report failed', description: String(e), variant: 'destructive' }) // ← NEW
+    } finally {                                                       // ← NEW
+      setSendingReport(false)                                         // ← NEW
+    }                                                                 // ← NEW
+  }                                                                   // ← NEW
 
   const { data: transactions = [], refetch: refetchTx } = useQuery<Transaction[]>({
     queryKey: ['finance-transactions'],
@@ -3227,6 +3256,18 @@ export default function Finance() {
             <p className="text-xs text-muted-foreground">{transactions.length} transaction{transactions.length !== 1 ? 's' : ''}</p>
           </div>
           <div className="flex items-center gap-1">
+            {/* ← NEW: Send Monthly Report button */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs gap-1.5 text-muted-foreground"
+              title="Send monthly KPI report SMS"
+              disabled={sendingReport}
+              onClick={() => setShowReportDialog(true)}
+            >
+              <BarChart2 className="h-3.5 w-3.5" />
+              {sendingReport ? 'Sending…' : 'Monthly Report'}
+            </Button>
             <Button variant="ghost" size="icon" className="h-8 w-8" title="Clear all data" onClick={() => setShowClearDialog(true)}>
               <Settings2 className="h-4 w-4" />
             </Button>
@@ -3255,6 +3296,35 @@ export default function Finance() {
             <Button variant="destructive" onClick={handleClearAll} disabled={clearing}>
               <Trash2 className="h-4 w-4 mr-1.5" />
               {clearing ? 'Clearing…' : 'Delete Everything'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Send Monthly Report confirmation dialog (NEW) */}
+      <Dialog open={showReportDialog} onOpenChange={setShowReportDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BarChart2 className="h-5 w-5" /> Send Monthly KPI Report
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <p className="text-sm text-muted-foreground">
+              This will generate and send the monthly KPI report SMS to your phone.
+            </p>
+            <p className="text-sm font-medium">
+              Make sure you've finished uploading all transactions for the period before continuing.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              The report covers the <strong>prior calendar month</strong>. If a report has already been sent for that period, you'll be notified.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowReportDialog(false)}>Cancel</Button>
+            <Button onClick={handleSendMonthlyReport} disabled={sendingReport}>
+              <BarChart2 className="h-4 w-4 mr-1.5" />
+              Send Report
             </Button>
           </DialogFooter>
         </DialogContent>
