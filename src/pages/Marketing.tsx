@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { LineChart, Line, ResponsiveContainer } from 'recharts'
+import QRCode from 'qrcode'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,7 +17,7 @@ import type { MarketingChannel, MarketingSpend, Campaign, CampaignEvent, Lead, Q
 import {
   TrendingUp, TrendingDown, Minus, DollarSign, Users, Briefcase,
   Target, ChevronUp, ChevronDown, Plus, Pencil, Trash2, Download, Megaphone,
-  Award, BarChart2,
+  Award, BarChart2, Pause, Play, Archive, Copy, QrCode,
 } from 'lucide-react'
 
 // ── Period types ─────────────────────────────────────────────────────────────
@@ -87,6 +88,10 @@ function fmtCurrency(n: number): string {
 }
 function fmtPct(n: number): string { return `${n >= 0 ? '+' : ''}${n.toFixed(1)}%` }
 function fmtNum(n: number): string { return n.toLocaleString() }
+
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+}
 
 // ── KpiCard ───────────────────────────────────────────────────────────────────
 
@@ -445,6 +450,495 @@ function ChannelDetailSheet({
   )
 }
 
+// ── Campaign status badges ────────────────────────────────────────────────────
+
+const CAM_STATUS_BADGE: Record<string, string> = {
+  active: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+  paused: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
+  ended:  'bg-muted text-muted-foreground border-border',
+}
+
+// ── CampaignCard ──────────────────────────────────────────────────────────────
+
+interface CampaignMetrics {
+  views: number; leads: number; closed: number
+  spend: number; revenue: number; revenueIsEst: boolean
+  cpl: number | null; cpa: number | null; roi: number | null
+}
+
+function CampaignCard({
+  campaign, channel, metrics, onEdit, onStatusToggle, onArchive,
+}: {
+  campaign: Campaign
+  channel: MarketingChannel | undefined
+  metrics: CampaignMetrics
+  onEdit: () => void
+  onStatusToggle: () => void
+  onArchive: () => void
+}) {
+  const { toast } = useToast()
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  const [qrLoading, setQrLoading] = useState(false)
+
+  // Generate QR for QR-type campaigns
+  useEffect(() => {
+    if (campaign.campaignType !== 'qr' || !campaign.redirectToken) return
+    setQrLoading(true)
+    const url = `${window.location.origin}/.netlify/functions/track?c=${campaign.redirectToken}`
+    QRCode.toDataURL(url, { width: 240, margin: 2, color: { dark: '#000000', light: '#ffffff' } })
+      .then(d => { setQrDataUrl(d); setQrLoading(false) })
+      .catch(() => setQrLoading(false))
+  }, [campaign.campaignType, campaign.redirectToken])
+
+  function downloadQr() {
+    if (!qrDataUrl) return
+    const a = document.createElement('a')
+    a.href = qrDataUrl
+    a.download = `${campaign.name.replace(/\s+/g, '-').toLowerCase()}-qr.png`
+    a.click()
+  }
+
+  const convViewsLeads  = metrics.views > 0  ? `${(metrics.leads  / metrics.views  * 100).toFixed(0)}%` : null
+  const convLeadsClosed = metrics.leads > 0  ? `${(metrics.closed / metrics.leads  * 100).toFixed(0)}%` : null
+
+  const budgetPct    = campaign.budget && campaign.budget > 0 ? Math.min((metrics.spend / campaign.budget) * 100, 100) : null
+  const isOverBudget = !!(campaign.budget && metrics.spend > campaign.budget)
+
+  function copyText(text: string) {
+    navigator.clipboard.writeText(text).then(() => toast({ title: 'Copied!' })).catch(() => {})
+  }
+
+  return (
+    <Card className="flex flex-col">
+      <CardContent className="p-4 flex flex-col gap-3">
+
+        {/* ── Header ───────────────────────────────────────────────── */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h4 className="font-semibold text-sm leading-tight truncate">{campaign.name}</h4>
+            <div className="flex flex-wrap gap-1 mt-1">
+              {channel && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">{channel.name}</Badge>
+              )}
+              <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-4 ${CAM_STATUS_BADGE[campaign.status] ?? CAM_STATUS_BADGE.ended}`}>
+                {campaign.status}
+              </Badge>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 capitalize">{campaign.campaignType}</Badge>
+            </div>
+            {(campaign.startDate || campaign.endDate) && (
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {campaign.startDate ?? '?'} – {campaign.endDate ?? 'ongoing'}
+              </p>
+            )}
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex gap-0.5 shrink-0">
+            {campaign.status !== 'ended' && (
+              <Button size="icon" variant="ghost" className="h-7 w-7"
+                title={campaign.status === 'active' ? 'Pause' : 'Resume'}
+                onClick={onStatusToggle}>
+                {campaign.status === 'active'
+                  ? <Pause className="h-3.5 w-3.5" />
+                  : <Play  className="h-3.5 w-3.5" />}
+              </Button>
+            )}
+            <Button size="icon" variant="ghost" className="h-7 w-7" title="Edit" onClick={onEdit}>
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            {campaign.status !== 'ended' && (
+              <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                title="Archive (mark ended)" onClick={onArchive}>
+                <Archive className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* ── Budget progress ───────────────────────────────────────── */}
+        {campaign.budget && campaign.budget > 0 ? (
+          <div>
+            <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
+              <span>Spend: {fmtCurrency(metrics.spend)}</span>
+              <span className={isOverBudget ? 'text-destructive font-semibold' : ''}>Budget: {fmtCurrency(campaign.budget)}</span>
+            </div>
+            <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+              <div
+                className={`h-1.5 rounded-full transition-all ${isOverBudget ? 'bg-destructive' : (budgetPct ?? 0) > 80 ? 'bg-amber-500' : 'bg-primary'}`}
+                style={{ width: `${budgetPct ?? 0}%` }}
+              />
+            </div>
+          </div>
+        ) : metrics.spend > 0 ? (
+          <p className="text-[11px] text-muted-foreground">Spend: {fmtCurrency(metrics.spend)} (no budget set)</p>
+        ) : null}
+
+        {/* ── Funnel: Views → Leads → Closed ───────────────────────── */}
+        <div className="grid grid-cols-5 items-center gap-1 text-center">
+          <div className="col-span-1 bg-muted/40 rounded-lg py-2">
+            <div className="text-sm font-bold">{metrics.views}</div>
+            <div className="text-[10px] text-muted-foreground">Views</div>
+          </div>
+          <div className="col-span-1 text-[10px] text-muted-foreground font-medium">
+            {convViewsLeads ?? '→'}
+          </div>
+          <div className="col-span-1 bg-muted/40 rounded-lg py-2">
+            <div className="text-sm font-bold">{metrics.leads}</div>
+            <div className="text-[10px] text-muted-foreground">Leads</div>
+          </div>
+          <div className="col-span-1 text-[10px] text-muted-foreground font-medium">
+            {convLeadsClosed ?? '→'}
+          </div>
+          <div className="col-span-1 bg-muted/40 rounded-lg py-2">
+            <div className="text-sm font-bold">{metrics.closed}</div>
+            <div className="text-[10px] text-muted-foreground">Closed</div>
+          </div>
+        </div>
+
+        {/* ── CPL / CPA / ROI ──────────────────────────────────────── */}
+        <div className="grid grid-cols-3 gap-1 text-center border border-border/40 rounded-lg p-2">
+          <div>
+            <div className="text-xs font-semibold tabular-nums">
+              {metrics.cpl != null ? fmtCurrency(metrics.cpl) : '—'}
+            </div>
+            <div className="text-[10px] text-muted-foreground">CPL</div>
+          </div>
+          <div>
+            <div className="text-xs font-semibold tabular-nums">
+              {metrics.cpa != null ? fmtCurrency(metrics.cpa) : '—'}
+            </div>
+            <div className="text-[10px] text-muted-foreground">CPA</div>
+          </div>
+          <div>
+            <div className={`text-xs font-semibold tabular-nums ${metrics.roi != null ? (metrics.roi >= 0 ? 'text-emerald-600' : 'text-red-500') : ''}`}>
+              {metrics.roi != null ? fmtPct(metrics.roi) : '—'}
+            </div>
+            <div className="text-[10px] text-muted-foreground">ROI</div>
+          </div>
+        </div>
+
+        {/* ── QR Code ──────────────────────────────────────────────── */}
+        {campaign.campaignType === 'qr' && (
+          <div className="border border-border/60 rounded-lg p-3 flex flex-col items-center gap-2">
+            <p className="text-[10px] text-muted-foreground self-start">QR Code → {campaign.destinationUrl ?? 'no destination set'}</p>
+            {qrLoading ? (
+              <Skeleton className="w-[120px] h-[120px] rounded" />
+            ) : qrDataUrl ? (
+              <>
+                <img src={qrDataUrl} alt="QR code" className="w-[120px] h-[120px] rounded border border-border/40" />
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1 w-full" onClick={downloadQr}>
+                  <Download className="h-3.5 w-3.5" /> Download QR PNG
+                </Button>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground py-2">QR unavailable</p>
+            )}
+          </div>
+        )}
+
+        {/* ── Referral code ─────────────────────────────────────────── */}
+        {campaign.campaignType === 'referral' && campaign.utmCampaign && (
+          <div className="border border-border/60 rounded-lg p-3">
+            <p className="text-[10px] text-muted-foreground mb-1.5">Referral Code</p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 text-sm font-mono font-bold bg-muted px-2 py-1 rounded truncate">
+                {campaign.utmCampaign}
+              </code>
+              <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0"
+                onClick={() => copyText(campaign.utmCampaign ?? '')}>
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Digital UTM URL ───────────────────────────────────────── */}
+        {campaign.campaignType === 'digital' && campaign.destinationUrl && (
+          <div className="border border-border/60 rounded-lg p-3">
+            <p className="text-[10px] text-muted-foreground mb-1.5">Campaign URL</p>
+            <div className="flex items-center gap-2">
+              <span className="flex-1 text-[10px] font-mono text-muted-foreground truncate">{campaign.destinationUrl}</span>
+              <Button size="icon" variant="ghost" className="h-7 w-7 shrink-0"
+                onClick={() => copyText(campaign.destinationUrl ?? '')}>
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+      </CardContent>
+    </Card>
+  )
+}
+
+// ── CampaignSheet ─────────────────────────────────────────────────────────────
+
+function CampaignSheet({
+  open, onClose, channels, editCampaign,
+}: {
+  open: boolean
+  onClose: () => void
+  channels: MarketingChannel[]
+  editCampaign: Campaign | null
+}) {
+  const qc = useQueryClient()
+  const { toast } = useToast()
+
+  const [name,           setName]           = useState('')
+  const [channelId,      setChannelId]      = useState('')
+  const [campaignType,   setCampaignType]   = useState<Campaign['campaignType']>('digital')
+  const [startDate,      setStartDate]      = useState('')
+  const [endDate,        setEndDate]        = useState('')
+  const [budget,         setBudget]         = useState('')
+  // Digital
+  const [destinationUrl, setDestinationUrl] = useState('')
+  const [utmMedium,      setUtmMedium]      = useState('paid')
+  const [utmCampaignSlug,setUtmCampaignSlug]= useState('')
+  const slugDirty = useRef(false)
+  // Referral
+  const [referralCode,   setReferralCode]   = useState('')
+
+  // Reset form when sheet opens
+  useEffect(() => {
+    if (!open) return
+    slugDirty.current = false
+    if (editCampaign) {
+      setName(editCampaign.name)
+      setChannelId(editCampaign.channelId)
+      setCampaignType(editCampaign.campaignType)
+      setStartDate(editCampaign.startDate ?? '')
+      setEndDate(editCampaign.endDate ?? '')
+      setBudget(editCampaign.budget != null ? String(editCampaign.budget) : '')
+      setDestinationUrl(editCampaign.destinationUrl ?? '')
+      setUtmMedium(editCampaign.utmMedium ?? 'paid')
+      setUtmCampaignSlug(editCampaign.utmCampaign ?? '')
+      setReferralCode(editCampaign.utmCampaign ?? '')
+      slugDirty.current = true  // don't auto-overwrite on edit
+    } else {
+      setName(''); setChannelId(''); setCampaignType('digital')
+      setStartDate(new Date().toISOString().slice(0, 10)); setEndDate('')
+      setBudget(''); setDestinationUrl(''); setUtmMedium('paid')
+      setUtmCampaignSlug(''); setReferralCode('')
+    }
+  }, [open, editCampaign])
+
+  // Auto-slugify name → utm_campaign (unless user has manually edited the field)
+  useEffect(() => {
+    if (!slugDirty.current) setUtmCampaignSlug(slugify(name))
+  }, [name])
+
+  // Auto-generate referral code when channel selected on new campaigns
+  useEffect(() => {
+    if (editCampaign || campaignType !== 'referral' || !channelId) return
+    const ch = channels.find(c => c.id === channelId)
+    if (!ch) return
+    const chPart = ch.name.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 8)
+    const rand   = Math.random().toString(36).slice(2, 6).toUpperCase()
+    setReferralCode(`REF-${chPart}-${rand}`)
+  }, [channelId, campaignType, editCampaign, channels])
+
+  const selectedChannel = channels.find(c => c.id === channelId)
+  const utmSource = selectedChannel ? slugify(selectedChannel.name) : ''
+
+  const generatedUtmUrl = useMemo(() => {
+    if (!destinationUrl) return ''
+    const p = new URLSearchParams()
+    if (utmSource)       p.set('utm_source',   utmSource)
+    if (utmMedium)       p.set('utm_medium',    utmMedium)
+    if (utmCampaignSlug) p.set('utm_campaign',  utmCampaignSlug)
+    return `${destinationUrl}?${p.toString()}`
+  }, [destinationUrl, utmSource, utmMedium, utmCampaignSlug])
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const base = {
+        name, channelId, campaignType,
+        startDate: startDate || null,
+        endDate:   endDate   || null,
+        budget:    budget    ? parseFloat(budget) : null,
+        status:    editCampaign?.status ?? 'active',
+      }
+      let extra: Record<string, unknown> = {}
+      if (campaignType === 'digital') {
+        extra = {
+          destinationUrl: generatedUtmUrl || destinationUrl || null,
+          utmSource,
+          utmMedium,
+          utmCampaign: utmCampaignSlug || null,
+        }
+      } else if (campaignType === 'qr') {
+        extra = { destinationUrl: destinationUrl || null }
+      } else {
+        extra = { utmCampaign: referralCode || null }
+      }
+      const payload = { ...base, ...extra }
+      return editCampaign
+        ? apiRequest('PATCH', `/campaigns/${editCampaign.id}`, payload)
+        : apiRequest('POST',  '/campaigns', payload)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/campaigns'] })
+      toast({ title: editCampaign ? 'Campaign updated' : 'Campaign created' })
+      onClose()
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  const isValid = !!(name.trim() && channelId && campaignType)
+
+  return (
+    <Sheet open={open} onOpenChange={o => { if (!o) onClose() }}>
+      <SheetContent side="bottom" className="rounded-t-2xl max-h-[92dvh] overflow-y-auto pb-safe">
+        <SheetHeader className="mb-4">
+          <SheetTitle>{editCampaign ? 'Edit Campaign' : 'New Campaign'}</SheetTitle>
+        </SheetHeader>
+
+        <div className="space-y-4">
+          {/* Name */}
+          <div>
+            <Label className="text-xs">Campaign Name</Label>
+            <Input className="mt-1" placeholder="e.g. Spring Door Hanger Run" value={name} onChange={e => setName(e.target.value)} />
+          </div>
+
+          {/* Channel */}
+          <div>
+            <Label className="text-xs">Channel</Label>
+            <Select value={channelId} onValueChange={setChannelId}>
+              <SelectTrigger className="mt-1"><SelectValue placeholder="Select channel…" /></SelectTrigger>
+              <SelectContent>
+                {channels.map(ch => <SelectItem key={ch.id} value={ch.id}>{ch.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Campaign type */}
+          <div>
+            <Label className="text-xs">Campaign Type</Label>
+            <div className="flex gap-1.5 mt-1">
+              {(['digital', 'qr', 'referral'] as Campaign['campaignType'][]).map(t => (
+                <button
+                  key={t}
+                  onClick={() => setCampaignType(t)}
+                  className={`flex-1 rounded-lg border py-2 text-xs font-medium transition-colors capitalize ${
+                    campaignType === t
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-transparent border-border text-muted-foreground hover:border-foreground'
+                  }`}
+                >
+                  {t === 'qr' ? 'QR Code' : t}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Dates + Budget */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Start Date</Label>
+              <Input type="date" className="mt-1" value={startDate} onChange={e => setStartDate(e.target.value)} />
+            </div>
+            <div>
+              <Label className="text-xs">End Date</Label>
+              <Input type="date" className="mt-1" value={endDate} onChange={e => setEndDate(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Budget ($)</Label>
+            <Input type="number" min="0" className="mt-1" placeholder="0" value={budget} onChange={e => setBudget(e.target.value)} />
+          </div>
+
+          {/* ── Type-specific fields ──────────────────────────────── */}
+
+          {campaignType === 'digital' && (
+            <div className="space-y-3 rounded-lg border border-border/60 p-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">UTM Builder</p>
+
+              <div>
+                <Label className="text-xs">Destination URL</Label>
+                <Input className="mt-1 text-sm" placeholder="https://yoursite.com/landing" value={destinationUrl} onChange={e => setDestinationUrl(e.target.value)} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">utm_source <span className="text-muted-foreground">(auto)</span></Label>
+                  <Input className="mt-1 text-sm bg-muted/40" readOnly value={utmSource} />
+                </div>
+                <div>
+                  <Label className="text-xs">utm_medium</Label>
+                  <Select value={utmMedium} onValueChange={setUtmMedium}>
+                    <SelectTrigger className="mt-1 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="paid">paid</SelectItem>
+                      <SelectItem value="organic">organic</SelectItem>
+                      <SelectItem value="social">social</SelectItem>
+                      <SelectItem value="email">email</SelectItem>
+                      <SelectItem value="cpc">cpc</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs">utm_campaign</Label>
+                <Input
+                  className="mt-1 text-sm"
+                  placeholder={slugify(name) || 'campaign-slug'}
+                  value={utmCampaignSlug}
+                  onChange={e => { slugDirty.current = true; setUtmCampaignSlug(e.target.value) }}
+                />
+              </div>
+
+              {generatedUtmUrl && (
+                <div className="rounded-md bg-muted/60 p-2">
+                  <p className="text-[10px] text-muted-foreground mb-1">Generated URL</p>
+                  <div className="flex items-start gap-2">
+                    <p className="flex-1 text-[11px] font-mono text-foreground break-all leading-relaxed">{generatedUtmUrl}</p>
+                    <Button size="icon" variant="ghost" className="h-6 w-6 shrink-0 mt-0.5"
+                      onClick={() => navigator.clipboard.writeText(generatedUtmUrl).then(() => toast({ title: 'Copied!' }))}>
+                      <Copy className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {campaignType === 'qr' && (
+            <div className="space-y-3 rounded-lg border border-border/60 p-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">QR Destination</p>
+              <div>
+                <Label className="text-xs">Destination URL</Label>
+                <Input className="mt-1 text-sm" placeholder="https://yoursite.com/landing" value={destinationUrl} onChange={e => setDestinationUrl(e.target.value)} />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                After saving, a QR code will appear on the campaign card pointing to the tracking redirect, which forwards visitors to this URL.
+              </p>
+            </div>
+          )}
+
+          {campaignType === 'referral' && (
+            <div className="space-y-3 rounded-lg border border-border/60 p-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Referral Code</p>
+              <div>
+                <Label className="text-xs">Code (editable)</Label>
+                <Input className="mt-1 font-mono text-sm" value={referralCode} onChange={e => setReferralCode(e.target.value)} placeholder="REF-CHANNEL-XXXX" />
+              </div>
+              <p className="text-[11px] text-muted-foreground">This code will be shown prominently on the campaign card. Share it with referrers.</p>
+            </div>
+          )}
+        </div>
+
+        <SheetFooter className="mt-5 flex flex-row gap-2">
+          <Button variant="ghost" className="flex-1" onClick={onClose}>Cancel</Button>
+          <Button className="flex-1" disabled={!isValid || saveMutation.isPending} onClick={() => saveMutation.mutate()}>
+            {saveMutation.isPending ? 'Saving…' : editCampaign ? 'Update Campaign' : 'Create Campaign'}
+          </Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 // ── Sort helpers ──────────────────────────────────────────────────────────────
 
 type SortCol = 'name' | 'spend' | 'leads' | 'views' | 'convRate' | 'closedJobs' | 'closeRate' | 'revenue' | 'cpl' | 'cpa' | 'roi'
@@ -492,6 +986,10 @@ export default function Marketing() {
   const [editSpend,     setEditSpend]     = useState<MarketingSpend | undefined>(undefined)
   const [spendChannelPreset, setSpendChannelPreset] = useState<string | undefined>(undefined)
   const [deleteId, setDeleteId] = useState<string | null>(null)
+  // Campaign manager state
+  const [campaignFilter,  setCampaignFilter]  = useState<'all' | 'active' | 'paused' | 'ended'>('all')
+  const [showNewCampaign, setShowNewCampaign] = useState(false)
+  const [editCampaign,    setEditCampaign]    = useState<Campaign | null>(null)
 
   function handleSort(col: SortCol) {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -798,6 +1296,51 @@ export default function Marketing() {
     URL.revokeObjectURL(url)
     toast({ title: 'CSV downloaded' })
   }
+
+  // ── Campaign mutations ────────────────────────────────────────────────────
+
+  const updateCampaignMutation = useMutation({
+    mutationFn: ({ id, updates }: { id: string; updates: Record<string, unknown> }) =>
+      apiRequest('PATCH', `/campaigns/${id}`, updates),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/campaigns'] })
+      toast({ title: 'Campaign updated' })
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  // ── Per-campaign metrics ──────────────────────────────────────────────────
+
+  function campaignMetrics(cam: Campaign): CampaignMetrics {
+    const views = allEvents.filter(e => e.campaignId === cam.id).length
+    const campLeads = allLeads.filter(l => l.campaignId === cam.id)
+    const leads = campLeads.length
+    const closedLeads = campLeads.filter(isClosed)
+    const closed = closedLeads.length
+
+    // Spend = sum of channel spend during the campaign's date range
+    let spend = 0
+    if (cam.channelId && (cam.startDate || cam.endDate)) {
+      const startYM = cam.startDate ? cam.startDate.slice(0, 7) : '0000-01'
+      const endYM   = cam.endDate   ? cam.endDate.slice(0, 7)   : thisMonthStr()
+      spend = allSpend
+        .filter(s => s.channelId === cam.channelId && s.month >= startYM && s.month <= endYM)
+        .reduce((sum, s) => sum + s.amount, 0)
+    }
+
+    const { total: revenue, hasEstimated: revenueIsEst } = revenueFor(closedLeads)
+    const cpl = leads  > 0 && spend > 0 ? spend / leads  : null
+    const cpa = closed > 0 && spend > 0 ? spend / closed : null
+    const roi = spend  > 0              ? ((revenue - spend) / spend) * 100 : null
+    return { views, leads, closed, spend, revenue, revenueIsEst, cpl, cpa, roi }
+  }
+
+  // ── Filtered campaigns for section 4 ─────────────────────────────────────
+
+  const filteredCampaigns = useMemo(() => {
+    if (campaignFilter === 'all') return allCampaigns
+    return allCampaigns.filter(c => c.status === campaignFilter)
+  }, [allCampaigns, campaignFilter])
 
   // ── Type badge helper ─────────────────────────────────────────────────────
 
@@ -1150,6 +1693,79 @@ export default function Marketing() {
           </Card>
         </section>
 
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* Section 4 — Campaign Manager                                   */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        <section>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Campaigns</h3>
+            <Button size="sm" className="h-7 text-xs gap-1 px-2" onClick={() => { setEditCampaign(null); setShowNewCampaign(true) }}>
+              <Plus className="h-3.5 w-3.5" /> New Campaign
+            </Button>
+          </div>
+
+          {/* Filter tabs */}
+          <div className="flex gap-1.5 mb-3 overflow-x-auto pb-0.5 scrollbar-hide">
+            {(['all', 'active', 'paused', 'ended'] as const).map(f => (
+              <Button
+                key={f}
+                size="sm"
+                variant={campaignFilter === f ? 'default' : 'outline'}
+                className="shrink-0 h-7 text-xs px-3 capitalize"
+                onClick={() => setCampaignFilter(f)}
+              >
+                {f}
+                {f !== 'all' && (
+                  <span className="ml-1 opacity-60">
+                    ({allCampaigns.filter(c => c.status === f).length})
+                  </span>
+                )}
+              </Button>
+            ))}
+          </div>
+
+          {filteredCampaigns.length === 0 ? (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                <QrCode className="h-8 w-8 mx-auto mb-2 opacity-30" />
+                <p className="text-sm font-medium">
+                  {campaignFilter === 'all' ? 'No campaigns yet' : `No ${campaignFilter} campaigns`}
+                </p>
+                {campaignFilter === 'all' && (
+                  <Button size="sm" variant="outline" className="mt-3 h-7 text-xs gap-1"
+                    onClick={() => { setEditCampaign(null); setShowNewCampaign(true) }}>
+                    <Plus className="h-3.5 w-3.5" /> Create your first campaign
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredCampaigns.map(cam => {
+                const ch = channels.find(c => c.id === cam.channelId)
+                const metrics = campaignMetrics(cam)
+                return (
+                  <CampaignCard
+                    key={cam.id}
+                    campaign={cam}
+                    channel={ch}
+                    metrics={metrics}
+                    onEdit={() => { setEditCampaign(cam); setShowNewCampaign(true) }}
+                    onStatusToggle={() => updateCampaignMutation.mutate({
+                      id: cam.id,
+                      updates: { status: cam.status === 'active' ? 'paused' : 'active' },
+                    })}
+                    onArchive={() => updateCampaignMutation.mutate({
+                      id: cam.id,
+                      updates: { status: 'ended' },
+                    })}
+                  />
+                )
+              })}
+            </div>
+          )}
+        </section>
+
       </div>
 
       {/* ── Spend Entry Sheet ────────────────────────────────────────────── */}
@@ -1160,6 +1776,14 @@ export default function Marketing() {
         initialChannelId={spendChannelPreset}
         initialMonth={range.end}
         editEntry={editSpend}
+      />
+
+      {/* ── Campaign Sheet ───────────────────────────────────────────────── */}
+      <CampaignSheet
+        open={showNewCampaign}
+        onClose={() => { setShowNewCampaign(false); setEditCampaign(null) }}
+        channels={channels}
+        editCampaign={editCampaign}
       />
 
       {/* ── Channel Detail Sheet ─────────────────────────────────────────── */}
