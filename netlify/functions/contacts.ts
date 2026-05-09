@@ -1,6 +1,7 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { rowToContact } from '../../src/types'
+import { syncContactToAgreements } from './_leadSync'   // ← NEW
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -131,6 +132,15 @@ export const handler: Handler = async (event) => {
       if (Object.keys(jobSync).length > 0) {
         try { await supabase.from('jobs').update(jobSync).eq('contact_id', id) } catch (_e) { /* non-fatal */ }
       }
+
+      // Service agreements: customer_name, customer_phone, customer_email,  // ← NEW
+      // customer_address — the gap the existing syncs didn't cover.           // ← NEW
+      syncContactToAgreements(supabase, id, {                                  // ← NEW
+        name:    body.name,                                                    // ← NEW
+        phone:   body.phone,                                                   // ← NEW
+        email:   body.email,                                                   // ← NEW
+        address: body.address,                                                 // ← NEW
+      }).catch((_e) => { /* non-fatal */ })                                    // ← NEW
 
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToContact(data)) }
     }

@@ -142,3 +142,43 @@ export async function advanceLeadStage(
     console.error('[leadSync] advanceLeadStage error:', err)
   }
 }
+
+// ── NEW export ────────────────────────────────────────────────────────────────
+/**
+ * Propagate contact identity changes (name, phone, email, address) to any
+ * service_agreements linked to this contact. Mirrors what contacts.ts already
+ * does for quotes, subscriptions, and jobs — service_agreements is the gap.
+ *
+ * NOTE: leads rows have no denormalized customer fields (they reference the
+ * contact via contact_id), so there is nothing to sync on the leads table.
+ *
+ * Non-fatal: errors are logged but never thrown.
+ */
+export async function syncContactToAgreements(
+  supabase: SupabaseClient,
+  contactId: string,
+  fields: {
+    name?:    string
+    phone?:   string
+    email?:   string
+    address?: string
+  },
+): Promise<void> {
+  if (!Object.values(fields).some(v => v !== undefined)) return   // nothing to sync
+  try {
+    const agreementSync: Record<string, unknown> = {}
+    if (fields.name    !== undefined) agreementSync.customer_name    = fields.name
+    if (fields.phone   !== undefined) agreementSync.customer_phone   = fields.phone
+    if (fields.email   !== undefined) agreementSync.customer_email   = fields.email
+    if (fields.address !== undefined) agreementSync.customer_address = fields.address
+    agreementSync.updated_at = new Date().toISOString()
+
+    await supabase
+      .from('service_agreements')
+      .update(agreementSync)
+      .eq('contact_id', contactId)
+      .not('status', 'in', '("void","signed")')  // don't overwrite signed/void records
+  } catch (err) {
+    console.error('[leadSync] syncContactToAgreements error:', err instanceof Error ? err.message : err)
+  }
+}

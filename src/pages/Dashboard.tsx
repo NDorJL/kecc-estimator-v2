@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { apiGet } from '@/lib/queryClient'
+import { apiGet, apiRequest } from '@/lib/queryClient'  // ← apiRequest added
 import type { Quote, Subscription, CompanySettings, Lead, Job, SubcontractorAgreement } from '@/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import {
   TrendingUp, FileText, CalendarCheck, DollarSign,
   Users, Target, BookOpen, BarChart2, MessageSquare,
-  CheckCircle2, PenLine, X, Bell, ChevronDown, ChevronUp,
+  CheckCircle2, PenLine, X, Bell, ChevronDown, ChevronUp, Send,  // ← Send added
   Clock, AlertTriangle, Star, Zap, RefreshCw, Megaphone,
   Calendar, Calculator as CalcIcon, Settings, Briefcase,
   MapPin, BarChart,
@@ -59,6 +59,38 @@ interface AppNotification {
   subtitle: string
   colorClass: string
   path: string
+}
+
+// ── SMS Queue types (NEW) ────────────────────────────────────────────────────
+
+interface SmsQueueItem {
+  id:             string
+  created_at:     string
+  to_phone:       string
+  message:        string
+  type:           'review_request' | 'quote_followup' | 'service_reminder' | 'kpi_report' | 'custom'
+  lead_id:        string | null
+  contact_id:     string | null
+  status:         'pending' | 'approved' | 'sent' | 'dismissed'
+  approved_at:    string | null
+  sent_at:        string | null
+  recipient_name: string | null   // joined from contacts table
+}
+
+const SMS_TYPE_LABELS: Record<string, string> = {
+  service_reminder: 'Service Reminder',
+  quote_followup:   'Quote Follow-Up',
+  review_request:   'Review Request',
+  kpi_report:       'KPI Report',
+  custom:           'Custom',
+}
+
+const SMS_TYPE_COLORS: Record<string, string> = {
+  service_reminder: 'bg-blue-100   text-blue-700   dark:bg-blue-900/30   dark:text-blue-300',
+  quote_followup:   'bg-amber-100  text-amber-700  dark:bg-amber-900/30  dark:text-amber-300',
+  review_request:   'bg-green-100  text-green-700  dark:bg-green-900/30  dark:text-green-300',
+  kpi_report:       'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300',
+  custom:           'bg-muted      text-muted-foreground',
 }
 
 // ── KPI Card ─────────────────────────────────────────────────────────────────
@@ -150,6 +182,48 @@ export default function Dashboard() {
     queryKey: ['/subcontractor-agreements'],
     queryFn: () => apiGet('/subcontractor-agreements?action=list'),
   })
+
+  // ── SMS Queue (NEW) ────────────────────────────────────────────────────────
+  const {
+    data: smsQueue = [],
+    isLoading: queueLoading,
+    refetch: refetchQueue,
+  } = useQuery<SmsQueueItem[]>({
+    queryKey: ['/sms-queue'],
+    queryFn: () => apiGet('/sms-queue'),
+    refetchInterval: 60_000,   // poll every minute so the panel stays fresh
+  })
+
+  // Track which item IDs are mid-action (approve/dismiss) to show loading state
+  const [queueActionIds, setQueueActionIds] = useState<Set<string>>(new Set())
+
+  async function handleApprove(item: SmsQueueItem) {
+    setQueueActionIds(prev => new Set(prev).add(item.id))
+    try {
+      await apiRequest('PATCH', `/sms-queue/${item.id}`, { status: 'approved' })
+      await apiRequest('POST', `/sms-queue/${item.id}/send`, {})
+      await refetchQueue()
+    } catch (err) {
+      console.error('[sms-queue approve]', err)
+      // Re-surface the error; don't swallow it silently
+      alert(`Send failed: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setQueueActionIds(prev => { const next = new Set(prev); next.delete(item.id); return next })
+    }
+  }
+
+  async function handleDismiss(item: SmsQueueItem) {
+    setQueueActionIds(prev => new Set(prev).add(item.id))
+    try {
+      await apiRequest('PATCH', `/sms-queue/${item.id}`, { status: 'dismissed' })
+      await refetchQueue()
+    } catch (err) {
+      console.error('[sms-queue dismiss]', err)
+    } finally {
+      setQueueActionIds(prev => { const next = new Set(prev); next.delete(item.id); return next })
+    }
+  }
+  // ── end SMS Queue ──────────────────────────────────────────────────────────
 
   const loading = quotesLoading || subsLoading
 
@@ -440,6 +514,95 @@ export default function Dashboard() {
           {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
         </p>
       </div>
+
+      {/* ── Pending SMS Queue (NEW) ───────────────────────────────────────── */}
+      {!queueLoading && (
+        <div className="rounded-xl border border-border overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center justify-between px-3 py-2 bg-amber-500/10 border-b border-amber-500/20">
+            <div className="flex items-center gap-1.5">
+              <MessageSquare className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+              <span className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                Pending SMS
+              </span>
+              {smsQueue.length > 0 && (
+                <span className="ml-1 rounded-full bg-amber-500 text-white text-xs font-bold w-5 h-5 flex items-center justify-center">
+                  {smsQueue.length}
+                </span>
+              )}
+            </div>
+            <span className="text-[10px] text-amber-700/70 dark:text-amber-400/60 font-medium uppercase tracking-wide">
+              Approve before sending
+            </span>
+          </div>
+
+          {/* Body */}
+          {smsQueue.length === 0 ? (
+            <div className="px-4 py-4 text-sm text-muted-foreground text-center">
+              No messages waiting for approval
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {smsQueue.map(item => {
+                const isActing   = queueActionIds.has(item.id)
+                const recipientLabel = item.recipient_name ?? item.to_phone
+                const queuedMinsAgo  = Math.round(
+                  (Date.now() - new Date(item.created_at).getTime()) / 60_000
+                )
+                const timeLabel = queuedMinsAgo < 60
+                  ? `${queuedMinsAgo}m ago`
+                  : `${Math.round(queuedMinsAgo / 60)}h ago`
+
+                return (
+                  <div key={item.id} className="p-3 space-y-2">
+                    {/* Top row: recipient + type tag + time */}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold truncate flex-1 min-w-0">
+                        {recipientLabel}
+                      </span>
+                      <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${SMS_TYPE_COLORS[item.type] ?? SMS_TYPE_COLORS.custom}`}>
+                        {SMS_TYPE_LABELS[item.type] ?? item.type}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground shrink-0">{timeLabel}</span>
+                    </div>
+
+                    {/* Phone (if we have a name to show separately) */}
+                    {item.recipient_name && (
+                      <p className="text-[11px] text-muted-foreground">{item.to_phone}</p>
+                    )}
+
+                    {/* Message preview */}
+                    <p className="text-xs text-muted-foreground leading-snug line-clamp-2">
+                      {item.message}
+                    </p>
+
+                    {/* Actions */}
+                    <div className="flex gap-2 pt-0.5">
+                      <button
+                        disabled={isActing}
+                        onClick={() => handleApprove(item)}
+                        className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-semibold py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <Send className="h-3 w-3 shrink-0" />
+                        {isActing ? 'Sending…' : 'Approve & Send'}
+                      </button>
+                      <button
+                        disabled={isActing}
+                        onClick={() => handleDismiss(item)}
+                        className="flex-1 flex items-center justify-center gap-1.5 rounded-lg border border-border hover:bg-muted text-muted-foreground text-xs font-semibold py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <X className="h-3 w-3 shrink-0" />
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+      {/* ── end Pending SMS Queue ─────────────────────────────────────────── */}
 
       {/* ── Notification Center ───────────────────────────────────────────── */}
       {!quotesLoading && !leadsLoading && !jobsLoading && (

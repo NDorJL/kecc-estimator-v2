@@ -11,12 +11,33 @@
 
 import { schedule } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
-import { sendOpenPhoneSms } from './_smsHelper'
+// sendOpenPhoneSms import removed — all sends now go through the approval queue  // ← CHANGED
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
+
+// ── SMS Queue helper ─────────────────────────────────────────────────────────  // ← NEW
+// Inserts a message into sms_queue with status='pending'.                       // ← NEW
+// The message will NOT be sent until approved in the Dashboard queue panel.     // ← NEW
+async function queueSms(opts: {                                                   // ← NEW
+  toPhone:    string                                                              // ← NEW
+  message:    string                                                              // ← NEW
+  type:       'review_request' | 'quote_followup' | 'service_reminder' | 'kpi_report' | 'custom'  // ← NEW
+  leadId?:    string | null                                                       // ← NEW
+  contactId?: string | null                                                       // ← NEW
+}): Promise<void> {                                                               // ← NEW
+  const { error } = await supabase.from('sms_queue').insert({                    // ← NEW
+    to_phone:   opts.toPhone,                                                     // ← NEW
+    message:    opts.message,                                                     // ← NEW
+    type:       opts.type,                                                        // ← NEW
+    lead_id:    opts.leadId    ?? null,                                           // ← NEW
+    contact_id: opts.contactId ?? null,                                           // ← NEW
+    status:     'pending',                                                        // ← NEW
+  })                                                                              // ← NEW
+  if (error) throw new Error(`[sms-queue insert] ${error.message}`)              // ← NEW
+}                                                                                 // ← NEW
 
 /** Returns 'YYYY-MM-DD' for today + offsetDays, in UTC */
 function dateOffset(offsetDays: number): string {
@@ -120,9 +141,15 @@ const handler = schedule('0 14 * * *', async () => {
           companyName,
         })
 
-        await sendOpenPhoneSms(apiKey, fromNumber, job.customer_phone, message)
+        // QUEUED — will not send until approved in Dashboard          // ← CHANGED
+        await queueSms({                                               // ← CHANGED
+          toPhone:   job.customer_phone,                              // ← CHANGED
+          message,                                                     // ← CHANGED
+          type:      'service_reminder',                               // ← CHANGED
+          contactId: job.contact_id,                                   // ← CHANGED
+        })                                                             // ← CHANGED
 
-        // Stamp reminder_sent_at so we don't double-send
+        // Stamp reminder_sent_at so we don't re-queue the next day
         await supabase
           .from('jobs')
           .update({ reminder_sent_at: new Date().toISOString() })
@@ -215,10 +242,17 @@ const handler = schedule('0 14 * * *', async () => {
               `Automated msg. Reply STOP to opt out.`
 
             try {
-              await sendOpenPhoneSms(apiKey, fromNumber, phone, message)
-              console.log(`[send-reminders] ✓ Quote follow-up sent to ${name} (lead ${lead.id})`)
+              // QUEUED — will not send until approved in Dashboard        // ← CHANGED
+              await queueSms({                                             // ← CHANGED
+                toPhone:   phone,                                          // ← CHANGED
+                message,                                                   // ← CHANGED
+                type:      'quote_followup',                               // ← CHANGED
+                leadId:    lead.id,                                        // ← CHANGED
+                contactId: lead.contact_id,                               // ← CHANGED
+              })                                                           // ← CHANGED
+              console.log(`[send-reminders] ✓ Quote follow-up queued for ${name} (lead ${lead.id})`)  // ← CHANGED
             } catch (err) {
-              console.error(`[send-reminders] ✗ SMS failed for lead ${lead.id}:`, err instanceof Error ? err.message : err)
+              console.error(`[send-reminders] ✗ Queue insert failed for lead ${lead.id}:`, err instanceof Error ? err.message : err)
             }
           } else {
             console.log(`[send-reminders] Lead ${lead.id} moved to follow_up (no phone/SMS — no message sent)`)
@@ -352,9 +386,18 @@ const handler = schedule('0 14 * * *', async () => {
 
         try {
           if (apiKey && fromNumber) {
-            await sendOpenPhoneSms(apiKey, fromNumber, job.customer_phone, message)
+            // QUEUED — will not send until approved in Dashboard          // ← CHANGED
+            await queueSms({                                               // ← CHANGED
+              toPhone:   job.customer_phone,                              // ← CHANGED
+              message,                                                     // ← CHANGED
+              type:      'review_request',                                 // ← CHANGED
+              contactId: job.contact_id,                                   // ← CHANGED
+            })                                                             // ← CHANGED
           }
 
+          // Stamp review_sent_at so we don't re-queue the next day
+          // NOTE: this stamps even if the queue insert happened above,
+          // which prevents duplicate queue entries on retry runs.
           await supabase
             .from('jobs')
             .update({ review_sent_at: new Date().toISOString() })
@@ -364,14 +407,14 @@ const handler = schedule('0 14 * * *', async () => {
             try { await supabase.from('activities').insert({
               contact_id: job.contact_id,
               type:       'sms_out',
-              summary:    `Review request sent to ${job.customer_name}`,
+              summary:    `Review request queued (pending approval) for ${job.customer_name}`,  // ← CHANGED
               metadata:   { jobId: job.id, automated: true },
             }) } catch (_e) { /* non-fatal */ }
           }
 
-          console.log(`[send-reminders] ✓ Review request sent to ${job.customer_name} (job ${job.id})`)
+          console.log(`[send-reminders] ✓ Review request queued for ${job.customer_name} (job ${job.id})`)  // ← CHANGED
         } catch (err) {
-          console.error(`[send-reminders] ✗ Review request failed for job ${job.id}:`, err instanceof Error ? err.message : err)
+          console.error(`[send-reminders] ✗ Review request queue failed for job ${job.id}:`, err instanceof Error ? err.message : err)  // ← CHANGED
           // Still stamp to prevent infinite retry on bad numbers
           try { await supabase.from('jobs').update({ review_sent_at: new Date().toISOString() }).eq('id', job.id) } catch (_e) { /* non-fatal */ }
         }

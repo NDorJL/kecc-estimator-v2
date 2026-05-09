@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { rowToLead } from '../../src/types'
 import { randomUUID } from 'crypto'
 import Busboy from 'busboy'
+import { handleLeadStageChange } from './_cascade'   // ← NEW
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -229,6 +230,14 @@ export const handler: Handler = async (event) => {
           console.error('[leads] Auto-subscription failed:', subErr instanceof Error ? subErr.message : subErr)
         }
       }
+
+      // ── Cascade: propagate stage change to Finance + activity log ──────────  // ← NEW
+      // Non-fatal: a cascade failure never blocks the response.                  // ← NEW
+      if (body.stage !== undefined) {                                              // ← NEW
+        handleLeadStageChange(id, body.stage, supabase).catch(err =>              // ← NEW
+          console.error('[leads] cascade failed:', err instanceof Error ? err.message : err)  // ← NEW
+        )                                                                          // ← NEW
+      }                                                                            // ← NEW
 
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToLead(data)) }
     }
