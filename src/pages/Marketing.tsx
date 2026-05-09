@@ -1694,7 +1694,23 @@ export default function Marketing() {
                         </th>
                         <SortTh col="spend"      label="Spend"    active={sortCol==='spend'}      dir={sortDir} onSort={handleSort} />
                         <SortTh col="leads"      label="Leads"    active={sortCol==='leads'}      dir={sortDir} onSort={handleSort} />
-                        <SortTh col="views"      label="Views"    active={sortCol==='views'}      dir={sortDir} onSort={handleSort} />
+                        {/* Views header — custom th so we can attach the footnote icon */}
+                        <th
+                          className="px-3 py-2 text-right text-[11px] font-medium text-muted-foreground cursor-pointer select-none whitespace-nowrap hover:text-foreground transition-colors"
+                          onClick={() => handleSort('views')}
+                        >
+                          <span className="inline-flex items-center gap-0.5 justify-end">
+                            Views
+                            {sortCol === 'views'
+                              ? (sortDir === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)
+                              : <ChevronDown className="h-3 w-3 opacity-30" />}
+                            <span
+                              className="ml-0.5 text-muted-foreground/50 hover:text-muted-foreground cursor-help"
+                              title="Impressions are only tracked for QR and digital campaigns. Direct inquiries (phone, referral, walk-in) are not counted as impressions."
+                              onClick={e => e.stopPropagation()}
+                            >ⓘ</span>
+                          </span>
+                        </th>
                         <SortTh col="convRate"   label="Conv%"    active={sortCol==='convRate'}   dir={sortDir} onSort={handleSort} />
                         <SortTh col="closedJobs" label="Closed"   active={sortCol==='closedJobs'} dir={sortDir} onSort={handleSort} />
                         <SortTh col="closeRate"  label="Close%"   active={sortCol==='closeRate'}  dir={sortDir} onSort={handleSort} />
