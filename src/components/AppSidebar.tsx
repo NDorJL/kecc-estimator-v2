@@ -30,6 +30,7 @@ const NAV_GROUPS = [
       { id: 'subscriptions', label: 'Subscriptions', path: '/subscriptions', icon: RefreshCw },
       { id: 'finance',       label: 'Finance',       path: '/finance',       icon: TrendingUp },
       { id: 'marketing',     label: 'Marketing',     path: '/marketing',     icon: Megaphone },
+      { id: 'contractors',   label: 'Contractors',   path: '/contractors',   icon: HardHat },
     ],
   },
   {
@@ -37,8 +38,7 @@ const NAV_GROUPS = [
     items: [
       { id: 'calculator',  label: 'Calculator',  path: '/calculator',  icon: Calculator },
       { id: 'pricebook',   label: 'Price Book',  path: '/pricebook',   icon: BookOpen },
-      { id: 'scratchpad',   label: 'Scratch Pad',  path: '/scratchpad',   icon: NotebookPen },
-      { id: 'contractors',  label: 'Contractors',  path: '/contractors',  icon: HardHat },    // ← NEW (FIX 3)
+      { id: 'scratchpad',  label: 'Scratch Pad', path: '/scratchpad',  icon: NotebookPen },
     ],
   },
 ]
