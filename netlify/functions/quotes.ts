@@ -10,6 +10,51 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
+// ── Revision helper ───────────────────────────────────────────────────────────
+// Mirrors buildRevisedLineItems() in Leads.tsx. Bakes amendments into a clean
+// line-items array: adjustments replace originals, removals are excluded,
+// additions are appended. Used when auto-generating the revision quote.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildRevisedLineItems(originalItems: any[], amendments: any[]): any[] {
+  const amendByItemId = new Map(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    amendments.filter((a: any) => a.lineItemId).map((a: any) => [a.lineItemId, a])
+  )
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const result: any[] = originalItems
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .filter((li: any) => amendByItemId.get(li.serviceId)?.type !== 'removal')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((li: any) => {
+      const a = amendByItemId.get(li.serviceId)
+      if (a?.type === 'adjustment') {
+        const newAmt = a.newAmount ?? li.lineTotal
+        return {
+          ...li,
+          serviceName: a.newName ?? li.serviceName,
+          description: a.newDescription ?? li.description,
+          unitPrice:   newAmt,
+          lineTotal:   newAmt,
+        }
+      }
+      return li
+    })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  amendments.filter((a: any) => a.type === 'addition').forEach((a: any) => {
+    result.push({
+      serviceId:      `amend_${a.id}`,
+      serviceName:    a.label,
+      category:       'Supplemental',
+      description:    a.addedDescription ?? undefined,
+      quantity:       1,
+      unitPrice:      a.addedAmount ?? 0,
+      lineTotal:      a.addedAmount ?? 0,
+      isSubscription: false,
+    })
+  })
+  return result
+}
+
 const CORS = {
   'Content-Type': 'application/json',
   'Access-Control-Allow-Origin': '*',
@@ -32,6 +77,8 @@ export const handler: Handler = async (event) => {
     if (method === 'GET' && !id) {
       const trashed = event.queryStringParameters?.trashed === 'true'
       const leadId  = event.queryStringParameters?.leadId
+      // select('*') returns all columns — includes option_groups, selected_option_group_ids,
+      // revised_from_id, amendments, original_total, etc. No explicit field list needed.
       let query = supabase.from('quotes').select('*').order('created_at', { ascending: false })
       if (trashed) query = query.not('trashed_at', 'is', null)
       else query = query.is('trashed_at', null)
@@ -153,6 +200,68 @@ export const handler: Handler = async (event) => {
 
       // NOTE: lead does NOT advance to 'scheduled' here — that only happens
       // when a job is explicitly created from this quote via POST /jobs.
+
+      // ── Auto-generate/update revision when amendments are saved to a signed quote ──
+      // Fires whenever the PATCH body contains an amendments array AND the quote is signed.
+      // Non-fatal — revision failure never blocks the primary save response.
+      if (body.amendments !== undefined && data.signed_at) {                                              // ← NEW
+        try {                                                                                               // ← NEW
+          const amendments    = Array.isArray(body.amendments) ? body.amendments as any[] : []           // ← NEW
+          const originalItems = Array.isArray(data.line_items) ? data.line_items as any[] : []           // ← NEW
+          const revisedItems  = buildRevisedLineItems(originalItems, amendments)                          // ← NEW
+                                                                                                           // ← NEW
+          // Compute amended total from original_total (frozen at signing) + amendment deltas            // ← NEW
+          const base     = Number(data.original_total ?? data.total)                                      // ← NEW
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any                                  // ← NEW
+          const newTotal = base + amendments.reduce((d: number, a: any) => {                              // ← NEW
+            if (a.type === 'addition')   return d + (a.addedAmount   ?? 0)                               // ← NEW
+            if (a.type === 'adjustment') return d + (a.newAmount ?? 0) - (a.originalAmount ?? 0)         // ← NEW
+            if (a.type === 'removal')    return d - (a.originalAmount ?? 0)                              // ← NEW
+            return d                                                                                        // ← NEW
+          }, 0)                                                                                             // ← NEW
+                                                                                                           // ← NEW
+          // Check if a revision already exists for this quote                                            // ← NEW
+          const { data: existingRevision } = await supabase                                               // ← NEW
+            .from('quotes')                                                                               // ← NEW
+            .select('id')                                                                                  // ← NEW
+            .eq('revised_from_id', id)                                                                    // ← NEW
+            .maybeSingle()                                                                                 // ← NEW
+                                                                                                           // ← NEW
+          if (existingRevision) {                                                                          // ← NEW
+            // Update the existing revision with the latest baked-in line items                          // ← NEW
+            await supabase.from('quotes').update({                                                        // ← NEW
+              line_items: revisedItems,                                                                   // ← NEW
+              subtotal:   newTotal,                                                                       // ← NEW
+              total:      newTotal,                                                                       // ← NEW
+            }).eq('id', existingRevision.id)                                                              // ← NEW
+          } else {                                                                                         // ← NEW
+            // Create a new revision quote with all customer info copied                                  // ← NEW
+            await supabase.from('quotes').insert({                                                        // ← NEW
+              customer_name:    data.customer_name,                                                       // ← NEW
+              customer_address: data.customer_address,                                                    // ← NEW
+              customer_phone:   data.customer_phone,                                                      // ← NEW
+              customer_email:   data.customer_email,                                                      // ← NEW
+              business_name:    data.business_name,                                                       // ← NEW
+              quote_type:       data.quote_type,                                                          // ← NEW
+              line_items:       revisedItems,                                                             // ← NEW
+              subtotal:         newTotal,                                                                  // ← NEW
+              discount:         null,                                                                     // ← NEW
+              total:            newTotal,                                                                  // ← NEW
+              notes:            data.notes,                                                               // ← NEW
+              status:           'revised',                                                                // ← NEW
+              contact_id:       data.contact_id,                                                          // ← NEW
+              lead_id:          data.lead_id,                                                             // ← NEW
+              revised_from_id:  id,                                                                       // ← NEW
+              accept_token:     randomUUID(),                                                             // ← NEW
+            })                                                                                            // ← NEW
+          }                                                                                               // ← NEW
+          console.log(`[quotes] Revision ${existingRevision ? 'updated' : 'created'} for signed quote ${id}`) // ← NEW
+        } catch (revErr) {                                                                                 // ← NEW
+          // Non-fatal: revision failure never blocks the response                                        // ← NEW
+          console.error('[quotes] Revision generation failed:', revErr instanceof Error ? revErr.message : revErr) // ← NEW
+        }                                                                                                  // ← NEW
+      }                                                                                                    // ← NEW
+
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToQuote(data)) }
     }
 
