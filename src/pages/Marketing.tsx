@@ -1,6 +1,11 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
+import { useLocation } from 'wouter'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { LineChart, Line, ResponsiveContainer } from 'recharts'
+import {
+  BarChart, Bar, LineChart, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  Cell, ResponsiveContainer,
+} from 'recharts'
 import QRCode from 'qrcode'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,13 +16,15 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Textarea } from '@/components/ui/textarea'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import type { MarketingChannel, MarketingSpend, Campaign, CampaignEvent, Lead, Quote, Job } from '@/types'
+import type { MarketingChannel, MarketingSpend, Campaign, CampaignEvent, Lead, Quote, Job, Contact } from '@/types'
 import {
   TrendingUp, TrendingDown, Minus, DollarSign, Users, Briefcase,
   Target, ChevronUp, ChevronDown, Plus, Pencil, Trash2, Download, Megaphone,
   Award, BarChart2, Pause, Play, Archive, Copy, QrCode,
+  ExternalLink, Link2, CheckCircle2, AlertCircle,
 } from 'lucide-react'
 
 // ── Period types ─────────────────────────────────────────────────────────────
@@ -92,6 +99,13 @@ function fmtNum(n: number): string { return n.toLocaleString() }
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
 }
+
+// One consistent color per channel, reused across all charts in Section 6
+const CHANNEL_PALETTE = [
+  '#52B788', '#1B4332', '#457b9d', '#e63946', '#f4a261',
+  '#e9c46a', '#2a9d8f', '#264653', '#6d6875', '#c77dff',
+  '#ff6b6b', '#4ecdc4',
+]
 
 // ── KpiCard ───────────────────────────────────────────────────────────────────
 
@@ -1342,6 +1356,173 @@ export default function Marketing() {
     return allCampaigns.filter(c => c.status === campaignFilter)
   }, [allCampaigns, campaignFilter])
 
+  // ── Navigation ───────────────────────────────────────────────────────────
+  const [, navigate] = useLocation()
+
+  // ── Contacts (for attribution feed lead names) ────────────────────────────
+  const { data: allContacts = [] } = useQuery<Contact[]>({
+    queryKey: ['/contacts'],
+    queryFn: () => apiGet('/contacts'),
+  })
+  const contactNameMap = useMemo(
+    () => Object.fromEntries(allContacts.map(c => [c.id, c.name])),
+    [allContacts],
+  )
+
+  // ── Channel color map (consistent across all Section 6 charts) ───────────
+  const channelColorMap = useMemo(
+    () => Object.fromEntries(channels.map((ch, i) => [ch.id, CHANNEL_PALETTE[i % CHANNEL_PALETTE.length]])),
+    [channels],
+  )
+
+  // ── 12-month trend window (ends at range.end, responds to period selector) ─
+  const trendMonths = useMemo(() => {
+    const end = range.end
+    return Array.from({ length: 12 }, (_, i) => addMonths(end, -(11 - i)))
+  }, [range.end])
+
+  // ── Section 5: funnel data ────────────────────────────────────────────────
+  const funnelStages = useMemo(() => {
+    const views  = periodEvents.length
+    const leads  = periodLeads.length
+    const quoted = periodLeads.filter(l => !!l.quoteId).length
+    const closed = periodClosed.length
+
+    const counts  = [views, leads, quoted, closed]
+    const maxCount = Math.max(...counts, 1)
+
+    function dp(from: number, to: number): number | null {
+      return from > 0 ? ((from - to) / from) * 100 : null
+    }
+    function dc(pct: number | null): string {
+      if (pct === null) return 'text-muted-foreground'
+      if (pct < 40) return 'text-emerald-500'
+      if (pct < 70) return 'text-amber-500'
+      return 'text-red-500'
+    }
+
+    const raw = [
+      { label: 'Impressions', value: views,  display: fmtNum(views)  },
+      { label: 'Leads',       value: leads,  display: fmtNum(leads)  },
+      { label: 'Quotes Sent', value: quoted, display: fmtNum(quoted) },
+      { label: 'Jobs Closed', value: closed, display: fmtNum(closed) },
+    ]
+
+    return raw.map((s, i) => {
+      const nextVal = raw[i + 1]?.value ?? null
+      const dropPct = nextVal !== null ? dp(s.value, nextVal) : null
+      return {
+        ...s,
+        widthPct: Math.max((s.value / maxCount) * 100, 4),
+        dropPct,
+        dropColor: dc(dropPct),
+      }
+    })
+  }, [periodEvents, periodLeads, periodClosed])
+
+  // ── Section 6: trend chart data ───────────────────────────────────────────
+
+  // Names of channels that have at least one lead in the 12-month window
+  const activeChannelNames = useMemo(() => {
+    const active = new Set<string>()
+    for (const l of allLeads) {
+      if (!trendMonths.includes(l.createdAt.slice(0, 7))) continue
+      const chId = getLeadChannelId(l)
+      if (chId) {
+        const ch = channels.find(c => c.id === chId)
+        if (ch) active.add(ch.name)
+      } else {
+        active.add('Unattributed')
+      }
+    }
+    return Array.from(active)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allLeads, trendMonths, channels, campaignChannelMap, sourceToChannelId])
+
+  // Tab 1: stacked bar — leads per channel per month
+  const leadsStackedData = useMemo(() => {
+    return trendMonths.map(ym => {
+      const monthLeads = allLeads.filter(l => l.createdAt.slice(0, 7) === ym)
+      const row: Record<string, unknown> = { month: monthLabel(ym) }
+      for (const ch of channels) {
+        row[ch.name] = monthLeads.filter(l => getLeadChannelId(l) === ch.id).length
+      }
+      row['Unattributed'] = monthLeads.filter(l => !getLeadChannelId(l)).length
+      return row
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trendMonths, allLeads, channels, campaignChannelMap, sourceToChannelId])
+
+  // Tab 2: grouped bar — spend vs revenue per month
+  const spendRevenueData = useMemo(() => {
+    return trendMonths.map(ym => {
+      const monthSpend = allSpend.filter(s => s.month === ym).reduce((a, b) => a + b.amount, 0)
+      const monthClosed = allLeads.filter(l => l.createdAt.slice(0, 7) === ym && isClosed(l))
+      const { total: monthRevenue } = revenueFor(monthClosed)
+      return { month: monthLabel(ym), spend: monthSpend, revenue: monthRevenue }
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trendMonths, allSpend, allLeads, allQuotes, allJobs])
+
+  // Tab 3: dual-line — CPL and CPA per month
+  const cplCpaData = useMemo(() => {
+    return trendMonths.map(ym => {
+      const monthSpend = allSpend.filter(s => s.month === ym).reduce((a, b) => a + b.amount, 0)
+      const monthLeads = allLeads.filter(l => l.createdAt.slice(0, 7) === ym).length
+      const monthClosed = allLeads.filter(l => l.createdAt.slice(0, 7) === ym && isClosed(l)).length
+      return {
+        month: monthLabel(ym),
+        cpl: monthLeads > 0 && monthSpend > 0 ? Math.round(monthSpend / monthLeads)  : undefined,
+        cpa: monthClosed > 0 && monthSpend > 0 ? Math.round(monthSpend / monthClosed) : undefined,
+      }
+    })
+  }, [trendMonths, allSpend, allLeads])
+
+  // Tab 4: horizontal bar — ROI per channel for current period (from channelRows)
+  const roiBarData = useMemo(() => {
+    return channelRows
+      .filter(r => r.chRoi !== null)
+      .sort((a, b) => (b.chRoi ?? -Infinity) - (a.chRoi ?? -Infinity))
+      .map(r => ({ name: r.ch.name, roi: Math.round(r.chRoi ?? 0), id: r.ch.id }))
+  }, [channelRows])
+
+  // ── Section 7: attribution feed ───────────────────────────────────────────
+
+  const attributedFeed = useMemo(() => {
+    return [...periodLeads]
+      .filter(l => l.campaignId || l.source)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 20)
+  }, [periodLeads])
+
+  const unattributedFeed = useMemo(() => {
+    return [...periodLeads]
+      .filter(l => !l.campaignId && !l.source)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 5)
+  }, [periodLeads])
+
+  // Attribution fix state
+  const [fixLeadId,     setFixLeadId]     = useState<string | null>(null)
+  const [fixChannelId,  setFixChannelId]  = useState('')
+  const [fixCampaignId, setFixCampaignId] = useState('')
+
+  const fixAttributionMutation = useMutation({
+    mutationFn: ({ leadId, chId, camId }: { leadId: string; chId: string; camId: string }) => {
+      const ch = channels.find(c => c.id === chId)
+      return apiRequest('PATCH', `/leads/${leadId}`, {
+        source:     ch?.name ?? null,
+        campaignId: camId || null,
+      })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/leads'] })
+      setFixLeadId(null); setFixChannelId(''); setFixCampaignId('')
+      toast({ title: 'Attribution updated' })
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
   // ── Type badge helper ─────────────────────────────────────────────────────
 
   const TYPE_BADGE: Record<string, string> = {
@@ -1763,6 +1944,317 @@ export default function Marketing() {
                 )
               })}
             </div>
+          )}
+        </section>
+
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* Section 5 — Full Funnel Visualization                          */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Marketing Funnel</h3>
+          <Card>
+            <CardContent className="p-5">
+              <div className="flex flex-col items-center gap-0 w-full">
+                {funnelStages.map((stage, i) => (
+                  <div key={stage.label} className="flex flex-col items-center w-full">
+                    {/* Funnel bar */}
+                    <div
+                      className="flex items-center justify-between px-3 rounded-sm h-11 transition-all bg-primary/80 text-primary-foreground"
+                      style={{ width: `${stage.widthPct}%`, minWidth: '60px' }}
+                    >
+                      <span className="text-[11px] font-medium opacity-80 truncate pr-1">{stage.label}</span>
+                      <span className="text-sm font-bold tabular-nums shrink-0">{stage.display}</span>
+                    </div>
+                    {/* Drop-off connector */}
+                    {stage.dropPct !== null && (
+                      <div className={`flex items-center gap-1 py-1 text-[11px] font-semibold ${stage.dropColor}`}>
+                        <span>↓</span>
+                        <span>{stage.dropPct.toFixed(0)}% drop-off</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {/* Revenue terminal row */}
+                <div className="mt-1 w-full flex justify-center">
+                  <div
+                    className="flex items-center justify-between px-3 rounded-sm h-11 bg-emerald-600 text-white"
+                    style={{ width: `${funnelStages[funnelStages.length - 1]?.widthPct ?? 30}%`, minWidth: '60px' }}
+                  >
+                    <span className="text-[11px] font-medium opacity-80">Revenue</span>
+                    <span className="text-sm font-bold tabular-nums">
+                      {revenueIsEst && <span className="opacity-60 mr-0.5">~</span>}
+                      {fmtCurrency(revenue)}
+                    </span>
+                  </div>
+                </div>
+                {funnelStages.every(s => s.value === 0) && (
+                  <p className="text-sm text-muted-foreground mt-4 text-center">No funnel data for this period</p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </section>
+
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* Section 6 — Trend Charts                                       */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">
+            Trends <span className="font-normal opacity-60">(12 months ending {monthLabel(range.end)})</span>
+          </h3>
+          <Card>
+            <CardContent className="p-0">
+              <Tabs defaultValue="leads" className="w-full">
+                <TabsList className="w-full rounded-none border-b bg-transparent h-auto p-0">
+                  {[
+                    { value: 'leads',   label: 'Leads by Channel' },
+                    { value: 'spend',   label: 'Spend vs Revenue' },
+                    { value: 'cplcpa',  label: 'CPL & CPA' },
+                    { value: 'roi',     label: 'ROI by Channel' },
+                  ].map(t => (
+                    <TabsTrigger
+                      key={t.value}
+                      value={t.value}
+                      className="flex-1 rounded-none border-b-2 border-transparent text-[11px] py-2.5 data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none"
+                    >
+                      {t.label}
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+
+                {/* Tab 1: Leads by channel, stacked bar */}
+                <TabsContent value="leads" className="p-4 mt-0">
+                  <p className="text-xs text-muted-foreground mb-3">Leads generated per channel per month (stacked)</p>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={leadsStackedData} margin={{ top: 0, right: 4, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="month" tick={{ fontSize: 9 }} />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 9 }} />
+                      <Tooltip wrapperStyle={{ fontSize: 11 }} />
+                      <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                      {channels.map((ch, i) => (
+                        <Bar key={ch.id} dataKey={ch.name} stackId="a"
+                          fill={channelColorMap[ch.id] ?? CHANNEL_PALETTE[i % CHANNEL_PALETTE.length]}
+                          isAnimationActive={false} />
+                      ))}
+                      <Bar dataKey="Unattributed" stackId="a" fill="#94a3b8" isAnimationActive={false} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </TabsContent>
+
+                {/* Tab 2: Spend vs Revenue grouped bar */}
+                <TabsContent value="spend" className="p-4 mt-0">
+                  <p className="text-xs text-muted-foreground mb-3">Total spend vs closed-job revenue per month</p>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <BarChart data={spendRevenueData} margin={{ top: 0, right: 4, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="month" tick={{ fontSize: 9 }} />
+                      <YAxis tick={{ fontSize: 9 }} tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+                      <Tooltip wrapperStyle={{ fontSize: 11 }} formatter={(v: number) => fmtCurrency(v)} />
+                      <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                      <Bar dataKey="spend"   name="Spend"   fill="#e63946" isAnimationActive={false} radius={[2,2,0,0]} />
+                      <Bar dataKey="revenue" name="Revenue" fill="#52B788" isAnimationActive={false} radius={[2,2,0,0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </TabsContent>
+
+                {/* Tab 3: CPL and CPA dual-line */}
+                <TabsContent value="cplcpa" className="p-4 mt-0">
+                  <p className="text-xs text-muted-foreground mb-3">Cost per Lead and Cost per Acquisition trends</p>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <LineChart data={cplCpaData} margin={{ top: 0, right: 4, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="month" tick={{ fontSize: 9 }} />
+                      <YAxis tick={{ fontSize: 9 }} tickFormatter={v => `$${v}`} />
+                      <Tooltip wrapperStyle={{ fontSize: 11 }} formatter={(v: number) => `$${v}`} />
+                      <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
+                      <Line dataKey="cpl" name="CPL" stroke="#457b9d" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
+                      <Line dataKey="cpa" name="CPA" stroke="#e9c46a" strokeWidth={2} dot={false} connectNulls isAnimationActive={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </TabsContent>
+
+                {/* Tab 4: ROI by channel, horizontal bar, current period */}
+                <TabsContent value="roi" className="p-4 mt-0">
+                  <p className="text-xs text-muted-foreground mb-3">ROI per channel for the selected period</p>
+                  {roiBarData.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-8">No ROI data for this period</p>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={Math.max(roiBarData.length * 36, 120)}>
+                      <BarChart
+                        data={roiBarData}
+                        layout="vertical"
+                        margin={{ top: 0, right: 20, left: 4, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" horizontal={false} />
+                        <XAxis type="number" tick={{ fontSize: 9 }} tickFormatter={v => `${v}%`} />
+                        <YAxis type="category" dataKey="name" tick={{ fontSize: 9 }} width={80} />
+                        <Tooltip wrapperStyle={{ fontSize: 11 }} formatter={(v: number) => [`${v}%`, 'ROI']} />
+                        <Bar dataKey="roi" isAnimationActive={false} radius={[0,2,2,0]}>
+                          {roiBarData.map(r => (
+                            <Cell key={r.id} fill={r.roi >= 0 ? '#52B788' : '#e63946'} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </TabsContent>
+              </Tabs>
+            </CardContent>
+          </Card>
+        </section>
+
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* Section 7 — Lead Source Attribution Feed                       */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        <section>
+          <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Attribution Feed</h3>
+
+          {/* Attributed leads */}
+          <Card className="mb-3">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
+                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                Attributed Leads ({attributedFeed.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {attributedFeed.length === 0 ? (
+                <p className="px-4 pb-4 text-sm text-muted-foreground">No attributed leads in this period</p>
+              ) : (
+                <div>
+                  {attributedFeed.map(lead => {
+                    const chId  = getLeadChannelId(lead)
+                    const ch    = channels.find(c => c.id === chId)
+                    const cam   = allCampaigns.find(c => c.id === lead.campaignId)
+                    const name  = lead.contactId ? (contactNameMap[lead.contactId] ?? 'Unknown contact') : 'No contact'
+                    const q     = allQuotes.find(q => q.id === lead.quoteId)
+                    const jobVal = isClosed(lead) ? (q?.total ?? lead.estimatedValue ?? null) : null
+
+                    const STAGE_COLOR: Record<string, string> = {
+                      new: 'bg-slate-100 text-slate-700',
+                      contacted: 'bg-blue-100 text-blue-700',
+                      quoted: 'bg-yellow-100 text-yellow-700',
+                      scheduled: 'bg-violet-100 text-violet-700',
+                      finished_paid: 'bg-emerald-100 text-emerald-700',
+                      finished_unpaid: 'bg-amber-100 text-amber-700',
+                      recurring: 'bg-indigo-100 text-indigo-700',
+                      follow_up: 'bg-orange-100 text-orange-700',
+                    }
+                    return (
+                      <div
+                        key={lead.id}
+                        className="flex items-center gap-2 px-4 py-3 border-b last:border-0 hover:bg-muted/20 cursor-pointer transition-colors group"
+                        onClick={() => navigate('/leads')}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span className="text-sm font-medium truncate">{name}</span>
+                            <ExternalLink className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0" />
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                            {ch && <span className="font-medium text-foreground/70">{ch.name}</span>}
+                            {ch && cam && <span>·</span>}
+                            {cam && <span className="truncate max-w-[140px]">{cam.name}</span>}
+                            <span>·</span>
+                            <span>{new Date(lead.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {jobVal !== null && (
+                            <span className="text-xs font-semibold text-emerald-600 tabular-nums">{fmtCurrency(jobVal)}</span>
+                          )}
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium capitalize ${STAGE_COLOR[lead.stage] ?? 'bg-muted text-muted-foreground'}`}>
+                            {lead.stage.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Unattributed leads + fix attribution */}
+          {unattributedFeed.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
+                  <AlertCircle className="h-4 w-4 text-amber-500" />
+                  Needs Attribution ({unattributedFeed.length} shown)
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {unattributedFeed.map(lead => {
+                  const name = lead.contactId ? (contactNameMap[lead.contactId] ?? 'Unknown contact') : 'No contact'
+                  const isFixing = fixLeadId === lead.id
+
+                  return (
+                    <div key={lead.id} className="border-b last:border-0 px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{name}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {new Date(lead.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            {' · '}
+                            <span className="capitalize">{lead.stage.replace(/_/g, ' ')}</span>
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs gap-1 shrink-0"
+                          onClick={() => {
+                            if (isFixing) { setFixLeadId(null); setFixChannelId(''); setFixCampaignId('') }
+                            else          { setFixLeadId(lead.id); setFixChannelId(''); setFixCampaignId('') }
+                          }}
+                        >
+                          <Link2 className="h-3 w-3" />
+                          {isFixing ? 'Cancel' : 'Fix Attribution'}
+                        </Button>
+                      </div>
+
+                      {isFixing && (
+                        <div className="mt-2 space-y-2 bg-muted/40 rounded-lg p-3">
+                          <div>
+                            <Label className="text-[11px]">Channel</Label>
+                            <Select value={fixChannelId} onValueChange={v => { setFixChannelId(v); setFixCampaignId('') }}>
+                              <SelectTrigger className="mt-0.5 h-8 text-xs"><SelectValue placeholder="Select channel…" /></SelectTrigger>
+                              <SelectContent>
+                                {channels.map(ch => <SelectItem key={ch.id} value={ch.id} className="text-xs">{ch.name}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          {fixChannelId && (
+                            <div>
+                              <Label className="text-[11px]">Campaign (optional)</Label>
+                              <Select value={fixCampaignId} onValueChange={setFixCampaignId}>
+                                <SelectTrigger className="mt-0.5 h-8 text-xs"><SelectValue placeholder="No campaign" /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="" className="text-xs">None</SelectItem>
+                                  {allCampaigns
+                                    .filter(c => c.channelId === fixChannelId)
+                                    .map(c => <SelectItem key={c.id} value={c.id} className="text-xs">{c.name}</SelectItem>)}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+                          <Button
+                            size="sm"
+                            className="w-full h-7 text-xs"
+                            disabled={!fixChannelId || fixAttributionMutation.isPending}
+                            onClick={() => fixAttributionMutation.mutate({ leadId: lead.id, chId: fixChannelId, camId: fixCampaignId })}
+                          >
+                            {fixAttributionMutation.isPending ? 'Saving…' : 'Save Attribution'}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </CardContent>
+            </Card>
           )}
         </section>
 
