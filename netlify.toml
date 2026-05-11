@@ -35,6 +35,9 @@
 [functions."quotes"]
   external_node_modules = ["resend"]
 
+[functions."agent"]
+  timeout = 60
+
 [functions."send-reminders"]
   schedule = "0 14 * * *"
 

@@ -26,6 +26,7 @@ import Finance from '@/pages/Finance'
 import Marketing from '@/pages/Marketing'
 import ScratchPad from '@/pages/ScratchPad'
 import Contractors from '@/pages/Contractors'   // ← NEW (FIX 3)
+import { KnoxWidget } from '@/components/KnoxWidget'
 
 // ThemeApplicator removed — Phantom Dark is the fixed theme, managed via CSS variables
 
@@ -126,6 +127,7 @@ function AppLayout() {
           </main>
         </div>
       </div>
+      <KnoxWidget />
     </SidebarProvider>
   )
 }
