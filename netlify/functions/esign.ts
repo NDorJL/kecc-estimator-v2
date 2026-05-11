@@ -1140,7 +1140,7 @@ function buildFullAgreementPage(opts: {
     <div class="sec">
       <div class="legal-text">
         <h4>Billing, Term &amp; Proration</h4>
-        <p style="margin:0;">Services are billed on a recurring subscription basis, in advance, starting on or around the first scheduled service window. The monthly rate is a blended/averaged amount reflecting all included services over the plan term and is not tied to any single visit&#8217;s price. Either party may cancel at any time with written or emailed notice. Upon cancellation, KECC will calculate the value of services already delivered at KECC&#8217;s then-current standard (non-subscriber) rates and compare that to subscription payments collected to date. If delivered service value exceeds payments collected, the ${party} agrees to pay a pro-rated final balance for the difference. If payments collected exceed services delivered, KECC will refund or credit the difference. Scope and pricing may be adjusted with at least 30 days&#8217; written notice if property conditions, labor costs, materials, or service requirements materially change.${billingExtra}</p>
+        <p style="margin:0;">Services are billed on a <strong>pay-ahead basis</strong>: each monthly payment covers the upcoming calendar month of services. If a plan begins mid-month, the first invoice is pro-rated to the end of that calendar month; thereafter, payments are due on or before the 1st of each month for the month ahead. The monthly rate is a blended/averaged amount reflecting all included services over the plan term and is not tied to any single visit&#8217;s price. Either party may cancel at any time with written or emailed notice. Upon cancellation, KECC will calculate the value of services already delivered at KECC&#8217;s then-current standard (non-subscriber) rates and compare that to subscription payments collected to date. If delivered service value exceeds payments collected, the ${party} agrees to pay a pro-rated final balance for the difference. If payments collected exceed services delivered (i.e., the ${party} has prepaid for a portion of the month in which cancellation occurs and those services will not be rendered), KECC will refund or credit the difference within five (5) business days of the effective cancellation date. Scope and pricing may be adjusted with at least 30 days&#8217; written notice if property conditions, labor costs, materials, or service requirements materially change.${billingExtra}</p>
       </div>
     </div>
 
@@ -1442,6 +1442,24 @@ export const handler: Handler = async (event) => {
             metadata:   { quoteId: quoteRow.id },
           }).catch(() => {}) // activities insert — always a real Promise, this is fine
         }
+
+        // Auto-create Finance income entry when a quote is accepted (fire-and-forget)
+        ;(async () => {
+          const { data: existing } = await supabase
+            .from('transactions').select('id').eq('source', `quote:${quoteRow.id}`).maybeSingle()
+          if (existing) return
+          await supabase.from('transactions').insert({
+            date:        signedAt.slice(0, 10),
+            description: `Quote Accepted — ${quoteRow.customer_name ?? 'Unknown'}`,
+            amount:      finalTotal,
+            type:        'Income',
+            category:    'Quote Revenue',
+            account:     'KECC Checking (TVA)',
+            notes:       '',
+            review:      false,
+            source:      `quote:${quoteRow.id}`,
+          })
+        })().catch(e => console.error('Finance auto-entry (quote) failed:', e))
 
         // ── Fetch SMS credentials (needed for both confirmation + agreement SMS) ──
         const { data: settings } = await supabase
