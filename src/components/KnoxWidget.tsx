@@ -8,7 +8,7 @@ import { apiGet } from '@/lib/queryClient'
 
 // ── Write tool names — used for cache invalidation after Knox acts ────────────
 const WRITE_TOOL_NAMES = new Set([
-  'create_contact', 'create_lead', 'update_lead_stage', 'add_note',
+  'create_contact', 'update_contact', 'create_lead', 'update_lead_stage', 'add_note',
   'queue_sms', 'complete_job', 'schedule_job', 'batch_queue_review_requests',
   'remember_fact',
 ])

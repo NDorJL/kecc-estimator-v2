@@ -186,7 +186,11 @@ export default async function handler(req: Request): Promise<Response> {
         }
 
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err !== null && 'message' in err
+            ? String((err as Record<string, unknown>).message)
+            : JSON.stringify(err)
         send('error', { message: `Something went wrong: ${message}` })
       }
 

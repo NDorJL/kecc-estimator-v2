@@ -23,7 +23,7 @@ const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? 'claude-sonnet-4-5'
 
 // Write tools — used for audit logging and frontend cache invalidation signals
 export const WRITE_TOOLS = new Set([
-  'create_contact', 'create_lead', 'update_lead_stage', 'add_note',
+  'create_contact', 'update_contact', 'create_lead', 'update_lead_stage', 'add_note',
   'queue_sms', 'complete_job', 'schedule_job', 'batch_queue_review_requests',
   'remember_fact', 'notify_owner',
 ])
@@ -523,6 +523,30 @@ export const tools = [
       },
     },
   },
+  // ── Contact/record editing ────────────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'update_contact',
+      description: 'Update a contact\'s core fields: name, phone, email, address (stored in custom_fields), or any other custom property. Use this when asked to add or change a phone number, email, address, gate code, dog warning, or similar info on a contact record.',
+      parameters: {
+        type: 'object',
+        properties: {
+          contactId:    { type: 'string', description: 'The contact UUID' },
+          name:         { type: 'string', description: 'Updated full name' },
+          phone:        { type: 'string', description: 'Updated phone number' },
+          email:        { type: 'string', description: 'Updated email address' },
+          businessName: { type: 'string', description: 'Updated business name' },
+          notes:        { type: 'string', description: 'Updated notes' },
+          customFields: {
+            type: 'object',
+            description: 'Key-value pairs to merge into custom_fields — e.g. { address: "123 Main St", gateCode: "1234", dogOnProperty: "yes - lab mix" }',
+          },
+        },
+        required: ['contactId'],
+      },
+    },
+  },
   // ── Memory tools ──────────────────────────────────────────────────────────────
   {
     type: 'function',
@@ -867,7 +891,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         })
         .select('id, name, phone, email, type')
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
       return { success: true, contact: data }
     }
 
@@ -884,7 +908,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         })
         .select('id, stage, service_interest, estimated_value, contact_id')
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
       return { success: true, lead: data }
     }
 
@@ -897,7 +921,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         .eq('id', String(args.leadId))
         .select('id, stage, contact_id')
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
       return { success: true, lead: data }
     }
 
@@ -907,13 +931,13 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
 
       if (type === 'lead') {
         const { error } = await supabase.from('leads').update({ notes: args.notes }).eq('id', id)
-        if (error) throw error
+        if (error) throw new Error(error.message ?? JSON.stringify(error))
         return { success: true, updated: 'lead', id }
       }
 
       if (type === 'job') {
         const { error } = await supabase.from('jobs').update({ notes: args.notes }).eq('id', id)
-        if (error) throw error
+        if (error) throw new Error(error.message ?? JSON.stringify(error))
         return { success: true, updated: 'job', id }
       }
 
@@ -922,11 +946,34 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         if (args.notes)        updates.notes         = args.notes
         if (args.customFields) updates.custom_fields = args.customFields
         const { error } = await supabase.from('contacts').update(updates).eq('id', id)
-        if (error) throw error
+        if (error) throw new Error(error.message ?? JSON.stringify(error))
         return { success: true, updated: 'contact', id }
       }
 
       return { error: `Unknown recordType: ${type}` }
+    }
+
+    case 'update_contact': {
+      const id = String(args.contactId)
+      // Build patch — only include fields that were passed
+      const patch: Record<string, unknown> = {}
+      if (args.name         != null) patch.name          = String(args.name)
+      if (args.phone        != null) patch.phone         = String(args.phone)
+      if (args.email        != null) patch.email         = String(args.email)
+      if (args.businessName != null) patch.business_name = String(args.businessName)
+      if (args.notes        != null) patch.notes         = String(args.notes)
+      if (args.customFields != null) {
+        // Merge into existing custom_fields rather than overwrite
+        const { data: existing } = await supabase
+          .from('contacts').select('custom_fields').eq('id', id).single()
+        patch.custom_fields = { ...(existing?.custom_fields ?? {}), ...args.customFields }
+      }
+      if (Object.keys(patch).length === 0) return { error: 'No fields provided to update.' }
+      const { data, error } = await supabase
+        .from('contacts').update(patch).eq('id', id)
+        .select('id, name, phone, email, custom_fields').single()
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
+      return { success: true, contact: data }
     }
 
     case 'queue_sms': {
@@ -937,7 +984,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         contact_id: args.contactId ?? null,
         status:     'pending',
       })
-      if (error) throw error
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
       return { success: true, queued: true, note: 'Message queued for approval in the Dashboard SMS panel.' }
     }
 
@@ -953,7 +1000,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         .eq('id', String(args.jobId))
         .select('id, service_name, status, customer_name')
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
       return { success: true, job: data }
     }
 
@@ -968,7 +1015,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         .eq('id', String(args.jobId))
         .select('id, service_name, scheduled_date, scheduled_window, customer_name')
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
       return { success: true, job: data }
     }
 
@@ -1607,7 +1654,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
       const { error } = await supabase
         .from('knox_memory')
         .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
-      if (error) throw error
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
       return { success: true, remembered: { key, value } }
     }
 
@@ -1717,7 +1764,11 @@ export const handler: Handler = async (event) => {
     }
 
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = err instanceof Error
+      ? err.message
+      : typeof err === 'object' && err !== null && 'message' in err
+        ? String((err as Record<string, unknown>).message)
+        : JSON.stringify(err)
     return {
       statusCode: 500,
       headers: CORS,
