@@ -23,13 +23,21 @@ import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { services as priceBookServices } from '../../src/lib/pricing'
 
-const supabase = createClient(
+export const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434').replace(/\/$/, '')
-const OLLAMA_MODEL    = process.env.OLLAMA_MODEL ?? 'llama3.1:8b'
+const OLLAMA_BASE_URL   = (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434').replace(/\/$/, '')
+const OLLAMA_MODEL      = process.env.OLLAMA_MODEL ?? 'qwen2.5:7b'
+const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL ?? null
+
+// Write tools — used for audit logging and frontend cache invalidation signals
+export const WRITE_TOOLS = new Set([
+  'create_contact', 'create_lead', 'update_lead_stage', 'add_note',
+  'queue_sms', 'complete_job', 'schedule_job', 'batch_queue_review_requests',
+  'remember_fact',
+])
 
 const CORS = {
   'Content-Type': 'application/json',
@@ -40,7 +48,7 @@ const CORS = {
 
 // ── Tool definitions (OpenAI-compatible format, supported by Ollama) ─────────
 
-const tools = [
+export const tools = [
   {
     type: 'function',
     function: {
@@ -500,12 +508,36 @@ const tools = [
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
+  // ── Memory tools ──────────────────────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'remember_fact',
+      description: 'Store a fact in Knox\'s persistent memory so it\'s available in future sessions. Use for things worth remembering across conversations: owner preferences, standing instructions, recurring notes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          key:   { type: 'string', description: 'Short descriptive key, e.g. "owner_scheduling_preference"' },
+          value: { type: 'string', description: 'The fact to remember' },
+        },
+        required: ['key', 'value'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'recall_memory',
+      description: 'Retrieve all facts stored in Knox\'s persistent memory.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
 ]
 
 // ── Tool execution (all queries run server-side with the service key) ─────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function executeTool(name: string, args: Record<string, any>): Promise<unknown> {
+export async function executeTool(name: string, args: Record<string, any>): Promise<unknown> {
   switch (name) {
 
     case 'search_contacts': {
@@ -1316,6 +1348,27 @@ async function executeTool(name: string, args: Record<string, any>): Promise<unk
       }
     }
 
+    // ── Memory tools ───────────────────────────────────────────────────────────
+
+    case 'remember_fact': {
+      const key   = String(args.key   ?? '').trim()
+      const value = String(args.value ?? '').trim()
+      if (!key) return { error: 'key is required' }
+      const { error } = await supabase
+        .from('knox_memory')
+        .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+      if (error) throw error
+      return { success: true, remembered: { key, value } }
+    }
+
+    case 'recall_memory': {
+      const { data } = await supabase
+        .from('knox_memory')
+        .select('key, value, updated_at')
+        .order('updated_at', { ascending: false })
+      return data ?? []
+    }
+
     default:
       return { error: `Unknown tool: ${name}` }
   }
@@ -1333,6 +1386,19 @@ export const handler: Handler = async (event) => {
     if (!Array.isArray(messages)) {
       return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'messages array required' }) }
     }
+
+    // ── Detect if any message contains images (multimodal) ────────────────────
+    const hasImages = messages.some(m =>
+      Array.isArray(m.content) && m.content.some((c: { type: string }) => c.type === 'image_url')
+    )
+    const activeModel = hasImages && OLLAMA_VISION_MODEL ? OLLAMA_VISION_MODEL : OLLAMA_MODEL
+
+    // ── Load persistent memory ────────────────────────────────────────────────
+    const { data: memoryRows } = await supabase
+      .from('knox_memory')
+      .select('key, value')
+      .order('updated_at', { ascending: false })
+    const memory = memoryRows ?? []
 
     // ── System prompt ────────────────────────────────────────────────────────
     const now = new Date().toLocaleString('en-US', {
@@ -1580,7 +1646,11 @@ COMPETITIVE CONTEXT
 ━━━ END KNOWLEDGE BASE ━━━
 
 Current date/time: ${now}
-Current CRM page: ${context?.page ?? 'unknown'}${context?.recordLabel ? `\nCurrently viewing: ${context.recordLabel}` : ''}`
+Current CRM page: ${context?.page ?? 'unknown'}${context?.recordLabel ? `\nCurrently viewing: ${context.recordLabel}` : ''}${
+  memory.length > 0
+    ? `\n\nKNOX MEMORY (facts stored across sessions):\n${memory.map((m: { key: string; value: string }) => `- ${m.key}: ${m.value}`).join('\n')}`
+    : ''
+}`
 
     // ── Agentic loop ─────────────────────────────────────────────────────────
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1591,19 +1661,21 @@ Current CRM page: ${context?.page ?? 'unknown'}${context?.recordLabel ? `\nCurre
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let finalResponse: any = null
-    const MAX_ROUNDS = 6  // prevent infinite loops
+    const toolsUsed: string[]   = []
+    const actionsTaken: object[] = []
+    const MAX_ROUNDS = 6
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const res = await fetch(`${OLLAMA_BASE_URL}/v1/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model:    OLLAMA_MODEL,
+          model:    activeModel,
           messages: history,
           tools,
           stream:   false,
           options: {
-            temperature: 0.3,  // lower = more factual, less creative
+            temperature: 0.3,
           },
         }),
       })
@@ -1629,11 +1701,17 @@ Current CRM page: ${context?.page ?? 'unknown'}${context?.recordLabel ? `\nCurre
 
       // Execute all tool calls in this round, collect results
       for (const tc of msg.tool_calls) {
+        const toolName = tc.function.name
         const argsParsed = typeof tc.function.arguments === 'string'
           ? JSON.parse(tc.function.arguments)
           : (tc.function.arguments ?? {})
 
-        const result = await executeTool(tc.function.name, argsParsed)
+        toolsUsed.push(toolName)
+        const result = await executeTool(toolName, argsParsed)
+
+        if (WRITE_TOOLS.has(toolName)) {
+          actionsTaken.push({ tool: toolName, args: argsParsed, result })
+        }
 
         history.push({
           role:         'tool',
@@ -1647,10 +1725,22 @@ Current CRM page: ${context?.page ?? 'unknown'}${context?.recordLabel ? `\nCurre
       finalResponse = "I ran into trouble getting an answer. Try rephrasing the question."
     }
 
+    // ── Audit log (write to knox_log if any write actions were taken) ─────────
+    if (actionsTaken.length > 0) {
+      const userMessage = messages.filter((m: { role: string }) => m.role === 'user').pop()
+      supabase.from('knox_log').insert({
+        trigger_type:  'chat',
+        user_message:  typeof userMessage?.content === 'string' ? userMessage.content : null,
+        knox_response: finalResponse,
+        tools_called:  toolsUsed,
+        actions_taken: actionsTaken,
+      }).then(() => {}).catch(() => {})  // fire-and-forget, non-fatal
+    }
+
     return {
       statusCode: 200,
       headers: CORS,
-      body: JSON.stringify({ response: finalResponse }),
+      body: JSON.stringify({ response: finalResponse, toolsUsed }),
     }
 
   } catch (err: unknown) {
