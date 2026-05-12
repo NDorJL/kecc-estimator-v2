@@ -292,9 +292,7 @@ export function KnoxWidget() {
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border/60 bg-card shrink-0">
             <div className="flex items-center gap-2.5">
-              <div className="h-7 w-7 rounded-full bg-black flex items-center justify-center shrink-0 overflow-hidden">
-                <KnoxLogo size={24} />
-              </div>
+              <KnoxLogo size={36} className="shrink-0" />
               <div>
                 <p className="text-sm font-semibold leading-none">Knox</p>
                 <p className="text-[10px] text-muted-foreground mt-0.5">KECC AI Assistant</p>
@@ -320,9 +318,7 @@ export function KnoxWidget() {
             {/* Empty state */}
             {!hasMessages && !loading && (
               <div className="flex flex-col items-center justify-center h-full text-center gap-3 px-4">
-                <div className="h-16 w-16 rounded-full bg-black flex items-center justify-center overflow-hidden">
-                  <KnoxLogo size={56} />
-                </div>
+                <KnoxLogo size={80} />
                 <div>
                   <p className="text-sm font-semibold">Hey, I'm Knox.</p>
                   <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
@@ -351,9 +347,7 @@ export function KnoxWidget() {
             {messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'assistant' && (
-                  <div className="h-6 w-6 rounded-full bg-black flex items-center justify-center shrink-0 mt-0.5 mr-2 overflow-hidden">
-                    <KnoxLogo size={20} />
-                  </div>
+                  <KnoxLogo size={28} className="shrink-0 mt-0.5 mr-1.5" />
                 )}
                 <div className={`flex flex-col gap-1.5 max-w-[82%]`}>
                   {/* Image thumbnail for user messages */}
@@ -486,16 +480,17 @@ export function KnoxWidget() {
       {/* ── Toggle button ────────────────────────────────────────────────── */}
       <button
         onClick={() => setOpen(o => !o)}
-        className={`fixed bottom-6 right-4 sm:right-6 z-50 h-14 w-14 rounded-full shadow-lg flex items-center justify-center transition-all duration-200 ${
+        className={`fixed bottom-6 right-4 sm:right-6 z-50 flex items-center justify-center transition-all duration-200 ${
           open
-            ? 'bg-muted border border-border/60 scale-90'
-            : 'bg-black hover:opacity-90 active:scale-95 overflow-hidden'
+            ? 'h-11 w-11 rounded-full bg-card/80 border border-border/60 shadow-lg scale-90'
+            : 'hover:scale-110 active:scale-95 drop-shadow-lg'
         }`}
+        style={open ? {} : { width: 64, height: 64 }}
         aria-label={open ? 'Close Knox' : 'Open Knox AI Assistant'}
       >
         {open
-          ? <X className="h-5 w-5 text-muted-foreground" />
-          : <KnoxLogo size={48} />}
+          ? <X className="h-4 w-4 text-muted-foreground" />
+          : <KnoxLogo size={64} />}
       </button>
     </>
   )
