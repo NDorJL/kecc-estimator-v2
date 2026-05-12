@@ -508,6 +508,90 @@ export const tools = [
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
+  // ── Finance & transactions ────────────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'get_transactions',
+      description: 'Query income and expense transactions from the finance ledger. Use to answer questions about revenue, expenses, profit, unpaid invoices, or specific transaction history.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type:       { type: 'string', description: 'Filter by type: Income | Expense' },
+          category:   { type: 'string', description: 'Filter by category, e.g. "Job Revenue", "Advertising"' },
+          startDate:  { type: 'string', description: 'ISO date YYYY-MM-DD — start of date range' },
+          endDate:    { type: 'string', description: 'ISO date YYYY-MM-DD — end of date range' },
+          unpaidOnly: { type: 'boolean', description: 'If true, return only unpaid income entries' },
+          limit:      { type: 'number', description: 'Max results (default 30)' },
+        },
+        required: [],
+      },
+    },
+  },
+  // ── Contact activity timeline ─────────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'get_activities',
+      description: 'Get the activity timeline for a contact — SMS messages, calls, notes, job events, quote events, payments, and any other logged interactions.',
+      parameters: {
+        type: 'object',
+        properties: {
+          contactId: { type: 'string', description: 'The contact UUID' },
+          limit:     { type: 'number', description: 'Max results (default 20, newest first)' },
+        },
+        required: ['contactId'],
+      },
+    },
+  },
+  // ── Contractors ───────────────────────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'get_contractors',
+      description: 'Get the list of subcontractors — names, phone numbers, specialties, rates, and 1099 status.',
+      parameters: {
+        type: 'object',
+        properties: {
+          specialty: { type: 'string', description: 'Optional: filter by specialty keyword' },
+        },
+        required: [],
+      },
+    },
+  },
+  // ── SMS queue ─────────────────────────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'get_sms_queue',
+      description: 'View messages in the SMS approval queue — pending messages awaiting send, and recently sent messages.',
+      parameters: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', description: 'Filter by status: pending | sent | failed (default: pending)' },
+          limit:  { type: 'number', description: 'Max results (default 20)' },
+        },
+        required: [],
+      },
+    },
+  },
+  // ── Service agreements ────────────────────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'get_agreements',
+      description: 'Get service agreements — their status (draft, pending_signature, signed, void), which customer they belong to, and when they were signed.',
+      parameters: {
+        type: 'object',
+        properties: {
+          contactId: { type: 'string', description: 'Optional: filter by contact UUID' },
+          status:    { type: 'string', description: 'Filter by status: draft | pending_signature | signed | void' },
+          limit:     { type: 'number', description: 'Max results (default 20)' },
+        },
+        required: [],
+      },
+    },
+  },
   // ── Autonomous / direct owner channel ────────────────────────────────────────
   {
     type: 'function',
@@ -1147,6 +1231,78 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         jobs:          jobsRes.data    ?? [],
         subscriptions: subsRes.data    ?? [],
       }
+    }
+
+    // ── Full CRM access tools ──────────────────────────────────────────────────
+
+    case 'get_transactions': {
+      let query = supabase
+        .from('transactions')
+        .select('id, date, description, amount, type, category, account, notes, review, is_unpaid, source, contact_id')
+        .order('date', { ascending: false })
+        .limit(Number(args.limit ?? 30))
+      if (args.type)       query = query.eq('type', args.type)
+      if (args.category)   query = query.ilike('category', `%${args.category}%`)
+      if (args.startDate)  query = query.gte('date', args.startDate)
+      if (args.endDate)    query = query.lte('date', args.endDate)
+      if (args.unpaidOnly) query = query.eq('is_unpaid', true)
+      const { data, error } = await query
+      if (error) throw new Error(error.message)
+      const rows = data ?? []
+      const totalIncome  = rows.filter(r => r.type === 'Income').reduce((s, r) => s + Number(r.amount), 0)
+      const totalExpense = rows.filter(r => r.type === 'Expense').reduce((s, r) => s + Number(r.amount), 0)
+      return { transactions: rows, summary: { totalIncome, totalExpense, net: totalIncome - totalExpense, count: rows.length } }
+    }
+
+    case 'get_activities': {
+      requireUUID(String(args.contactId), 'contactId')
+      const { data, error } = await supabase
+        .from('activities')
+        .select('id, type, summary, metadata, created_at')
+        .eq('contact_id', String(args.contactId))
+        .order('created_at', { ascending: false })
+        .limit(Number(args.limit ?? 20))
+      if (error) throw new Error(error.message)
+      return data ?? []
+    }
+
+    case 'get_contractors': {
+      let query = supabase
+        .from('contractors')
+        .select('id, name, phone, email, company, specialty, rate_per_job, is_1099, notes')
+        .order('name')
+      if (args.specialty) query = query.ilike('specialty', `%${args.specialty}%`)
+      const { data, error } = await query
+      if (error) throw new Error(error.message)
+      return data ?? []
+    }
+
+    case 'get_sms_queue': {
+      const status = String(args.status ?? 'pending')
+      const { data, error } = await supabase
+        .from('sms_queue')
+        .select('id, to_phone, message, type, status, contact_id, created_at')
+        .eq('status', status)
+        .order('created_at', { ascending: false })
+        .limit(Number(args.limit ?? 20))
+      if (error) throw new Error(error.message)
+      return data ?? []
+    }
+
+    case 'get_agreements': {
+      let query = supabase
+        .from('service_agreements')
+        .select('id, contact_id, customer_name, customer_address, status, signed_at, created_at')
+        .order('created_at', { ascending: false })
+        .limit(Number(args.limit ?? 20))
+      if (args.contactId) {
+        requireUUID(String(args.contactId), 'contactId')
+        query = query.eq('contact_id', String(args.contactId))
+      }
+      if (args.status) query = query.eq('status', String(args.status))
+      const { data, error } = await query
+      if (error) throw new Error(error.message)
+      return data ?? []
     }
 
     // ── Session 6: Automation triggers ─────────────────────────────────────────
