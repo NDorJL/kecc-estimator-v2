@@ -23,7 +23,7 @@ const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? 'claude-sonnet-4-5'
 
 // Write tools — used for audit logging and frontend cache invalidation signals
 export const WRITE_TOOLS = new Set([
-  'create_contact', 'update_contact', 'create_lead', 'update_lead_stage', 'add_note',
+  'create_contact', 'update_contact', 'add_property', 'create_lead', 'update_lead_stage', 'add_note',
   'queue_sms', 'complete_job', 'schedule_job', 'batch_queue_review_requests',
   'remember_fact', 'notify_owner',
 ])
@@ -528,7 +528,7 @@ export const tools = [
     type: 'function',
     function: {
       name: 'update_contact',
-      description: 'Update a contact\'s core fields: name, phone, email, address (stored in custom_fields), or any other custom property. Use this when asked to add or change a phone number, email, address, gate code, dog warning, or similar info on a contact record.',
+      description: 'Update a contact\'s core fields: name, phone, email, businessName, notes, or property-access custom fields (gate code, dog warning, parking notes). Do NOT use this for service addresses — use add_property instead.',
       parameters: {
         type: 'object',
         properties: {
@@ -540,10 +540,43 @@ export const tools = [
           notes:        { type: 'string', description: 'Updated notes' },
           customFields: {
             type: 'object',
-            description: 'Key-value pairs to merge into custom_fields — e.g. { address: "123 Main St", gateCode: "1234", dogOnProperty: "yes - lab mix" }',
+            description: 'Property-access key-value pairs — e.g. { gateCode: "1234", dogOnProperty: "yes - lab mix", parkingNotes: "use driveway" }. NOT for addresses — use add_property for those.',
           },
         },
         required: ['contactId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_contact_properties',
+      description: 'Get all service addresses (properties) linked to a contact. Call this before add_property to check if an address already exists.',
+      parameters: {
+        type: 'object',
+        properties: {
+          contactId: { type: 'string', description: 'The contact UUID' },
+        },
+        required: ['contactId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'add_property',
+      description: 'Add a service address to a contact. This is the correct tool when asked to add or update an address on a contact card. Call get_contact_properties first — if an address already exists, confirm with the user before adding a second one.',
+      parameters: {
+        type: 'object',
+        properties: {
+          contactId:    { type: 'string', description: 'The contact UUID' },
+          address:      { type: 'string', description: 'Full service address, e.g. "123 Main St, Knoxville, TN 37919"' },
+          label:        { type: 'string', description: 'Optional label, e.g. "Home", "Rental Property"' },
+          type:         { type: 'string', description: 'residential or commercial (default: residential)' },
+          notes:        { type: 'string', description: 'Optional property notes — gate codes, parking, dogs, etc.' },
+          mowableAcres: { type: 'number', description: 'Mowable acreage if known (pre-fills the calculator)' },
+        },
+        required: ['contactId', 'address'],
       },
     },
   },
@@ -644,6 +677,8 @@ CONVERSATIONAL SKILLS
 - Re-engagement drafts: use draft_reengagement_message to generate a message, show it to the user, let them edit if needed, then use queue_sms to submit for approval.
 
 When someone asks about gate codes, access notes, dog warnings, or property-specific info — use get_contact_details or search_contacts and read the custom_fields and notes.
+
+ADDRESS RULE: Service addresses are stored in the properties table, NOT on the contact record. To add an address: call get_contact_properties first (check if one exists), then call add_property with the contactId and address. Never put an address in custom_fields — it won't appear in the UI.
 
 ━━━ KECC KNOWLEDGE BASE ━━━
 
@@ -995,6 +1030,34 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
       if (error) throw new Error(error.message ?? JSON.stringify(error))
       if (!data) return { error: `Contact ${id} not found. Use search_contacts to find the correct ID.` }
       return { success: true, contact: data }
+    }
+
+    case 'get_contact_properties': {
+      requireUUID(String(args.contactId), 'contactId')
+      const { data } = await supabase
+        .from('properties')
+        .select('id, label, address, type, mowable_acres, sqft, notes')
+        .eq('contact_id', String(args.contactId))
+        .order('created_at')
+      return data ?? []
+    }
+
+    case 'add_property': {
+      requireUUID(String(args.contactId), 'contactId')
+      const { data, error } = await supabase
+        .from('properties')
+        .insert({
+          contact_id:    String(args.contactId),
+          address:       String(args.address),
+          label:         args.label        ?? null,
+          type:          args.type         ?? 'residential',
+          notes:         args.notes        ?? null,
+          mowable_acres: args.mowableAcres ?? null,
+        })
+        .select('id, label, address, type, notes')
+        .single()
+      if (error) throw new Error(error.message ?? JSON.stringify(error))
+      return { success: true, property: data }
     }
 
     case 'queue_sms': {

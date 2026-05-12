@@ -159,6 +159,8 @@ export default async function handler(req: Request): Promise<Response> {
             generate_marketing_report:   'Generating marketing report…',
             get_weekly_comparison:       'Comparing this week vs last week…',
             draft_reengagement_message:  'Drafting re-engagement message…',
+            get_contact_properties:      'Loading service addresses…',
+            add_property:                'Adding service address…',
             create_contact:              'Creating contact…',
             create_lead:                 'Creating lead…',
             update_lead_stage:           'Moving lead stage…',
