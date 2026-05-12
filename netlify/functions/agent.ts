@@ -782,8 +782,9 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         .from('contacts')
         .select('*')
         .eq('id', String(args.contactId))
-        .single()
-      return data ?? { error: 'Contact not found' }
+        .maybeSingle()
+      if (!data) return { error: `Contact ${args.contactId} not found. Use search_contacts to find the correct ID.` }
+      return data
     }
 
     case 'get_leads': {
@@ -936,8 +937,9 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         .update(updates)
         .eq('id', String(args.leadId))
         .select('id, stage, contact_id')
-        .single()
+        .maybeSingle()
       if (error) throw new Error(error.message ?? JSON.stringify(error))
+      if (!data) return { error: `Lead ${args.leadId} not found. Use get_leads to find the correct ID.` }
       return { success: true, lead: data }
     }
 
@@ -983,14 +985,15 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
       if (args.customFields != null) {
         // Merge into existing custom_fields rather than overwrite
         const { data: existing } = await supabase
-          .from('contacts').select('custom_fields').eq('id', id).single()
+          .from('contacts').select('custom_fields').eq('id', id).maybeSingle()
         patch.custom_fields = { ...(existing?.custom_fields ?? {}), ...args.customFields }
       }
       if (Object.keys(patch).length === 0) return { error: 'No fields provided to update.' }
       const { data, error } = await supabase
         .from('contacts').update(patch).eq('id', id)
-        .select('id, name, phone, email, custom_fields').single()
+        .select('id, name, phone, email, custom_fields').maybeSingle()
       if (error) throw new Error(error.message ?? JSON.stringify(error))
+      if (!data) return { error: `Contact ${id} not found. Use search_contacts to find the correct ID.` }
       return { success: true, contact: data }
     }
 
@@ -1018,8 +1021,9 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         .update(updates)
         .eq('id', String(args.jobId))
         .select('id, service_name, status, customer_name')
-        .single()
+        .maybeSingle()
       if (error) throw new Error(error.message ?? JSON.stringify(error))
+      if (!data) return { error: `Job ${args.jobId} not found. Use find_job to locate the correct ID.` }
       return { success: true, job: data }
     }
 
@@ -1034,8 +1038,9 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         .update(updates)
         .eq('id', String(args.jobId))
         .select('id, service_name, scheduled_date, scheduled_window, customer_name')
-        .single()
+        .maybeSingle()
       if (error) throw new Error(error.message ?? JSON.stringify(error))
+      if (!data) return { error: `Job ${args.jobId} not found. Use find_job to locate the correct ID.` }
       return { success: true, job: data }
     }
 
