@@ -511,6 +511,15 @@ export const tools = [
       parameters: { type: 'object', properties: {}, required: [] },
     },
   },
+  // ── Phase 4: On-demand insight analysis ──────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'get_weekly_comparison',
+      description: 'Compare this week\'s performance against last week across leads, revenue, quotes, and marketing sources. Returns structured data for insight analysis.',
+      parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
   // ── Autonomous / direct owner channel ────────────────────────────────────────
   {
     type: 'function',
@@ -1363,6 +1372,52 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         pausedSubscriptions:      pausedSubs.data    ?? [],
         finishedUnpaidLeads:      finishedUnpaid.data ?? [],
         activeSubsNoRecentJob:    inactiveActiveSubs.slice(0, 20),
+      }
+    }
+
+    // ── Phase 4: Weekly comparison ─────────────────────────────────────────────
+
+    case 'get_weekly_comparison': {
+      const now     = Date.now()
+      const thisEnd   = new Date(now).toISOString().slice(0, 10)
+      const thisStart = new Date(now - 7 * 86400000).toISOString().slice(0, 10)
+      const lastEnd   = thisStart
+      const lastStart = new Date(now - 14 * 86400000).toISOString().slice(0, 10)
+
+      async function weekSlice(start: string, end: string) {
+        const [leadsRes, closedRes, quotesRes] = await Promise.all([
+          supabase.from('leads').select('source, stage').gte('created_at', `${start}T00:00:00`).lt('created_at', `${end}T23:59:59`),
+          supabase.from('leads').select('estimated_value').in('stage', ['finished_paid', 'finished_unpaid']).gte('created_at', `${start}T00:00:00`).lt('created_at', `${end}T23:59:59`),
+          supabase.from('quotes').select('status, total').gte('created_at', `${start}T00:00:00`).lt('created_at', `${end}T23:59:59`).is('trashed_at', null),
+        ])
+        const leads  = leadsRes.data  ?? []
+        const closed = closedRes.data ?? []
+        const quotes = quotesRes.data ?? []
+        const bySource: Record<string, number> = {}
+        for (const l of leads) { const s = l.source ?? 'Unattributed'; bySource[s] = (bySource[s] ?? 0) + 1 }
+        const sent = quotes.filter(q => q.status === 'sent' || q.status === 'accepted')
+        const acc  = quotes.filter(q => q.status === 'accepted')
+        return {
+          newLeads:       leads.length,
+          leadsBySource:  bySource,
+          closedJobs:     closed.length,
+          closedRevenue:  closed.reduce((s, l) => s + Number(l.estimated_value ?? 0), 0),
+          quotesSent:     sent.length,
+          quotesAccepted: acc.length,
+          acceptanceRate: sent.length > 0 ? Math.round((acc.length / sent.length) * 100) : null,
+        }
+      }
+
+      const [thisWeek, lastWeek] = await Promise.all([weekSlice(thisStart, thisEnd), weekSlice(lastStart, lastEnd)])
+      const { data: subs } = await supabase.from('subscriptions').select('status, in_season_monthly_total')
+      const active = (subs ?? []).filter(s => s.status === 'ACTIVE')
+      const mrr    = active.reduce((s, r) => s + Number(r.in_season_monthly_total), 0)
+
+      return {
+        thisWeek:  { period: `${thisStart} → ${thisEnd}`,   ...thisWeek },
+        lastWeek:  { period: `${lastStart} → ${lastEnd}`, ...lastWeek },
+        mrr,
+        note: 'Use this data to identify patterns. Ask Knox to explain what it means.',
       }
     }
 

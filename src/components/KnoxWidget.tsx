@@ -332,7 +332,7 @@ export function KnoxWidget() {
                 <div className="flex flex-col gap-1.5 w-full mt-1">
                   {[
                     "Give me my daily briefing",
-                    "What's my route today?",
+                    "Compare this week vs last week",
                     "Any unsigned quotes over $500?",
                   ].map(prompt => (
                     <button

@@ -46,6 +46,10 @@
 [functions."knox-agent"]
   schedule = "0 12 * * *"   # noon UTC = 7 am EST / 8 am EDT
 
+[functions."knox-observer"]
+  schedule = "0 0 * * 1"   # midnight UTC Monday (7 pm ET Sunday)
+  timeout = 60
+
 [functions."send-reminders"]
   schedule = "0 14 * * *"
 
