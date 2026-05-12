@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react'
+import { Sensitive } from '@/components/ui/sensitive'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet, apiRequest } from '@/lib/queryClient'  // ← apiRequest added
 import type { Quote, Subscription, CompanySettings, Lead, Job, SubcontractorAgreement } from '@/types'
@@ -119,8 +120,8 @@ function KpiCard({
           <Skeleton className="h-9 w-24" />
         ) : (
           <>
-            <p className="text-[2rem] font-black tracking-tight leading-none mt-0.5 tabular-nums">{value}</p>
-            {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
+            <Sensitive as="p" className="text-[2rem] font-black tracking-tight leading-none mt-0.5 tabular-nums">{value}</Sensitive>
+            {sub && <Sensitive as="p" className="text-xs text-muted-foreground mt-1">{sub}</Sensitive>}
           </>
         )}
       </CardContent>
@@ -823,8 +824,8 @@ export default function Dashboard() {
                 className="w-full rounded-xl border bg-card p-3 text-left hover:bg-muted/50 active:scale-95 transition-all"
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold text-sm">{q.customerName}</span>
-                  <span className="text-sm font-bold">${q.total.toFixed(0)}</span>
+                  <Sensitive className="font-semibold text-sm">{q.customerName}</Sensitive>
+                  <Sensitive className="text-sm font-bold">${q.total.toFixed(0)}</Sensitive>
                 </div>
                 <div className="flex items-center justify-between mt-0.5">
                   <span className="text-xs text-muted-foreground capitalize">{q.status}</span>

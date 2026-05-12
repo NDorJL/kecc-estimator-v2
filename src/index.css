@@ -192,6 +192,19 @@
   }
 }
 
+/* ── Demo mode — blur sensitive data ────────────────────────────────────────── */
+.demo-mode [data-sensitive] {
+  filter: blur(8px);
+  user-select: none;
+  pointer-events: none;
+  transition: filter 0.2s ease;
+}
+/* Remove blur on hover so the owner can still read if needed */
+.demo-mode [data-sensitive]:hover {
+  filter: blur(0px);
+  pointer-events: auto;
+}
+
 /* ── Page enter animation ────────────────────────────────────────────────────── */
 @keyframes page-enter {
   from { opacity: 0; transform: translateY(6px); }

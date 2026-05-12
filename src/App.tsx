@@ -10,7 +10,8 @@ import { ServicesProvider } from '@/lib/services-context'
 import { Button } from '@/components/ui/button'
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar'
 import { AppSidebar } from '@/components/AppSidebar'
-import { Sun, Moon } from 'lucide-react'
+import { Sun, Moon, Eye, EyeOff } from 'lucide-react'
+import { DemoModeProvider, useDemoMode } from '@/lib/demo-mode'
 import Dashboard from '@/pages/Dashboard'
 import Contacts from '@/pages/Contacts'
 import ContactDetail from '@/pages/ContactDetail'
@@ -63,26 +64,49 @@ function getPageLabel(location: string): string {
 
 function AppHeader() {
   const { theme, toggleTheme } = useTheme()
+  const { demoMode, toggleDemoMode } = useDemoMode()
   const [location] = useLocation()
   const pageLabel = getPageLabel(location)
 
   return (
-    <header className="sticky top-0 z-50 flex items-center gap-2 border-b bg-card/95 backdrop-blur-sm px-3" style={{ minHeight: 48 }}>
-      <SidebarTrigger className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground" />
+    <>
+      <header className="sticky top-0 z-50 flex items-center gap-2 border-b bg-card/95 backdrop-blur-sm px-3" style={{ minHeight: 48 }}>
+        <SidebarTrigger className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground" />
 
-      {/* Current page name — centered between the two icons */}
-      <div className="flex-1 flex justify-center">
-        {pageLabel && (
-          <span className="text-sm font-semibold tracking-tight truncate max-w-[200px]">
-            {pageLabel}
-          </span>
-        )}
-      </div>
+        {/* Current page name — centered */}
+        <div className="flex-1 flex justify-center">
+          {pageLabel && (
+            <span className="text-sm font-semibold tracking-tight truncate max-w-[200px]">
+              {pageLabel}
+            </span>
+          )}
+        </div>
 
-      <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-8 w-8 rounded-full">
-        {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-      </Button>
-    </header>
+        {/* Demo mode toggle */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={toggleDemoMode}
+          className={`h-8 w-8 rounded-full ${demoMode ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+          title={demoMode ? 'Demo mode on — click to disable' : 'Enable demo mode (blurs sensitive data)'}
+        >
+          {demoMode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </Button>
+
+        <Button variant="ghost" size="icon" onClick={toggleTheme} className="h-8 w-8 rounded-full">
+          {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        </Button>
+      </header>
+
+      {/* Demo mode banner */}
+      {demoMode && (
+        <div className="sticky top-[48px] z-40 flex items-center justify-center gap-2 bg-primary/10 border-b border-primary/20 py-1 px-3">
+          <EyeOff className="h-3 w-3 text-primary shrink-0" />
+          <span className="text-[11px] font-semibold text-primary tracking-wide uppercase">Demo Mode — sensitive data is blurred</span>
+          <button onClick={toggleDemoMode} className="text-[11px] text-primary/70 underline hover:text-primary ml-2">Disable</button>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -137,14 +161,16 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <ThemeProvider>
-          <ServicesProvider>
-            <QuoteProvider>
-              <Toaster />
-              <Router hook={useHashLocation}>
-                <AppLayout />
-              </Router>
-            </QuoteProvider>
-          </ServicesProvider>
+          <DemoModeProvider>
+            <ServicesProvider>
+              <QuoteProvider>
+                <Toaster />
+                <Router hook={useHashLocation}>
+                  <AppLayout />
+                </Router>
+              </QuoteProvider>
+            </ServicesProvider>
+          </DemoModeProvider>
         </ThemeProvider>
       </TooltipProvider>
     </QueryClientProvider>
