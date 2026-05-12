@@ -7,14 +7,15 @@
  * - Every 1st:       + Monthly marketing performance snapshot
  *
  * Sends directly to owner's phone via OpenPhone — no approval queue.
- * Falls back to structured text if Ollama is unreachable.
+ * Falls back to structured text if Claude API is unavailable.
  *
  * Required env vars:
- *   OWNER_PHONE       — owner's personal cell, e.g. 8656036396
- *   OLLAMA_BASE_URL   — Cloudflare tunnel URL
- *   OLLAMA_AGENT_MODEL or OLLAMA_MODEL — model for report generation
+ *   ANTHROPIC_API_KEY      — Anthropic API key
+ *   OWNER_PHONE            — owner's personal cell, e.g. 8656036396
+ *   CLAUDE_AGENT_MODEL     — optional model override (default: claude-3-5-sonnet-20241022)
  */
 import type { Handler } from '@netlify/functions'
+import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { sendOpenPhoneSms } from './_smsHelper'
 
@@ -23,9 +24,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434').replace(/\/$/, '')
-const OLLAMA_MODEL    = process.env.OLLAMA_AGENT_MODEL ?? process.env.OLLAMA_MODEL ?? 'qwen2.5:14b'
-const OWNER_PHONE     = process.env.OWNER_PHONE ?? '8656036396'
+const CLAUDE_MODEL = process.env.CLAUDE_AGENT_MODEL ?? process.env.CLAUDE_MODEL ?? 'claude-3-5-sonnet-20241022'
+const OWNER_PHONE  = process.env.OWNER_PHONE ?? '8656036396'
 
 // ── Data collection helpers ────────────────────────────────────────────────────
 
@@ -106,10 +106,12 @@ async function getMonthlyMarketingData() {
   return { month, totalSpend, totalLeads, totalClosed }
 }
 
-// ── Ollama LLM call ────────────────────────────────────────────────────────────
+// ── Claude API call ────────────────────────────────────────────────────────────
 
 async function generateBriefing(dataContext: string): Promise<string | null> {
   try {
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
     const systemPrompt = [
       'You are Knox, the KECC AI agent. You are generating an automated morning briefing SMS for the owner.',
       'Rules: plain text only (no markdown, no bullet symbols), concise, direct, actionable.',
@@ -118,26 +120,19 @@ async function generateBriefing(dataContext: string): Promise<string | null> {
       'Mention jobs first, then any urgent items. End with MRR if available.',
     ].join(' ')
 
-    const res = await fetch(`${OLLAMA_BASE_URL}/v1/chat/completions`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model:    OLLAMA_MODEL,
-        messages: [
-          { role: 'system',  content: systemPrompt },
-          { role: 'user',    content: `Generate the briefing SMS from this data:\n${dataContext}` },
-        ],
-        stream:  false,
-        options: { temperature: 0.4 },
-      }),
-      signal: AbortSignal.timeout(25000),
+    const response = await anthropic.messages.create({
+      model:      CLAUDE_MODEL,
+      max_tokens: 512,
+      system:     systemPrompt,
+      messages:   [{ role: 'user', content: `Generate the briefing SMS from this data:\n${dataContext}` }],
+      // @ts-expect-error — temperature accepted at runtime
+      temperature: 0.4,
     })
 
-    if (!res.ok) return null
-    const data = await res.json()
-    return data.choices?.[0]?.message?.content?.trim() ?? null
+    const textBlock = response.content.find(c => c.type === 'text') as { type: 'text'; text: string } | undefined
+    return textBlock?.text?.trim() ?? null
   } catch {
-    return null  // Ollama unreachable — caller uses fallback
+    return null  // Claude unavailable — caller uses fallback
   }
 }
 
@@ -193,10 +188,10 @@ export const handler: Handler = async () => {
       isFirstOfMonth ? getMonthlyMarketingData() : Promise.resolve(null),
     ])
 
-    // Build data context for Ollama
+    // Build data context for Claude
     const dataContext = JSON.stringify({ daily, weekly: weekly ?? undefined, monthly: monthly ?? undefined }, null, 2)
 
-    // Try LLM first, fall back to template
+    // Try Claude API first, fall back to template
     const message = (await generateBriefing(dataContext)) ?? buildFallbackBriefing(daily, weekly, monthly)
 
     // Get OpenPhone credentials

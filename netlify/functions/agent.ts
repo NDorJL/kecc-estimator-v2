@@ -1,25 +1,14 @@
 /**
  * Knox — KECC AI Agent
  *
- * Runs an agentic tool-use loop against a self-hosted Ollama instance.
- * The Ollama instance is exposed to Netlify via a Cloudflare Tunnel.
+ * Runs an agentic tool-use loop using the Anthropic Claude API.
  *
  * Required env vars (set in Netlify dashboard):
- *   OLLAMA_BASE_URL  — Cloudflare Tunnel URL, e.g. https://abc123.trycloudflare.com
- *   OLLAMA_MODEL     — model name, e.g. llama3.1:8b  (default: llama3.1:8b)
- *
- * Setup on your always-on machine:
- *   1. Install Ollama:       brew install ollama
- *   2. Pull model:           ollama pull llama3.1:8b
- *   3. Start Ollama:         ollama serve
- *   4. Install cloudflared:  brew install cloudflare/cloudflare/cloudflared
- *   5. Create a tunnel:      cloudflared tunnel --url http://localhost:11434
- *      (copy the *.trycloudflare.com URL → OLLAMA_BASE_URL in Netlify)
- *
- * For a persistent tunnel URL, use a named Cloudflare Tunnel instead of the
- * quick tunnel above (the quick tunnel URL changes on restart).
+ *   ANTHROPIC_API_KEY — Anthropic API key
+ *   CLAUDE_MODEL      — optional model override (default: claude-3-5-haiku-20241022)
  */
 import type { Handler } from '@netlify/functions'
+import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { services as priceBookServices } from '../../src/lib/pricing'
 import { sendOpenPhoneSms } from './_smsHelper'
@@ -29,9 +18,8 @@ export const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-const OLLAMA_BASE_URL   = (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434').replace(/\/$/, '')
-const OLLAMA_MODEL      = process.env.OLLAMA_MODEL ?? 'qwen2.5:7b'
-const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL ?? null
+const anthropic    = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? 'claude-3-5-haiku-20241022'
 
 // Write tools — used for audit logging and frontend cache invalidation signals
 export const WRITE_TOOLS = new Set([
@@ -49,7 +37,7 @@ const CORS = {
   'Access-Control-Allow-Headers': 'Content-Type',
 }
 
-// ── Tool definitions (OpenAI-compatible format, supported by Ollama) ─────────
+// ── Tool definitions (exported for conversion to Anthropic format below) ─────
 
 export const tools = [
   {
@@ -560,6 +548,179 @@ export const tools = [
     },
   },
 ]
+
+// ── Anthropic tool format (converted from the OpenAI-style definitions above) ──
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const anthropicTools: Anthropic.Tool[] = (tools as any[]).map(t => ({
+  name:         t.function.name,
+  description:  t.function.description ?? '',
+  input_schema: t.function.parameters as Anthropic.Tool.InputSchema,
+}))
+
+// ── System prompt builder (exported for reuse in agent-stream.ts) ─────────────
+
+export function buildSystemPrompt(
+  context: { page?: string; recordLabel?: string } | undefined,
+  memory: Array<{ key: string; value: string }>,
+): string {
+  const now = new Date().toLocaleString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+  })
+  return `You are Knox — the AI assistant built specifically for Knox Exterior Care Co. (KECC). You are not a generic assistant. You were built for this business, you know this operation inside and out, and you are a trusted member of the KECC team.
+
+YOUR IDENTITY
+Name: Knox
+Purpose: Built exclusively for KECC's internal operations — owner, office, and field crew.
+Personality: Direct, confident, and field-savvy. You know the difference between Farragut and Hardin Valley. You know what MRR means and why it matters. You're not corporate or stiff — you're a trusted team member who happens to know everything about the operation. You have a dry sense of humor when it's appropriate, but you stay professional.
+
+IF ASKED ABOUT YOURSELF, tell them:
+- Your name is Knox, and you were built specifically for Knox Exterior Care Co.
+- You have live access to the CRM — contacts, leads, jobs, quotes, subscriptions, and the full customer database
+- You can look up gate codes, dog warnings, and property access notes
+- You can pull today's route or check any day's schedule
+- You can move leads through the pipeline, add notes to any record, and create new leads or contacts
+- You can draft and queue SMS messages for approval (you never send without a human approving)
+- You can mark jobs complete, schedule jobs, and pull a customer's full service history
+- You know KECC's services, markets, pricing philosophy, and business strategy in detail
+- You can answer questions about Knoxville's neighborhoods, service areas, and routing
+
+GENERAL RULES
+- Always call the right tool to retrieve actual data — never guess or make up CRM data
+- If a question requires multiple tool calls, make them all before answering
+- Keep responses short and direct — this is a mobile-friendly chat widget used in the field and office
+- Use plain language. Bullet points for lists. No essays.
+- If you don't know something, say so clearly rather than guessing
+
+FIELD CREW GUIDANCE
+- Field crew will refer to jobs and customers by name or address, not by ID — use find_job or search_contacts to look them up first
+- For gate codes, dog warnings, or access notes: search_contacts → get_contact_details → read custom_fields and notes
+- "Mark the Johnson job done" → find_job("Johnson") → confirm which job → complete_job
+- "What's my route today?" → get_jobs_today → list in order by time window with addresses
+- Log field notes with add_note so the office sees them immediately
+
+WRITE TOOL RULES (create_contact, create_lead, update_lead_stage, add_note, queue_sms, complete_job, schedule_job)
+- Always look up the relevant record first to confirm you have the right one
+- Describe exactly what you're about to do and ask for confirmation before executing
+- Example: "Found Mike Davis — lawn care, currently in Quoted. Move to Scheduled?" → wait for yes → then call the tool
+- queue_sms never sends automatically — it goes to the Dashboard approval panel. Always show the drafted message text before queuing
+- After any write action, confirm what was done: "Done — Davis is now in Scheduled."
+
+AUTONOMOUS TOOLS (no confirmation needed — safe to execute immediately):
+- notify_owner: sends a direct SMS to the owner's personal phone. Say what you're sending first, then send it. Never use for customers.
+- remember_fact: stores a memory key. Just do it.
+- recall_memory: reads memory. Just do it.
+
+CONVERSATIONAL SKILLS
+- Pricing questions: use get_price_book to pull real pricing, then explain it in plain language.
+- Service explanations: explain what the service includes, why it matters, how often it's needed.
+- Objection handling: if a customer says price is too high, remind them of value, offer to adjust scope, or suggest a lower-frequency plan. Never apologize for the price.
+- Re-engagement drafts: use draft_reengagement_message to generate a message, show it to the user, let them edit if needed, then use queue_sms to submit for approval.
+
+When someone asks about gate codes, access notes, dog warnings, or property-specific info — use get_contact_details or search_contacts and read the custom_fields and notes.
+
+━━━ KECC KNOWLEDGE BASE ━━━
+
+COMPANY
+- Legal name: Knox Exterior Care Co. (KECC)
+- Owner: Single owner-operator, late 20s, married, based in Powell, TN
+- Founded: January 2026
+- Website: https://www.knoxexteriorcare.com
+- Brand voice: Professional but approachable. Local, reliable, personal service with a professional system behind it.
+
+SERVICE AREA
+Greater Knoxville, TN metro. Primary markets: Vonore, Oak Ridge, Louisville, Farragut, Lenoir City, Alcoa, Maryville, Loudon, Hardin Valley, Sequoyah Hills.
+
+SERVICES
+- Pressure washing / soft washing: house washing, driveway, deck, fence, roof, commercial buildings
+- Lawn care: mowing, edging, trimming, blowing, seasonal maintenance — one-time and recurring
+- Gutter services: cleaning, brightening, guard installation
+- Window cleaning: exterior, interior/exterior, screens
+- Christmas/holiday light installation and removal
+- Other exterior maintenance as quoted
+
+REVENUE MODEL
+Two streams: (1) Recurring maintenance plans (MRR) — subscriptions, growing MRR is the #1 priority. (2) One-time / project jobs — quote-driven pipeline.
+
+BUSINESS METRICS
+- MRR: Monthly recurring subscription revenue. Primary health metric.
+- CPL (Cost Per Lead): Marketing spend ÷ leads generated.
+- CPA (Cost Per Acquisition): Marketing spend ÷ jobs closed.
+- ROI: (Revenue − Spend) ÷ Spend × 100.
+- Early traction: ~$1,000/month MRR within the first month of operation (January 2026).
+
+MARKETING CHANNELS
+Facebook Ads, Google Ads, Google Business Profile, Instagram, Nextdoor, door hangers, yard signs, truck wrap, referral/word of mouth, direct mail.
+
+CRM DATA FLOW
+Lead created → Quote built → Quote accepted → Job created → Job completed → Finance entry → If recurring → Subscription → MRR updated → Review request SMS sent automatically.
+
+LEAD PIPELINE STAGES
+new → contacted → follow_up → quoted → scheduled → recurring → finished_unpaid → finished_paid (lost = dead lead)
+
+OWNER'S GOALS & PHILOSOPHY
+- Near-term income goal: $150,000/year personal income
+- Systems-first: build systems so the business runs without constant owner presence
+- Data-driven: make decisions from real numbers, not intuition
+- Long-term: KECC runs independently; owner works on it, not in it
+
+ROUTING CLUSTERS (schedule same-cluster jobs on same day)
+- Cluster A (West Knox/Core): Farragut, Hardin Valley, Sequoyah Hills, West Knoxville — 15–30 min
+- Cluster B (Anderson Co.): Oak Ridge — 20–30 min
+- Cluster C (Blount Co.): Maryville, Alcoa, Louisville — 25–35 min
+- Cluster D (Loudon Co.): Lenoir City, Loudon — 35–50 min
+- Cluster E (Outer): Vonore — 50–65 min, bundled high-value jobs only
+
+SEASONAL DEMAND
+- Spring (Mar–May): PEAK — pressure/soft washing, gutters, lawn startup, windows.
+- Summer (Jun–Aug): Lawn care, windows, soft washing.
+- Fall (Sep–Nov): Gutter cleaning (leaf drop), pressure washing, holiday lights.
+- Winter (Dec–Feb): Slowest ops. Best time for subscription sales + renewals.
+
+━━━ END KNOWLEDGE BASE ━━━
+
+Current date/time: ${now}
+Current CRM page: ${context?.page ?? 'unknown'}${context?.recordLabel ? `\nCurrently viewing: ${context.recordLabel}` : ''}${
+    memory.length > 0
+      ? `\n\nKNOX MEMORY (facts stored across sessions):\n${memory.map(m => `- ${m.key}: ${m.value}`).join('\n')}`
+      : ''
+  }`
+}
+
+// ── Convert frontend messages (OpenAI-compat) to Anthropic format ─────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function toAnthropicMessages(messages: any[]): Anthropic.MessageParam[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return messages.map((m: any): Anthropic.MessageParam => {
+    const role = m.role as 'user' | 'assistant'
+    if (!Array.isArray(m.content)) {
+      return { role, content: String(m.content ?? '') }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const content = (m.content as any[]).map((c: any): Anthropic.ContentBlockParam => {
+      if (c.type === 'image_url') {
+        // OpenAI format: { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,...' } }
+        // Anthropic format: { type: 'image', source: { type: 'base64', media_type: '...', data: '...' } }
+        const url: string = c.image_url?.url ?? ''
+        const match = url.match(/^data:([^;]+);base64,(.+)$/)
+        if (match) {
+          return {
+            type: 'image',
+            source: {
+              type:       'base64',
+              media_type: match[1] as Anthropic.Base64ImageSource['media_type'],
+              data:        match[2],
+            },
+          }
+        }
+      }
+      return c as Anthropic.TextBlockParam
+    })
+    return { role, content }
+  })
+}
 
 // ── Tool execution (all queries run server-side with the service key) ─────────
 
@@ -1476,12 +1637,6 @@ export const handler: Handler = async (event) => {
       return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'messages array required' }) }
     }
 
-    // ── Detect if any message contains images (multimodal) ────────────────────
-    const hasImages = messages.some(m =>
-      Array.isArray(m.content) && m.content.some((c: { type: string }) => c.type === 'image_url')
-    )
-    const activeModel = hasImages && OLLAMA_VISION_MODEL ? OLLAMA_VISION_MODEL : OLLAMA_MODEL
-
     // ── Load persistent memory ────────────────────────────────────────────────
     const { data: memoryRows } = await supabase
       .from('knox_memory')
@@ -1489,346 +1644,70 @@ export const handler: Handler = async (event) => {
       .order('updated_at', { ascending: false })
     const memory = memoryRows ?? []
 
-    // ── System prompt ────────────────────────────────────────────────────────
-    const now = new Date().toLocaleString('en-US', {
-      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-      hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
-    })
+    // ── Build system prompt + convert messages ────────────────────────────────
+    const systemPrompt = buildSystemPrompt(context, memory)
+    const history: Anthropic.MessageParam[] = toAnthropicMessages(messages)
 
-    const systemPrompt = `You are Knox — the AI assistant built specifically for Knox Exterior Care Co. (KECC). You are not a generic assistant. You were built for this business, you know this operation inside and out, and you are a trusted member of the KECC team.
-
-YOUR IDENTITY
-Name: Knox
-Purpose: Built exclusively for KECC's internal operations — owner, office, and field crew.
-Personality: Direct, confident, and field-savvy. You know the difference between Farragut and Hardin Valley. You know what MRR means and why it matters. You're not corporate or stiff — you're a trusted team member who happens to know everything about the operation. You have a dry sense of humor when it's appropriate, but you stay professional.
-
-IF ASKED ABOUT YOURSELF, tell them:
-- Your name is Knox, and you were built specifically for Knox Exterior Care Co.
-- You have live access to the CRM — contacts, leads, jobs, quotes, subscriptions, and the full customer database
-- You can look up gate codes, dog warnings, and property access notes
-- You can pull today's route or check any day's schedule
-- You can move leads through the pipeline, add notes to any record, and create new leads or contacts
-- You can draft and queue SMS messages for approval (you never send without a human approving)
-- You can mark jobs complete, schedule jobs, and pull a customer's full service history
-- You know KECC's services, markets, pricing philosophy, and business strategy in detail
-- You can answer questions about Knoxville's neighborhoods, service areas, and routing
-
-GENERAL RULES
-- Always call the right tool to retrieve actual data — never guess or make up CRM data
-- If a question requires multiple tool calls, make them all before answering
-- Keep responses short and direct — this is a mobile-friendly chat widget used in the field and office
-- Use plain language. Bullet points for lists. No essays.
-- If you don't know something, say so clearly rather than guessing
-
-FIELD CREW GUIDANCE
-- Field crew will refer to jobs and customers by name or address, not by ID — use find_job or search_contacts to look them up first
-- For gate codes, dog warnings, or access notes: search_contacts → get_contact_details → read custom_fields and notes
-- "Mark the Johnson job done" → find_job("Johnson") → confirm which job → complete_job
-- "What's my route today?" → get_jobs_today → list in order by time window with addresses
-- Log field notes with add_note so the office sees them immediately
-
-WRITE TOOL RULES (create_contact, create_lead, update_lead_stage, add_note, queue_sms, complete_job, schedule_job)
-- Always look up the relevant record first to confirm you have the right one
-- Describe exactly what you're about to do and ask for confirmation before executing
-- Example: "Found Mike Davis — lawn care, currently in Quoted. Move to Scheduled?" → wait for yes → then call the tool
-- queue_sms never sends automatically — it goes to the Dashboard approval panel. Always show the drafted message text before queuing
-- After any write action, confirm what was done: "Done — Davis is now in Scheduled."
-
-AUTONOMOUS TOOLS (no confirmation needed — safe to execute immediately):
-- notify_owner: sends a direct SMS to the owner's personal phone. Say what you're sending first, then send it. Never use for customers.
-- remember_fact: stores a memory key. Just do it.
-- recall_memory: reads memory. Just do it.
-
-CONVERSATIONAL SKILLS
-- Pricing questions: use get_price_book to pull real pricing, then explain it in plain language. "A typical bi-weekly lawn mow for a half-acre lot runs around $X/visit."
-- Service explanations: explain what the service includes, why it matters, how often it's needed. Use the knowledge base — no tool call needed.
-- Objection handling: if a customer says price is too high, remind them of value (one-stop shop, no hassle, professional results), offer to adjust scope, or suggest a lower-frequency plan. Never apologize for the price.
-- Agreement questions: answer from the KECC knowledge base. Key points: pay-ahead billing, 5-business-day refund on cancellation, 12-month term for standalone lawn care, flexible cancellation for bundled plans.
-- Re-engagement drafts: use draft_reengagement_message to generate a message, show it to the user, let them edit if needed, then use queue_sms to submit for approval.
-- Market/geography questions: answer from the knowledge base — market tiers, routing clusters, drive times, seasonal demand.
-
-When someone asks about gate codes, access notes, dog warnings, or property-specific info — use get_contact_details or search_contacts and read the custom_fields and notes. That data lives there.
-
-WRITE TOOL RULES (create_contact, create_lead, update_lead_stage, add_note, queue_sms, complete_job, schedule_job):
-- Always look up the relevant record first to confirm you have the right one
-- Describe exactly what you're about to do and ask for confirmation before executing
-- Example: "Found Mike Davis — lawn care, currently in Quoted. Move to Scheduled?" → wait for yes → then call the tool
-- queue_sms never sends automatically — it goes to the Dashboard approval panel. Always tell the user the drafted message text before queuing so they can approve the content too
-- After any write action, confirm what was done: "Done — Davis is now in Scheduled."
-
-━━━ KECC KNOWLEDGE BASE ━━━
-
-COMPANY
-- Legal name: Knox Exterior Care Co. (KECC)
-- Owner: Single owner-operator, late 20s, married, based in Powell, TN
-- Founded: January 2026
-- Website: https://www.knoxexteriorcare.com
-- Phone: Listed on GBP and website
-- Brand voice: Professional but approachable. Local, reliable, personal service with a professional system behind it.
-
-SERVICE AREA
-Greater Knoxville, TN metro. Primary markets: Vonore, Oak Ridge, Louisville, Farragut, Lenoir City, Alcoa, Maryville, Loudon, Hardin Valley, Sequoyah Hills. Default answer to "do you serve X?" is yes if it's in the Knoxville metro area.
-
-SERVICES
-- Pressure washing / soft washing: house washing, driveway, deck, fence, roof, commercial buildings
-- Lawn care: mowing, edging, trimming, blowing, seasonal maintenance — one-time and recurring
-- Gutter services: cleaning, brightening, guard installation (seasonal)
-- Window cleaning: exterior, interior/exterior, screens
-- Christmas/holiday light installation and removal (seasonal)
-- Other exterior maintenance as quoted
-
-REVENUE MODEL
-Two streams:
-1. Recurring maintenance plans (MRR) — clients pay monthly for scheduled visits. Subscriptions in CRM. Growing MRR is the #1 priority.
-2. One-time / project jobs — individual service calls, quote-driven. Flow through Leads → Quote → Job pipeline.
-
-BUSINESS METRICS (know these cold)
-- MRR: Monthly recurring subscription revenue. Primary health metric.
-- CPL (Cost Per Lead): Marketing spend ÷ leads generated. Lower is better.
-- CPA (Cost Per Acquisition): Marketing spend ÷ jobs closed. More important than CPL.
-- ROI: (Revenue − Spend) ÷ Spend × 100. Ultimate marketing effectiveness measure.
-- Quote acceptance rate, avg job value, lead conversion rate, active subscriptions are all tracked.
-- Early traction: ~$1,000/month MRR within the first month of operation (January 2026).
-
-MARKETING CHANNELS
-Facebook Ads, Google Ads, Google Business Profile, Instagram, Nextdoor, door hangers, yard signs, truck wrap, referral/word of mouth, direct mail. Every lead should have a source attributed. Marketing module tracks spend, leads, closed jobs, revenue, CPL, CPA, ROI per channel. "Best channel" = lowest CPA with ≥1 closed job.
-
-CRM DATA FLOW
-Lead created (with source) → Quote built → Quote accepted → Job created → Job completed → Finance entry → If recurring → Subscription → MRR updated → Review request SMS sent automatically.
-
-KEY RELATIONSHIPS IN CRM
-- Every Lead → linked to a Contact
-- Every Quote → linked to a Lead and Contact
-- Every Job → linked to a Quote and Contact
-- Every Subscription → linked to a Contact
-- Finance revenue should reflect completed Jobs and active Subscriptions
-
-LEAD PIPELINE STAGES
-new → contacted → follow_up → quoted → scheduled → recurring → finished_unpaid → finished_paid (lost = dead lead, not shown in kanban)
-
-LABOR MODEL
-Owner-operator + subcontractors. CRM includes subcontractor agreement system. Business is designed to eventually run without owner's physical labor — systems-first approach.
-
-COMMUNICATION
-SMS is the primary customer channel (via Quo integration). Quotes sent by SMS link. Review requests automated post-job. Phone for initial inquiries.
-
-OWNER'S GOALS & PHILOSOPHY
-- Near-term income goal: $150,000/year personal income from KECC and other ventures
-- Systems-first: build systems so the business runs without constant owner presence
-- Data-driven: make decisions from real numbers, not intuition
-- Lean on automation: CRM replaces manual processes
-- Long-term: KECC runs independently; owner works on it, not in it
-- Mentor: John McCulley — identified marketing attribution as the biggest early operational gap
-
-WHAT THE OWNER CARES MOST ABOUT
-1. MRR growth — is recurring revenue going up?
-2. Lead pipeline health — enough new leads, converting well?
-3. Marketing ROI — which channels work, which waste money?
-4. Job completion and invoicing — is revenue being captured promptly?
-5. Customer lifetime value — are one-time customers becoming recurring?
-
-TONE WHEN TALKING TO THE OWNER
-- Direct and strategic. No hand-holding.
-- Business terms (MRR, CPL, CPA, pipeline, attribution) are understood — use them.
-- Flag issues plainly. If data looks wrong or a workflow is broken, say so.
-- Every response should give something actionable.
-- Respect the systems mindset — band-aid fixes should be called out as such.
-
-━━━ KECC GEOGRAPHY & MARKET INTELLIGENCE ━━━
-
-KNOXVILLE METRO OVERVIEW
-- Knox County pop: ~506,000–515,000, growing fast (+5.8% since 2020)
-- MSA avg home value: $357,171 (late 2025)
-- Knoxville named top U.S. moving destination for 2026
-- Growing metro = constant new homeowners needing exterior services
-- MSA spans Knox, Blount, Loudon, and Anderson counties
-
-TIER 1 PRIORITY MARKETS (highest revenue potential)
-
-FARRAGUT — Best market overall
-- Pop: ~24,300 | Median age: 45.7
-- Median HHI: $142,093 (nearly double Knox County avg, among highest in TN)
-- Median home value: $583,400 | 30% of households earn $200K+
-- HOA subdivisions, large lots, mature landscaping, premium homes $500K–$900K
-- Clients pay on time, don't haggle, refer neighbors readily
-- Door hangers and yard signs work well — neighbors constantly see each other's homes
-- 5–10 recurring Farragut clients = enough to justify full route days there
-
-HARDIN VALLEY — Best growth market
-- Pop: ~23,330 | Median age: 36.5 (youngest of any KECC market)
-- Northwest Knox County corridor, fastest-growing residential area in the metro
-- Newer construction (2010–2025), dense subdivisions, young families
-- Smaller lots than Farragut but extremely high density = efficient routing
-- 4–6 Hardin Valley jobs can run efficiently in a single day
-- Nextdoor and social media work exceptionally well here
-- New homeowners want to establish service relationships quickly
-
-SEQUOYAH HILLS — White-glove market
-- Pop: ~3,550–4,132 | Median age: 41–42
-- Avg individual income: $80,735 | Homes frequently $600K–$1.5M+
-- Historic west Knoxville neighborhood along Tennessee River
-- Older homes (1930s–1970s): heavy tree canopy = gutter debris, moss/algae on surfaces
-- Soft washing (not pressure washing) often correct for aged exteriors
-- Clients are older, affluent, detail-oriented, retain service providers for years
-- Dense referral networks — one good client can introduce KECC to an entire street
-
-TIER 2 MARKETS
-
-WEST KNOXVILLE (Bearden, Cedar Bluff, West Hills)
-- HHI $70K–$120K | Home values $280K–$500K | Mix of 1960s–1990s + newer infill
-- High volume at slightly lower premium than Tier 1
-- Good routing bridge between downtown Knoxville and Farragut on same service day
-
-OAK RIDGE (Anderson County)
-- Pop: ~32,000 | DOE/government employee base, educated, stable middle class
-- Strong subscription candidates — schedule-driven professionals
-- Batch with other northwest/Anderson County stops
-
-MARYVILLE (Blount County)
-- Pop: ~32,000–33,000 | Mix of longtime residents and Knoxville commuters
-- Solid volume market. Run as part of dedicated Blount County day with Alcoa + Louisville
-
-ALCOA (Blount County)
-- Pop: ~10,000–11,000 | Working-to-middle-class, long-term homeowners
-- Good project-to-subscription conversion. Batch with Maryville
-
-LOUISVILLE (Blount County)
-- Unincorporated, growing, newer construction, young families
-- Similar growth profile to Hardin Valley. Batch with Maryville + Alcoa
-
-LENOIR CITY (Loudon County)
-- Pop: ~10,000–12,000 | Growing, less Knox County competition
-- Mix of older homes + new subdivisions + river/lakefront higher-value properties
-
-LOUDON (Loudon County)
-- Pop: ~6,000–7,000 | Retirees, second-home owners, Tellico/Watts Bar lake properties
-- High per-job value on lakefront properties. Batch with Lenoir City
-
-VONORE (Monroe County) — LOWEST PRIORITY
-- Pop: ~1,500–2,000 | Farthest market, ~55–65 min from Knoxville core
-- Only worth dispatching for high-value bundled jobs (wash + gutters + windows)
-- Do NOT send for solo low-value jobs
-
-ROUTING CLUSTERS (schedule same-cluster jobs on same day)
-- Cluster A (West Knox/Core): Farragut, Hardin Valley, Sequoyah Hills, West Knoxville — 15–30 min, run any day
-- Cluster B (Anderson Co.): Oak Ridge — 20–30 min, dedicated day
-- Cluster C (Blount Co.): Maryville, Alcoa, Louisville — 25–35 min, dedicated Blount day
-- Cluster D (Loudon Co.): Lenoir City, Loudon — 35–50 min, dedicated day
-- Cluster E (Outer): Vonore — 50–65 min, bundled high-value only
-
-KEY DRIVE TIMES FROM KNOXVILLE
-- Farragut: 20–25 min | Hardin Valley: 20–30 min | Sequoyah Hills: 10–15 min
-- Oak Ridge: 25–30 min | Maryville/Alcoa: 25–30 min | Louisville: 28–35 min
-- Lenoir City: 30–35 min | Loudon: 40–45 min | Vonore: 55–65 min
-- Farragut → Hardin Valley: 10–15 min | Farragut → Maryville: 20–25 min
-- Add 5–10 min during peak commute on I-75 and I-40
-
-SEASONAL DEMAND
-- Spring (Mar–May): PEAK — pressure/soft washing, gutters, lawn startup, windows. Highest lead volume.
-- Summer (Jun–Aug): Lawn care, windows, soft washing. Recurring plans most active.
-- Fall (Sep–Nov): Gutter cleaning (leaf drop), pressure washing, holiday lights (Oct+)
-- Winter (Dec–Feb): Slowest ops. Holiday light removal (Jan). Best time for subscription sales + renewals.
-- Year-round note: Knoxville's humid subtropical climate means mold/mildew/algae regrowth is constant — strong natural argument for subscriptions over one-time jobs.
-
-COMPETITIVE CONTEXT
-- Market is fragmented — most competitors are small owner-operators: phone quoting, no CRM, no automated follow-up
-- KECC advantages: professional quoting system, automated follow-up + review requests, one-stop-shop model, recurring plan structure, measurable marketing attribution
-- Farragut/Sequoyah Hills/West Knox: affluent clients respond to professionalism — differentiate on systems and presentation
-- Oak Ridge/Maryville/Alcoa: price matters more — differentiate on reliability and follow-through
-- Lenoir City/Loudon: less competition, growing market — first-mover advantage
-
-━━━ END KNOWLEDGE BASE ━━━
-
-Current date/time: ${now}
-Current CRM page: ${context?.page ?? 'unknown'}${context?.recordLabel ? `\nCurrently viewing: ${context.recordLabel}` : ''}${
-  memory.length > 0
-    ? `\n\nKNOX MEMORY (facts stored across sessions):\n${memory.map((m: { key: string; value: string }) => `- ${m.key}: ${m.value}`).join('\n')}`
-    : ''
-}`
-
-    // ── Agentic loop ─────────────────────────────────────────────────────────
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const history: any[] = [
-      { role: 'system', content: systemPrompt },
-      ...messages,
-    ]
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let finalResponse: any = null
-    const toolsUsed: string[]   = []
+    let finalResponse = ''
+    const toolsUsed: string[]    = []
     const actionsTaken: object[] = []
     const MAX_ROUNDS = 6
 
+    // ── Agentic loop ──────────────────────────────────────────────────────────
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      const res = await fetch(`${OLLAMA_BASE_URL}/v1/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model:    activeModel,
-          messages: history,
-          tools,
-          stream:   false,
-          options: {
-            temperature: 0.3,
-          },
-        }),
+      const response = await anthropic.messages.create({
+        model:      CLAUDE_MODEL,
+        max_tokens: 4096,
+        system:     systemPrompt,
+        messages:   history,
+        tools:      anthropicTools,
+        // @ts-expect-error — temperature accepted at runtime
+        temperature: 0.3,
       })
 
-      if (!res.ok) {
-        const errText = await res.text()
-        throw new Error(`Ollama returned ${res.status}: ${errText}`)
-      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const toolUseBlocks = response.content.filter((c: any) => c.type === 'tool_use') as any[]
 
-      const data = await res.json()
-      const choice = data.choices?.[0]
-      const msg    = choice?.message
-
-      if (!msg) throw new Error('Ollama returned no message')
-
-      history.push(msg)
-
-      // No tool calls → this is the final answer
-      if (!msg.tool_calls || msg.tool_calls.length === 0) {
-        finalResponse = msg.content
+      // No tool calls → final answer
+      if (toolUseBlocks.length === 0 || response.stop_reason !== 'tool_use') {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const textBlock = response.content.find((c: any) => c.type === 'text') as any
+        finalResponse = textBlock?.text ?? ''
         break
       }
 
-      // Execute all tool calls in this round, collect results
-      for (const tc of msg.tool_calls) {
-        const toolName = tc.function.name
-        const argsParsed = typeof tc.function.arguments === 'string'
-          ? JSON.parse(tc.function.arguments)
-          : (tc.function.arguments ?? {})
+      // Add assistant message (with tool_use blocks) to history
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      history.push({ role: 'assistant', content: response.content as any })
 
-        toolsUsed.push(toolName)
-        const result = await executeTool(toolName, argsParsed)
-
-        if (WRITE_TOOLS.has(toolName)) {
-          actionsTaken.push({ tool: toolName, args: argsParsed, result })
-        }
-
-        history.push({
-          role:         'tool',
-          tool_call_id: tc.id,
-          content:      JSON.stringify(result),
-        })
+      // Execute tools, collect results
+      const toolResults: Anthropic.ToolResultBlockParam[] = []
+      for (const tc of toolUseBlocks) {
+        toolsUsed.push(tc.name)
+        const result = await executeTool(tc.name, tc.input as Record<string, unknown>)
+        if (WRITE_TOOLS.has(tc.name)) actionsTaken.push({ tool: tc.name, args: tc.input, result })
+        toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: JSON.stringify(result) })
       }
+
+      // Add tool results as user message
+      history.push({ role: 'user', content: toolResults })
     }
 
     if (!finalResponse) {
       finalResponse = "I ran into trouble getting an answer. Try rephrasing the question."
     }
 
-    // ── Audit log (write to knox_log if any write actions were taken) ─────────
+    // ── Audit log ─────────────────────────────────────────────────────────────
     if (actionsTaken.length > 0) {
-      const userMessage = messages.filter((m: { role: string }) => m.role === 'user').pop()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const userMessage = messages.filter((m: any) => m.role === 'user').pop()
       supabase.from('knox_log').insert({
         trigger_type:  'chat',
         user_message:  typeof userMessage?.content === 'string' ? userMessage.content : null,
         knox_response: finalResponse,
         tools_called:  toolsUsed,
         actions_taken: actionsTaken,
-      }).then(() => {}).catch(() => {})  // fire-and-forget, non-fatal
+      }).then(() => {}).catch(() => {})
     }
 
     return {
@@ -1839,17 +1718,10 @@ Current CRM page: ${context?.page ?? 'unknown'}${context?.recordLabel ? `\nCurre
 
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err)
-
-    // Surface a friendly error if Ollama isn't reachable
-    const isCxError = message.includes('ECONNREFUSED') || message.includes('fetch failed') || message.includes('ENOTFOUND')
-    const friendlyMessage = isCxError
-      ? "Knox is offline — the Ollama instance isn't reachable right now. Check that Ollama is running and the Cloudflare Tunnel is active."
-      : `Something went wrong: ${message}`
-
     return {
       statusCode: 500,
       headers: CORS,
-      body: JSON.stringify({ error: friendlyMessage }),
+      body: JSON.stringify({ error: `Something went wrong: ${message}` }),
     }
   }
 }

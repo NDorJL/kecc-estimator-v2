@@ -7,16 +7,14 @@
  *   event: done     data: {"toolsUsed":["get_leads"]}      ← end of stream
  *   event: error    data: {"message":"..."}                ← on failure
  *
- * Imports tools, executeTool, supabase, and WRITE_TOOLS from agent.ts.
- * Files starting with _ are excluded from Netlify function registration;
- * agent.ts is registered separately as the non-streaming fallback.
+ * Imports anthropicTools, executeTool, WRITE_TOOLS, buildSystemPrompt, and
+ * toAnthropicMessages from agent.ts.
  */
+import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
-import { tools, executeTool, WRITE_TOOLS } from './agent'
+import { anthropicTools, executeTool, WRITE_TOOLS, buildSystemPrompt, toAnthropicMessages } from './agent'
 
-const OLLAMA_BASE_URL     = (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434').replace(/\/$/, '')
-const OLLAMA_MODEL        = process.env.OLLAMA_MODEL ?? 'qwen2.5:7b'
-const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL ?? null
+const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? 'claude-3-5-haiku-20241022'
 
 const supabaseStream = createClient(
   process.env.SUPABASE_URL!,
@@ -56,203 +54,140 @@ export default async function handler(req: Request): Promise<Response> {
           return
         }
 
-        // ── Detect multimodal ──────────────────────────────────────────────────
-        const hasImages = messages.some((m: { content: unknown }) =>
-          Array.isArray(m.content) && (m.content as { type: string }[]).some(c => c.type === 'image_url')
-        )
-        const activeModel = hasImages && OLLAMA_VISION_MODEL ? OLLAMA_VISION_MODEL : OLLAMA_MODEL
-
         // ── Load persistent memory ─────────────────────────────────────────────
         const { data: memoryRows } = await supabaseStream
           .from('knox_memory').select('key, value').order('updated_at', { ascending: false })
         const memory = memoryRows ?? []
 
-        // ── System prompt ──────────────────────────────────────────────────────
-        const now = new Date().toLocaleString('en-US', {
-          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-          hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
-        })
-
-        // Import system prompt from agent.ts is complex due to its size;
-        // We inline the minimal version here — identity + rules + memory injection.
-        // The full knowledge base is embedded in agent.ts's systemPrompt template.
-        // For parity, we duplicate just the core structure.
-        const systemPrompt = [
-          `You are Knox — the AI assistant built specifically for Knox Exterior Care Co. (KECC). Direct, confident, field-savvy. Not a generic assistant.`,
-          `You have tools to look up real data. Always call the right tool. Keep responses short and direct — chat widget used in the field and office.`,
-          `WRITE TOOL RULES: Always confirm before executing write actions. queue_sms never sends directly — goes to approval panel.`,
-          `Current date/time: ${now}`,
-          `Current CRM page: ${context?.page ?? 'unknown'}${context?.recordLabel ? `\nCurrently viewing: ${context.recordLabel}` : ''}`,
-          memory.length > 0
-            ? `\nKNOX MEMORY:\n${memory.map((m: { key: string; value: string }) => `- ${m.key}: ${m.value}`).join('\n')}`
-            : '',
-        ].filter(Boolean).join('\n\n')
-
-        // ── Agentic tool loop ──────────────────────────────────────────────────
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const history: any[] = [
-          { role: 'system', content: systemPrompt },
-          ...messages,
-        ]
+        // ── Build system prompt + convert messages ─────────────────────────────
+        const systemPrompt = buildSystemPrompt(context, memory)
+        const history: Anthropic.MessageParam[] = toAnthropicMessages(messages)
 
         const toolsUsed: string[]    = []
         const actionsTaken: object[] = []
         const MAX_ROUNDS = 6
 
+        const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
+        // ── Agentic tool loop (non-streaming rounds) ───────────────────────────
         for (let round = 0; round < MAX_ROUNDS; round++) {
-          // Non-streaming tool-call round
-          const res = await fetch(`${OLLAMA_BASE_URL}/v1/chat/completions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              model:    activeModel,
-              messages: history,
-              tools,
-              stream:   false,
-              options:  { temperature: 0.3 },
-            }),
+          const response = await anthropic.messages.create({
+            model:      CLAUDE_MODEL,
+            max_tokens: 4096,
+            system:     systemPrompt,
+            messages:   history,
+            tools:      anthropicTools,
+            // @ts-expect-error — temperature accepted at runtime
+            temperature: 0.3,
           })
 
-          if (!res.ok) throw new Error(`Ollama error ${res.status}: ${await res.text()}`)
-
-          const data   = await res.json()
-          const msg    = data.choices?.[0]?.message
-          if (!msg) throw new Error('Ollama returned no message')
-
-          history.push(msg)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const toolUseBlocks = response.content.filter((c: any) => c.type === 'tool_use') as any[]
 
           // No tool calls → stream the final response
-          if (!msg.tool_calls || msg.tool_calls.length === 0) {
-            // Stream the final response
-            const streamRes = await fetch(`${OLLAMA_BASE_URL}/v1/chat/completions`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                model:    activeModel,
-                messages: history,
-                stream:   true,
-                options:  { temperature: 0.3 },
-              }),
-            })
+          if (toolUseBlocks.length === 0 || response.stop_reason !== 'tool_use') {
+            // Stream final answer using Anthropic streaming
+            const streamRes = await anthropic.messages.create({
+              model:      CLAUDE_MODEL,
+              max_tokens: 4096,
+              system:     systemPrompt,
+              messages:   history,
+              // @ts-expect-error — temperature accepted at runtime
+              temperature: 0.3,
+              stream:     true,
+            }) as unknown as AsyncIterable<Anthropic.MessageStreamEvent>
 
-            if (!streamRes.ok || !streamRes.body) {
-              // Fallback: use the already-computed response
-              send('token', { text: msg.content ?? '' })
-            } else {
-              const reader  = streamRes.body.getReader()
-              const decoder = new TextDecoder()
-              let streamBuf = ''
-              let fullText  = ''
-
-              while (true) {
-                const { done, value } = await reader.read()
-                if (done) break
-                streamBuf += decoder.decode(value, { stream: true })
-                const lines = streamBuf.split('\n')
-                streamBuf = lines.pop() ?? ''
-
-                for (const line of lines) {
-                  if (!line.startsWith('data: ')) continue
-                  const raw = line.slice(6).trim()
-                  if (raw === '[DONE]') continue
-                  try {
-                    const chunk = JSON.parse(raw)
-                    const token = chunk.choices?.[0]?.delta?.content
-                    if (token) {
-                      fullText += token
-                      send('token', { text: token })
-                    }
-                  } catch { /* ignore malformed chunks */ }
-                }
+            let fullText = ''
+            for await (const chunk of streamRes) {
+              if (
+                chunk.type === 'content_block_delta' &&
+                chunk.delta.type === 'text_delta'
+              ) {
+                fullText += chunk.delta.text
+                send('token', { text: chunk.delta.text })
               }
+            }
 
-              // Audit log for write actions
-              if (actionsTaken.length > 0) {
-                const userMsg = messages.filter((m: { role: string }) => m.role === 'user').pop()
-                supabaseStream.from('knox_log').insert({
-                  trigger_type:  'chat',
-                  user_message:  typeof userMsg?.content === 'string' ? userMsg.content : null,
-                  knox_response: fullText,
-                  tools_called:  toolsUsed,
-                  actions_taken: actionsTaken,
-                }).then(() => {}).catch(() => {})
-              }
+            // Audit log for write actions (fire-and-forget)
+            if (actionsTaken.length > 0) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const userMsg = messages.filter((m: any) => m.role === 'user').pop()
+              supabaseStream.from('knox_log').insert({
+                trigger_type:  'chat',
+                user_message:  typeof userMsg?.content === 'string' ? userMsg.content : null,
+                knox_response: fullText,
+                tools_called:  toolsUsed,
+                actions_taken: actionsTaken,
+              }).then(() => {}).catch(() => {})
             }
 
             send('done', { toolsUsed })
             break
           }
 
+          // Add assistant message to history
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          history.push({ role: 'assistant', content: response.content as any })
+
           // Execute tool calls and send status events
-          for (const tc of msg.tool_calls) {
-            const toolName  = tc.function.name
-            const argsParsed = typeof tc.function.arguments === 'string'
-              ? JSON.parse(tc.function.arguments)
-              : (tc.function.arguments ?? {})
-
-            // Send status to frontend
-            const friendlyName: Record<string, string> = {
-              search_contacts:           'Searching contacts…',
-              get_contact_details:       'Looking up contact details…',
-              get_leads:                 'Checking the lead pipeline…',
-              get_jobs_today:            'Pulling today\'s schedule…',
-              get_jobs:                  'Looking up jobs…',
-              get_quotes:                'Checking quotes…',
-              get_subscriptions:         'Loading subscriptions…',
-              get_dashboard_stats:       'Pulling business stats…',
-              get_upcoming_jobs:         'Checking upcoming jobs…',
-              find_job:                  'Finding that job…',
-              get_customer_history:      'Loading customer history…',
-              get_daily_briefing:        'Compiling your daily briefing…',
-              audit_pipeline:            'Auditing the pipeline…',
-              find_upsell_opportunities: 'Finding upsell opportunities…',
-              get_revenue_forecast:      'Calculating revenue forecast…',
-              get_churn_risks:           'Checking for churn risks…',
-              get_marketing_analytics:   'Analyzing marketing performance…',
-              get_top_customers:         'Ranking top customers…',
-              get_service_analytics:     'Breaking down services…',
-              get_monthly_revenue_trend: 'Computing revenue trend…',
-              get_quote_analytics:       'Analyzing quote performance…',
-              get_price_book:            'Loading price book…',
-              preview_review_requests:   'Checking review requests…',
-              batch_queue_review_requests: 'Queuing review requests…',
-              get_untouched_leads:       'Finding untouched leads…',
-              generate_marketing_report: 'Generating marketing report…',
-              create_contact:            'Creating contact…',
-              create_lead:               'Creating lead…',
-              update_lead_stage:         'Moving lead stage…',
-              add_note:                  'Adding note…',
-              queue_sms:                 'Queuing message…',
-              complete_job:              'Completing job…',
-              schedule_job:              'Scheduling job…',
-              remember_fact:             'Saving to memory…',
-              recall_memory:             'Recalling memory…',
-            }
-            send('status', { text: friendlyName[toolName] ?? `Running ${toolName}…` })
-
-            toolsUsed.push(toolName)
-            const result = await executeTool(toolName, argsParsed)
-
-            if (WRITE_TOOLS.has(toolName)) {
-              actionsTaken.push({ tool: toolName, args: argsParsed, result })
-            }
-
-            history.push({
-              role:         'tool',
-              tool_call_id: tc.id,
-              content:      JSON.stringify(result),
-            })
+          const friendlyName: Record<string, string> = {
+            search_contacts:             'Searching contacts…',
+            get_contact_details:         'Looking up contact details…',
+            get_leads:                   'Checking the lead pipeline…',
+            get_jobs_today:              'Pulling today\'s schedule…',
+            get_jobs:                    'Looking up jobs…',
+            get_quotes:                  'Checking quotes…',
+            get_subscriptions:           'Loading subscriptions…',
+            get_dashboard_stats:         'Pulling business stats…',
+            get_upcoming_jobs:           'Checking upcoming jobs…',
+            find_job:                    'Finding that job…',
+            get_customer_history:        'Loading customer history…',
+            get_daily_briefing:          'Compiling your daily briefing…',
+            audit_pipeline:              'Auditing the pipeline…',
+            find_upsell_opportunities:   'Finding upsell opportunities…',
+            get_revenue_forecast:        'Calculating revenue forecast…',
+            get_churn_risks:             'Checking for churn risks…',
+            get_marketing_analytics:     'Analyzing marketing performance…',
+            get_top_customers:           'Ranking top customers…',
+            get_service_analytics:       'Breaking down services…',
+            get_monthly_revenue_trend:   'Computing revenue trend…',
+            get_quote_analytics:         'Analyzing quote performance…',
+            get_price_book:              'Loading price book…',
+            preview_review_requests:     'Checking review requests…',
+            batch_queue_review_requests: 'Queuing review requests…',
+            get_untouched_leads:         'Finding untouched leads…',
+            generate_marketing_report:   'Generating marketing report…',
+            get_weekly_comparison:       'Comparing this week vs last week…',
+            draft_reengagement_message:  'Drafting re-engagement message…',
+            create_contact:              'Creating contact…',
+            create_lead:                 'Creating lead…',
+            update_lead_stage:           'Moving lead stage…',
+            add_note:                    'Adding note…',
+            queue_sms:                   'Queuing message…',
+            complete_job:                'Completing job…',
+            schedule_job:                'Scheduling job…',
+            notify_owner:                'Notifying owner…',
+            remember_fact:               'Saving to memory…',
+            recall_memory:               'Recalling memory…',
           }
+
+          const toolResults: Anthropic.ToolResultBlockParam[] = []
+          for (const tc of toolUseBlocks) {
+            send('status', { text: friendlyName[tc.name] ?? `Running ${tc.name}…` })
+            toolsUsed.push(tc.name)
+
+            const result = await executeTool(tc.name, tc.input as Record<string, unknown>)
+            if (WRITE_TOOLS.has(tc.name)) actionsTaken.push({ tool: tc.name, args: tc.input, result })
+
+            toolResults.push({ type: 'tool_result', tool_use_id: tc.id, content: JSON.stringify(result) })
+          }
+
+          history.push({ role: 'user', content: toolResults })
         }
 
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
-        const isCx    = message.includes('ECONNREFUSED') || message.includes('fetch failed') || message.includes('ENOTFOUND')
-        send('error', {
-          message: isCx
-            ? "Knox is offline — check that Ollama is running and the tunnel is active."
-            : `Something went wrong: ${message}`,
-        })
+        send('error', { message: `Something went wrong: ${message}` })
       }
 
       controller.close()

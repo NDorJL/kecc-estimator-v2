@@ -2,18 +2,16 @@
  * knox-observer.ts — Knox weekly insight engine
  *
  * Runs every Monday at midnight UTC (Sunday 7 pm ET).
- * Uses the insight model (deepseek-r1:14b) to find non-obvious patterns
- * by comparing this week's data against the prior week.
+ * Uses Claude to find non-obvious patterns by comparing this week's data
+ * against the prior week.
  *
  * Required env vars:
- *   OLLAMA_INSIGHT_MODEL — e.g. deepseek-r1:14b  (falls back to OLLAMA_AGENT_MODEL)
+ *   ANTHROPIC_API_KEY    — Anthropic API key
  *   OWNER_PHONE          — owner's personal cell
- *   OLLAMA_BASE_URL      — Cloudflare tunnel URL
- *
- * DeepSeek R1 wraps its reasoning in <think>...</think> tags.
- * Those are stripped before the SMS is sent — only the final answer goes out.
+ *   CLAUDE_AGENT_MODEL   — optional model override (default: claude-3-5-sonnet-20241022)
  */
 import type { Handler } from '@netlify/functions'
+import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { sendOpenPhoneSms } from './_smsHelper'
 
@@ -22,9 +20,8 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434').replace(/\/$/, '')
-const OLLAMA_MODEL    = process.env.OLLAMA_INSIGHT_MODEL ?? process.env.OLLAMA_AGENT_MODEL ?? process.env.OLLAMA_MODEL ?? 'deepseek-r1:14b'
-const OWNER_PHONE     = process.env.OWNER_PHONE ?? '8656036396'
+const CLAUDE_MODEL = process.env.CLAUDE_AGENT_MODEL ?? process.env.CLAUDE_MODEL ?? 'claude-3-5-sonnet-20241022'
+const OWNER_PHONE  = process.env.OWNER_PHONE ?? '8656036396'
 
 // ── Date helpers ───────────────────────────────────────────────────────────────
 
@@ -139,14 +136,12 @@ async function getBusinessContext() {
   }
 }
 
-// ── DeepSeek R1 — strip <think> reasoning before sending ──────────────────────
-
-function stripThinking(text: string): string {
-  return text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
-}
+// ── Claude API — generate weekly insights ─────────────────────────────────────
 
 async function generateInsights(data: object): Promise<string | null> {
   try {
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
     const systemPrompt = [
       'You are Knox, KECC\'s AI agent running a weekly business intelligence analysis.',
       'Analyze the week-over-week data and identify 2-3 genuinely non-obvious patterns.',
@@ -158,28 +153,19 @@ async function generateInsights(data: object): Promise<string | null> {
 
     const userMsg = `Week ending ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}:\n\n${JSON.stringify(data, null, 2)}`
 
-    const res = await fetch(`${OLLAMA_BASE_URL}/v1/chat/completions`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model:    OLLAMA_MODEL,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user',   content: userMsg },
-        ],
-        stream:  false,
-        options: { temperature: 0.5 },
-      }),
-      signal: AbortSignal.timeout(55000),
+    const response = await anthropic.messages.create({
+      model:      CLAUDE_MODEL,
+      max_tokens: 512,
+      system:     systemPrompt,
+      messages:   [{ role: 'user', content: userMsg }],
+      // @ts-expect-error — temperature accepted at runtime
+      temperature: 0.5,
     })
 
-    if (!res.ok) return null
-    const json = await res.json()
-    const raw  = json.choices?.[0]?.message?.content ?? ''
-    const clean = stripThinking(raw).trim()
-    return clean || null
+    const textBlock = response.content.find(c => c.type === 'text') as { type: 'text'; text: string } | undefined
+    return textBlock?.text?.trim() || null
   } catch {
-    return null  // Ollama unavailable — caller uses fallback
+    return null  // Claude unavailable — caller uses fallback
   }
 }
 
