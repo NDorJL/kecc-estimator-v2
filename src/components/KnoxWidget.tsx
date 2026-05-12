@@ -1,7 +1,34 @@
 import { useState, useRef, useEffect } from 'react'
 import { useLocation } from 'wouter'
 import { Button } from '@/components/ui/button'
-import { X, Send, Loader2, Bot } from 'lucide-react'
+import { X, Send, Loader2 } from 'lucide-react'
+
+// ── Knox branded icon — stylized K with sparkles ─────────────────────────────
+function KnoxIcon({ size = 20, className = '' }: { size?: number; className?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
+      {/* K — bold vertical bar */}
+      <path d="M5 3v18" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" />
+      {/* K — upper arm with slight curve for character */}
+      <path d="M5 12L17.5 3.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+      {/* K — lower arm */}
+      <path d="M5 12L17.5 20.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+      {/* Large 4-point sparkle — top right */}
+      <path
+        d="M20 3L20.8 5.2L23 6L20.8 6.8L20 9L19.2 6.8L17 6L19.2 5.2Z"
+        fill="currentColor"
+      />
+      {/* Small 4-point sparkle — lower right */}
+      <path
+        d="M20.5 15.5L21.1 17L22.6 17.5L21.1 18L20.5 19.5L19.9 18L18.4 17.5L19.9 17Z"
+        fill="currentColor"
+        opacity="0.7"
+      />
+      {/* Tiny accent dot */}
+      <circle cx="13.5" cy="4.2" r="0.85" fill="currentColor" opacity="0.55" />
+    </svg>
+  )
+}
 
 interface Message {
   role: 'user' | 'assistant'
@@ -127,7 +154,7 @@ export function KnoxWidget() {
           <div className="flex items-center justify-between px-4 py-3 border-b border-border/60 bg-card shrink-0">
             <div className="flex items-center gap-2.5">
               <div className="h-7 w-7 rounded-full bg-primary flex items-center justify-center shrink-0">
-                <span className="text-[11px] font-black text-primary-foreground">K</span>
+                <KnoxIcon size={16} className="text-primary-foreground" />
               </div>
               <div>
                 <p className="text-sm font-semibold leading-none">Knox</p>
@@ -152,12 +179,12 @@ export function KnoxWidget() {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+          <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3" style={{ overscrollBehavior: 'contain' }}>
             {/* Empty state */}
             {!hasMessages && !loading && (
               <div className="flex flex-col items-center justify-center h-full text-center gap-3 px-4">
                 <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Bot className="h-6 w-6 text-primary" />
+                  <KnoxIcon size={28} className="text-primary" />
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Hey, I'm Knox.</p>
@@ -239,8 +266,8 @@ export function KnoxWidget() {
                 onKeyDown={handleKey}
                 placeholder="Ask Knox anything…"
                 disabled={loading}
-                className="flex-1 resize-none rounded-xl border border-border/60 bg-muted/40 px-3 py-2 text-sm placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-50 max-h-[120px] overflow-y-auto"
-                style={{ minHeight: '38px' }}
+                className="flex-1 resize-none rounded-xl border border-border/60 bg-muted/40 px-3 py-2 placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-50 max-h-[120px] overflow-y-auto"
+                style={{ minHeight: '38px', fontSize: '16px' }}
                 onInput={e => {
                   // Auto-grow
                   const el = e.currentTarget
@@ -278,7 +305,7 @@ export function KnoxWidget() {
       >
         {open
           ? <X className="h-5 w-5 text-muted-foreground" />
-          : <span className="text-base font-black text-primary-foreground tracking-tight">K</span>}
+          : <KnoxIcon size={22} className="text-primary-foreground" />}
       </button>
     </>
   )

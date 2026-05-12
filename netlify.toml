@@ -37,6 +37,7 @@
 
 [functions."agent"]
   timeout = 60
+  included_files = ["src/lib/pricing.ts"]
 
 [functions."send-reminders"]
   schedule = "0 14 * * *"
