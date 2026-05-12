@@ -292,7 +292,7 @@ export function KnoxWidget() {
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border/60 bg-card shrink-0">
             <div className="flex items-center gap-2.5">
-              <KnoxLogo size={36} className="shrink-0" />
+              <KnoxLogo size={72} className="shrink-0" />
               <div>
                 <p className="text-sm font-semibold leading-none">Knox</p>
                 <p className="text-[10px] text-muted-foreground mt-0.5">KECC AI Assistant</p>
@@ -318,7 +318,7 @@ export function KnoxWidget() {
             {/* Empty state */}
             {!hasMessages && !loading && (
               <div className="flex flex-col items-center justify-center h-full text-center gap-3 px-4">
-                <KnoxLogo size={80} />
+                <KnoxLogo size={160} />
                 <div>
                   <p className="text-sm font-semibold">Hey, I'm Knox.</p>
                   <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
@@ -347,7 +347,7 @@ export function KnoxWidget() {
             {messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'assistant' && (
-                  <KnoxLogo size={28} className="shrink-0 mt-0.5 mr-1.5" />
+                  <KnoxLogo size={56} className="shrink-0 mt-0.5 mr-1.5" />
                 )}
                 <div className={`flex flex-col gap-1.5 max-w-[82%]`}>
                   {/* Image thumbnail for user messages */}
@@ -373,9 +373,7 @@ export function KnoxWidget() {
             {/* Status / loading indicator */}
             {loading && !messages.some(m => m.streaming) && (
               <div className="flex justify-start">
-                <div className="h-6 w-6 rounded-full bg-primary flex items-center justify-center shrink-0 mt-0.5 mr-2">
-                  <KnoxIcon size={13} className="text-primary-foreground" />
-                </div>
+                <KnoxLogo size={56} className="shrink-0 mt-0.5 mr-2" />
                 <div className="bg-muted rounded-2xl rounded-bl-sm px-3 py-2.5 flex items-center gap-2">
                   {statusText ? (
                     <span className="text-xs text-muted-foreground italic">{statusText}</span>
@@ -485,12 +483,12 @@ export function KnoxWidget() {
             ? 'h-11 w-11 rounded-full bg-card/80 border border-border/60 shadow-lg scale-90'
             : 'hover:scale-110 active:scale-95 drop-shadow-lg'
         }`}
-        style={open ? {} : { width: 64, height: 64 }}
+        style={open ? {} : { width: 128, height: 128 }}
         aria-label={open ? 'Close Knox' : 'Open Knox AI Assistant'}
       >
         {open
           ? <X className="h-4 w-4 text-muted-foreground" />
-          : <KnoxLogo size={64} />}
+          : <KnoxLogo size={128} />}
       </button>
     </>
   )
