@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useParams } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import { quoCallUrl, quoTextUrl } from '@/lib/utils'
-import { Contact, Property, Quote, Subscription, Activity, ServiceAgreement, rowToContact } from '@/types'
+import { Contact, Property, Quote, Subscription, Activity, ServiceAgreement, Lead, rowToContact } from '@/types'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -599,6 +599,51 @@ function LogActivitySheet({ contactId, open, onClose }: { contactId: string; ope
   )
 }
 
+function LeadsTab({ contactId }: { contactId: string }) {
+  const [, navigate] = useLocation()
+  const { data: leads = [], isLoading } = useQuery<Lead[]>({
+    queryKey: ['/leads', { contactId }],
+    queryFn: () => apiGet(`/leads?contactId=${contactId}`),
+  })
+
+  const STAGE_LABELS: Record<string, string> = {
+    new: 'New', contacted: 'Contacted', follow_up: 'Follow Up', quoted: 'Quoted',
+    scheduled: 'Scheduled', recurring: 'Recurring', finished_unpaid: 'Finished (Unpaid)',
+    finished_paid: 'Finished (Paid)', lost: 'Lost',
+  }
+
+  if (isLoading) return <div className="p-4 space-y-2">{[1,2].map(i => <Skeleton key={i} className="h-16 w-full" />)}</div>
+
+  if (leads.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-48 text-center p-4">
+        <p className="text-muted-foreground text-sm">No leads linked to this contact.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-3 space-y-2">
+      {leads.map(lead => (
+        <button
+          key={lead.id}
+          className="w-full text-left rounded-lg border bg-card p-3 hover:bg-accent transition-colors"
+          onClick={() => navigate('/leads')}
+        >
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-medium">{lead.serviceInterest ?? 'No service specified'}</span>
+            <Badge variant="secondary" className="text-xs shrink-0">{STAGE_LABELS[lead.stage] ?? lead.stage}</Badge>
+          </div>
+          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+            {lead.estimatedValue != null && <span>${lead.estimatedValue.toLocaleString()}</span>}
+            <span>{new Date(lead.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+          </div>
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function ActivityTab({ contactId }: { contactId: string }) {
   const [showLog, setShowLog] = useState(false)
 
@@ -721,7 +766,7 @@ export default function ContactDetail() {
       <Tabs defaultValue="info" className="flex flex-col flex-1 overflow-hidden">
         <div className="shrink-0 border-b overflow-x-auto">
           <TabsList className="w-max min-w-full rounded-none bg-transparent justify-start px-3 gap-0 h-10">
-            {(['info', 'quotes', 'subs', 'agreements', 'jobs', 'invoices', 'activity'] as const).map(tab => (
+            {(['info', 'quotes', 'subs', 'agreements', 'jobs', 'leads', 'invoices', 'activity'] as const).map(tab => (
               <TabsTrigger
                 key={tab}
                 value={tab}
@@ -750,6 +795,9 @@ export default function ContactDetail() {
             <div className="flex flex-col items-center justify-center h-48 text-center p-4">
               <p className="text-muted-foreground text-sm">Jobs coming in Phase 3.</p>
             </div>
+          </TabsContent>
+          <TabsContent value="leads" className="mt-0 h-full">
+            <LeadsTab contactId={contact.id} />
           </TabsContent>
           <TabsContent value="invoices" className="mt-0 h-full">
             <div className="flex flex-col items-center justify-center h-48 text-center p-4">
