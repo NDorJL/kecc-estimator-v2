@@ -5,7 +5,7 @@
  *
  * Required env vars (set in Netlify dashboard):
  *   ANTHROPIC_API_KEY — Anthropic API key
- *   CLAUDE_MODEL      — optional model override (default: claude-3-5-haiku-20241022)
+ *   CLAUDE_MODEL      — optional model override (default: claude-3-haiku-20240307)
  */
 import type { Handler } from '@netlify/functions'
 import Anthropic from '@anthropic-ai/sdk'
@@ -19,7 +19,7 @@ export const supabase = createClient(
 )
 
 const anthropic    = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? 'claude-3-5-haiku-20241022'
+const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? 'claude-3-haiku-20240307'
 
 // Write tools — used for audit logging and frontend cache invalidation signals
 export const WRITE_TOOLS = new Set([

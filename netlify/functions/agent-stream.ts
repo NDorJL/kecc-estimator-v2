@@ -14,7 +14,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { anthropicTools, executeTool, WRITE_TOOLS, buildSystemPrompt, toAnthropicMessages } from './agent'
 
-const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? 'claude-3-5-haiku-20241022'
+const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? 'claude-3-haiku-20240307'
 
 const supabaseStream = createClient(
   process.env.SUPABASE_URL!,
