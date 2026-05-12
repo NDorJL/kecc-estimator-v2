@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 import { rowToJob } from '../../src/types'
 import { syncJobToGoogle, deleteGoogleEvent } from './_google'
 import { advanceLeadStage } from './_leadSync'
+import { notifyOwner } from './_knoxNotify'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -131,6 +132,57 @@ export const handler: Handler = async (event) => {
           metadata:   { jobId: id, serviceName: data.service_name, scheduledDate: data.scheduled_date },
         }) } catch (_e) { /* non-fatal */ }
       }
+      // Auto-create Finance income entry when a job is completed (fire-and-forget)
+      if (body.status === 'completed') {
+        ;(async () => {
+          const { data: existing } = await supabase
+            .from('transactions').select('id').eq('source', `job:${id}`).maybeSingle()
+          if (existing) return
+          let amount = 0
+          let review = true
+          if (data.quote_id) {
+            const { data: q } = await supabase
+              .from('quotes').select('total').eq('id', data.quote_id).single()
+            if (q?.total) { amount = Number(q.total); review = false }
+          }
+          const description = [data.service_name, data.customer_name].filter(Boolean).join(' — ')
+          await supabase.from('transactions').insert({
+            date:        (data.completed_at as string | null)?.slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+            description: description || 'Job Completed',
+            amount,
+            type:        'Income',
+            category:    'Job Revenue',
+            account:     'KECC Checking (TVA)',
+            notes:       '',
+            review,
+            source:      `job:${id}`,
+          })
+        })().catch(e => console.error('Finance auto-entry (job) failed:', e))
+      }
+
+      // ── Knox Phase 3: auto-queue review request + notify owner ────────────
+      if (body.status === 'completed') {
+        ;(async () => {
+          // Auto-queue review request if customer has a phone and review not yet sent
+          if (data.customer_phone && !data.review_sent_at) {
+            const firstName = (data.customer_name ?? 'there').split(' ')[0]
+            const reviewMsg = `Hi ${firstName}! Thank you for choosing Knox Exterior Care Co.! We hope your ${data.service_name} service exceeded your expectations. If you have a moment, we'd love to hear about your experience:\nhttps://g.page/r/CYjpuP4I4MbiEBM/review\nIt means the world to us! — Knox Exterior Care Co. Reply STOP to opt out.`
+            await supabase.from('sms_queue').insert({
+              to_phone:   data.customer_phone,
+              message:    reviewMsg,
+              type:       'review_request',
+              contact_id: data.contact_id ?? null,
+              status:     'pending',
+            })
+            await supabase.from('jobs').update({ review_sent_at: new Date().toISOString() }).eq('id', id)
+          }
+
+          // Notify owner directly
+          const customerLabel = data.customer_name ?? 'Customer'
+          await notifyOwner(supabase, `Knox: ${customerLabel} — ${data.service_name} job completed.${data.customer_phone ? ' Review request queued.' : ''}`)
+        })().catch(() => {})
+      }
+
       return { statusCode: 200, headers: CORS, body: JSON.stringify(job) }
     }
 

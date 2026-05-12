@@ -4,6 +4,7 @@ import { rowToLead } from '../../src/types'
 import { randomUUID } from 'crypto'
 import Busboy from 'busboy'
 import { handleLeadStageChange } from './_cascade'   // ← NEW
+import { notifyOwner } from './_knoxNotify'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -155,6 +156,15 @@ export const handler: Handler = async (event) => {
         .select()
         .single()
       if (error) throw error
+
+      // ── Knox: notify owner of new lead (fire-and-forget) ──────────────────
+      ;(async () => {
+        const sourcePart  = resolvedSource ? ` via ${resolvedSource}` : ''
+        const svcPart     = body.serviceInterest ? ` — ${body.serviceInterest}` : ''
+        const valPart     = body.estimatedValue   ? ` ($${Number(body.estimatedValue).toFixed(0)})` : ''
+        await notifyOwner(supabase, `Knox: New lead${sourcePart}${svcPart}${valPart}`)
+      })().catch(() => {})
+
       return { statusCode: 201, headers: CORS, body: JSON.stringify(rowToLead(data)) }
     }
 

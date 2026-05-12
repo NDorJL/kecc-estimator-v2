@@ -13,17 +13,17 @@ const WRITE_TOOL_NAMES = new Set([
   'remember_fact',
 ])
 
-// ── Knox branded icon — stylized K with sparkles ──────────────────────────────
-function KnoxIcon({ size = 20, className = '' }: { size?: number; className?: string }) {
+// ── Knox logo image (placed at /public/knox-logo.png) ─────────────────────────
+function KnoxLogo({ size = 20, className = '' }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className}>
-      <path d="M5 3v18" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" />
-      <path d="M5 12L17.5 3.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-      <path d="M5 12L17.5 20.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-      <path d="M20 3L20.8 5.2L23 6L20.8 6.8L20 9L19.2 6.8L17 6L19.2 5.2Z" fill="currentColor" />
-      <path d="M20.5 15.5L21.1 17L22.6 17.5L21.1 18L20.5 19.5L19.9 18L18.4 17.5L19.9 17Z" fill="currentColor" opacity="0.7" />
-      <circle cx="13.5" cy="4.2" r="0.85" fill="currentColor" opacity="0.55" />
-    </svg>
+    <img
+      src="/knox-logo.png"
+      alt="Knox"
+      width={size}
+      height={size}
+      className={`object-contain ${className}`}
+      style={{ imageRendering: 'auto' }}
+    />
   )
 }
 
@@ -292,8 +292,8 @@ export function KnoxWidget() {
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border/60 bg-card shrink-0">
             <div className="flex items-center gap-2.5">
-              <div className="h-7 w-7 rounded-full bg-primary flex items-center justify-center shrink-0">
-                <KnoxIcon size={16} className="text-primary-foreground" />
+              <div className="h-7 w-7 rounded-full bg-black flex items-center justify-center shrink-0 overflow-hidden">
+                <KnoxLogo size={24} />
               </div>
               <div>
                 <p className="text-sm font-semibold leading-none">Knox</p>
@@ -320,8 +320,8 @@ export function KnoxWidget() {
             {/* Empty state */}
             {!hasMessages && !loading && (
               <div className="flex flex-col items-center justify-center h-full text-center gap-3 px-4">
-                <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                  <KnoxIcon size={28} className="text-primary" />
+                <div className="h-16 w-16 rounded-full bg-black flex items-center justify-center overflow-hidden">
+                  <KnoxLogo size={56} />
                 </div>
                 <div>
                   <p className="text-sm font-semibold">Hey, I'm Knox.</p>
@@ -351,8 +351,8 @@ export function KnoxWidget() {
             {messages.map((msg, i) => (
               <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.role === 'assistant' && (
-                  <div className="h-6 w-6 rounded-full bg-primary flex items-center justify-center shrink-0 mt-0.5 mr-2">
-                    <KnoxIcon size={13} className="text-primary-foreground" />
+                  <div className="h-6 w-6 rounded-full bg-black flex items-center justify-center shrink-0 mt-0.5 mr-2 overflow-hidden">
+                    <KnoxLogo size={20} />
                   </div>
                 )}
                 <div className={`flex flex-col gap-1.5 max-w-[82%]`}>
@@ -489,13 +489,13 @@ export function KnoxWidget() {
         className={`fixed bottom-6 right-4 sm:right-6 z-50 h-14 w-14 rounded-full shadow-lg flex items-center justify-center transition-all duration-200 ${
           open
             ? 'bg-muted border border-border/60 scale-90'
-            : 'bg-primary hover:bg-primary/90 active:scale-95'
+            : 'bg-black hover:opacity-90 active:scale-95 overflow-hidden'
         }`}
         aria-label={open ? 'Close Knox' : 'Open Knox AI Assistant'}
       >
         {open
           ? <X className="h-5 w-5 text-muted-foreground" />
-          : <KnoxIcon size={22} className="text-primary-foreground" />}
+          : <KnoxLogo size={48} />}
       </button>
     </>
   )
