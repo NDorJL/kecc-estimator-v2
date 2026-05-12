@@ -1,0 +1,234 @@
+/**
+ * knox-agent.ts — Autonomous Knox scheduled agent
+ *
+ * Runs daily at noon UTC (7 am EST / 8 am EDT).
+ * - Every day:       Morning briefing (jobs, stale leads, unsigned quotes)
+ * - Every Monday:    + Weekly pipeline & revenue summary
+ * - Every 1st:       + Monthly marketing performance snapshot
+ *
+ * Sends directly to owner's phone via OpenPhone — no approval queue.
+ * Falls back to structured text if Ollama is unreachable.
+ *
+ * Required env vars:
+ *   OWNER_PHONE       — owner's personal cell, e.g. 8656036396
+ *   OLLAMA_BASE_URL   — Cloudflare tunnel URL
+ *   OLLAMA_AGENT_MODEL or OLLAMA_MODEL — model for report generation
+ */
+import type { Handler } from '@netlify/functions'
+import { createClient } from '@supabase/supabase-js'
+import { sendOpenPhoneSms } from './_smsHelper'
+
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+)
+
+const OLLAMA_BASE_URL = (process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434').replace(/\/$/, '')
+const OLLAMA_MODEL    = process.env.OLLAMA_AGENT_MODEL ?? process.env.OLLAMA_MODEL ?? 'qwen2.5:14b'
+const OWNER_PHONE     = process.env.OWNER_PHONE ?? '8656036396'
+
+// ── Data collection helpers ────────────────────────────────────────────────────
+
+async function getDailyData() {
+  const today        = new Date().toISOString().slice(0, 10)
+  const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString()
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString()
+
+  const [todayJobs, staleLeads, unsignedQuotes, overdueJobs] = await Promise.all([
+    supabase.from('jobs')
+      .select('service_name, scheduled_window, customer_name, customer_address')
+      .eq('scheduled_date', today).neq('status', 'cancelled').order('scheduled_window'),
+    supabase.from('leads')
+      .select('stage, service_interest, contact_id')
+      .in('stage', ['new', 'follow_up'])
+      .lt('created_at', sevenDaysAgo).limit(5),
+    supabase.from('quotes')
+      .select('customer_name, total, sent_at')
+      .eq('status', 'sent').lt('sent_at', threeDaysAgo).is('signed_at', null).is('trashed_at', null).limit(5),
+    supabase.from('jobs')
+      .select('service_name, scheduled_date, customer_name')
+      .eq('status', 'scheduled').lt('scheduled_date', today).limit(3),
+  ])
+
+  return {
+    todayJobs:      todayJobs.data      ?? [],
+    staleLeads:     staleLeads.data     ?? [],
+    unsignedQuotes: unsignedQuotes.data ?? [],
+    overdueJobs:    overdueJobs.data    ?? [],
+    date:           today,
+  }
+}
+
+async function getWeeklyData() {
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)
+  const today   = new Date().toISOString().slice(0, 10)
+
+  const [newLeads, closedLeads, quotesActivity, subsRes] = await Promise.all([
+    supabase.from('leads').select('id').gte('created_at', weekAgo),
+    supabase.from('leads').select('estimated_value')
+      .eq('stage', 'finished_paid').gte('created_at', weekAgo),
+    supabase.from('quotes').select('status, total').gte('created_at', weekAgo).is('trashed_at', null),
+    supabase.from('subscriptions').select('in_season_monthly_total').eq('status', 'ACTIVE'),
+  ])
+
+  const revenue = (closedLeads.data ?? []).reduce((s, l) => s + Number(l.estimated_value ?? 0), 0)
+  const mrr     = (subsRes.data     ?? []).reduce((s, r) => s + Number(r.in_season_monthly_total), 0)
+  const sent     = (quotesActivity.data ?? []).filter(q => q.status === 'sent' || q.status === 'accepted').length
+  const accepted = (quotesActivity.data ?? []).filter(q => q.status === 'accepted').length
+
+  return {
+    newLeadsCount:  (newLeads.data ?? []).length,
+    closedRevenue:  revenue,
+    quotesSent:     sent,
+    quotesAccepted: accepted,
+    mrr,
+  }
+}
+
+async function getMonthlyMarketingData() {
+  const now   = new Date()
+  const prev  = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+  const month = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, '0')}`
+  const start = `${month}-01`
+  const end   = new Date(prev.getFullYear(), prev.getMonth() + 1, 0).toISOString().slice(0, 10)
+
+  const [spendRes, leadsRes, channels] = await Promise.all([
+    supabase.from('marketing_spend').select('channel_id, amount').eq('month', month),
+    supabase.from('leads').select('source, stage').gte('created_at', start).lte('created_at', end),
+    supabase.from('marketing_channels').select('id, name'),
+  ])
+
+  const channelMap  = Object.fromEntries((channels.data ?? []).map(c => [c.id, c.name]))
+  const totalSpend  = (spendRes.data ?? []).reduce((s, e) => s + Number(e.amount), 0)
+  const totalLeads  = (leadsRes.data ?? []).length
+  const totalClosed = (leadsRes.data ?? []).filter(l => l.stage === 'finished_paid').length
+
+  return { month, totalSpend, totalLeads, totalClosed }
+}
+
+// ── Ollama LLM call ────────────────────────────────────────────────────────────
+
+async function generateBriefing(dataContext: string): Promise<string | null> {
+  try {
+    const systemPrompt = [
+      'You are Knox, the KECC AI agent. You are generating an automated morning briefing SMS for the owner.',
+      'Rules: plain text only (no markdown, no bullet symbols), concise, direct, actionable.',
+      'Keep the total response under 480 characters so it fits in 3 SMS messages.',
+      'Start with "Knox AM —" followed by the date.',
+      'Mention jobs first, then any urgent items. End with MRR if available.',
+    ].join(' ')
+
+    const res = await fetch(`${OLLAMA_BASE_URL}/v1/chat/completions`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model:    OLLAMA_MODEL,
+        messages: [
+          { role: 'system',  content: systemPrompt },
+          { role: 'user',    content: `Generate the briefing SMS from this data:\n${dataContext}` },
+        ],
+        stream:  false,
+        options: { temperature: 0.4 },
+      }),
+      signal: AbortSignal.timeout(25000),
+    })
+
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.choices?.[0]?.message?.content?.trim() ?? null
+  } catch {
+    return null  // Ollama unreachable — caller uses fallback
+  }
+}
+
+// ── Fallback template (no LLM needed) ─────────────────────────────────────────
+
+function buildFallbackBriefing(
+  daily: Awaited<ReturnType<typeof getDailyData>>,
+  weekly: Awaited<ReturnType<typeof getWeeklyData>> | null,
+  monthly: Awaited<ReturnType<typeof getMonthlyMarketingData>> | null,
+): string {
+  const lines: string[] = []
+  const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+  lines.push(`Knox AM — ${dateStr}`)
+
+  if (daily.todayJobs.length > 0) {
+    lines.push(`${daily.todayJobs.length} job${daily.todayJobs.length > 1 ? 's' : ''} today: ${daily.todayJobs.map(j => `${j.customer_name?.split(' ')[0]} (${j.scheduled_window ?? 'open'})`).join(', ')}`)
+  } else {
+    lines.push('No jobs scheduled today.')
+  }
+
+  const urgent: string[] = []
+  if (daily.unsignedQuotes.length > 0) urgent.push(`${daily.unsignedQuotes.length} unsigned quote${daily.unsignedQuotes.length > 1 ? 's' : ''}`)
+  if (daily.staleLeads.length > 0)     urgent.push(`${daily.staleLeads.length} stale lead${daily.staleLeads.length > 1 ? 's' : ''}`)
+  if (daily.overdueJobs.length > 0)    urgent.push(`${daily.overdueJobs.length} overdue job${daily.overdueJobs.length > 1 ? 's' : ''}`)
+  if (urgent.length > 0) lines.push(`Needs attention: ${urgent.join(', ')}`)
+
+  if (weekly) {
+    lines.push(`Week: ${weekly.newLeadsCount} new leads, $${weekly.closedRevenue.toFixed(0)} closed, MRR $${weekly.mrr.toFixed(0)}`)
+  }
+
+  if (monthly) {
+    lines.push(`${monthly.month} marketing: $${monthly.totalSpend.toFixed(0)} spend, ${monthly.totalLeads} leads, ${monthly.totalClosed} closed`)
+  }
+
+  return lines.join('\n')
+}
+
+// ── Main handler ───────────────────────────────────────────────────────────────
+
+export const handler: Handler = async () => {
+  console.log('[knox-agent] Starting autonomous daily run')
+
+  try {
+    // Check what kind of day it is
+    const now            = new Date()
+    const isMonday       = now.getDay() === 1
+    const isFirstOfMonth = now.getDate() === 1
+
+    // Collect data
+    const [daily, weekly, monthly] = await Promise.all([
+      getDailyData(),
+      isMonday       ? getWeeklyData()           : Promise.resolve(null),
+      isFirstOfMonth ? getMonthlyMarketingData() : Promise.resolve(null),
+    ])
+
+    // Build data context for Ollama
+    const dataContext = JSON.stringify({ daily, weekly: weekly ?? undefined, monthly: monthly ?? undefined }, null, 2)
+
+    // Try LLM first, fall back to template
+    const message = (await generateBriefing(dataContext)) ?? buildFallbackBriefing(daily, weekly, monthly)
+
+    // Get OpenPhone credentials
+    const { data: settings } = await supabase
+      .from('company_settings')
+      .select('quo_api_key, quo_from_number')
+      .limit(1).single()
+
+    const apiKey     = settings?.quo_api_key     ?? process.env.QUO_API_KEY     ?? ''
+    const fromNumber = settings?.quo_from_number ?? process.env.QUO_FROM_NUMBER ?? ''
+
+    if (!apiKey || !fromNumber) {
+      console.log('[knox-agent] OpenPhone not configured — logging only')
+    } else {
+      await sendOpenPhoneSms(apiKey, fromNumber, OWNER_PHONE, message)
+      console.log('[knox-agent] Briefing sent to owner')
+    }
+
+    // Audit log
+    await supabase.from('knox_log').insert({
+      trigger_type:  'scheduled',
+      user_message:  null,
+      knox_response: message,
+      tools_called:  ['get_daily_briefing', ...(isMonday ? ['get_weekly_data'] : []), ...(isFirstOfMonth ? ['get_monthly_marketing'] : [])],
+      actions_taken: [{ tool: 'notify_owner', args: { to: OWNER_PHONE }, result: { sent: !!apiKey } }],
+    })
+
+    return { statusCode: 200, body: JSON.stringify({ sent: true, preview: message.slice(0, 100) }) }
+
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('[knox-agent] Error:', message)
+    return { statusCode: 500, body: JSON.stringify({ error: message }) }
+  }
+}

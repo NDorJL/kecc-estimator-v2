@@ -43,6 +43,9 @@
   timeout = 60
   included_files = ["src/lib/pricing.ts"]
 
+[functions."knox-agent"]
+  schedule = "0 12 * * *"   # noon UTC = 7 am EST / 8 am EDT
+
 [functions."send-reminders"]
   schedule = "0 14 * * *"
 

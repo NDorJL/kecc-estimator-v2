@@ -22,6 +22,7 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { services as priceBookServices } from '../../src/lib/pricing'
+import { sendOpenPhoneSms } from './_smsHelper'
 
 export const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -36,8 +37,10 @@ const OLLAMA_VISION_MODEL = process.env.OLLAMA_VISION_MODEL ?? null
 export const WRITE_TOOLS = new Set([
   'create_contact', 'create_lead', 'update_lead_stage', 'add_note',
   'queue_sms', 'complete_job', 'schedule_job', 'batch_queue_review_requests',
-  'remember_fact',
+  'remember_fact', 'notify_owner',
 ])
+
+const OWNER_PHONE = process.env.OWNER_PHONE ?? '8656036396'
 
 const CORS = {
   'Content-Type': 'application/json',
@@ -506,6 +509,21 @@ export const tools = [
       name: 'get_churn_risks',
       description: 'Identify churn risks: paused subscriptions, contacts with no job in 60+ days, and one-time customers who have never been pitched a subscription.',
       parameters: { type: 'object', properties: {}, required: [] },
+    },
+  },
+  // ── Autonomous / direct owner channel ────────────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'notify_owner',
+      description: 'Send a direct SMS message to the KECC owner\'s personal phone — bypasses the approval queue. Use for summaries, alerts, or insights you want to push proactively. Never use for customer-facing messages.',
+      parameters: {
+        type: 'object',
+        properties: {
+          message: { type: 'string', description: 'The message text to send to the owner' },
+        },
+        required: ['message'],
+      },
     },
   },
   // ── Memory tools ──────────────────────────────────────────────────────────────
@@ -1348,6 +1366,22 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
       }
     }
 
+    // ── Owner direct channel ───────────────────────────────────────────────────
+
+    case 'notify_owner': {
+      const msg = String(args.message ?? '').trim()
+      if (!msg) return { error: 'message is required' }
+      const { data: settings } = await supabase
+        .from('company_settings')
+        .select('quo_api_key, quo_from_number')
+        .limit(1).single()
+      const apiKey     = settings?.quo_api_key     ?? process.env.QUO_API_KEY     ?? ''
+      const fromNumber = settings?.quo_from_number ?? process.env.QUO_FROM_NUMBER ?? ''
+      if (!apiKey || !fromNumber) return { error: 'OpenPhone not configured in settings' }
+      await sendOpenPhoneSms(apiKey, fromNumber, OWNER_PHONE, msg)
+      return { success: true, sent: true, to: 'owner' }
+    }
+
     // ── Memory tools ───────────────────────────────────────────────────────────
 
     case 'remember_fact': {
@@ -1444,6 +1478,11 @@ WRITE TOOL RULES (create_contact, create_lead, update_lead_stage, add_note, queu
 - Example: "Found Mike Davis — lawn care, currently in Quoted. Move to Scheduled?" → wait for yes → then call the tool
 - queue_sms never sends automatically — it goes to the Dashboard approval panel. Always show the drafted message text before queuing
 - After any write action, confirm what was done: "Done — Davis is now in Scheduled."
+
+AUTONOMOUS TOOLS (no confirmation needed — safe to execute immediately):
+- notify_owner: sends a direct SMS to the owner's personal phone. Say what you're sending first, then send it. Never use for customers.
+- remember_fact: stores a memory key. Just do it.
+- recall_memory: reads memory. Just do it.
 
 CONVERSATIONAL SKILLS
 - Pricing questions: use get_price_book to pull real pricing, then explain it in plain language. "A typical bi-weekly lawn mow for a half-acre lot runs around $X/visit."
