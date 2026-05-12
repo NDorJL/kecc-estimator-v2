@@ -30,14 +30,20 @@ const OWNER_PHONE  = process.env.OWNER_PHONE ?? '8656036396'
 // ── Data collection helpers ────────────────────────────────────────────────────
 
 async function getDailyData() {
-  const today        = new Date().toISOString().slice(0, 10)
-  const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString()
-  const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString()
+  const today           = new Date().toISOString().slice(0, 10)
+  const threeDaysAgo    = new Date(Date.now() -  3 * 86400000).toISOString()
+  const sevenDaysAgo    = new Date(Date.now() -  7 * 86400000).toISOString()
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10)
 
-  const [todayJobs, staleLeads, unsignedQuotes, overdueJobs] = await Promise.all([
+  const [todayJobs, activeSubs, staleLeads, unsignedQuotes, overdueJobs] = await Promise.all([
+    // Scheduled service jobs for today (exclude quote visits)
     supabase.from('jobs')
       .select('service_name, scheduled_window, customer_name, customer_address')
-      .eq('scheduled_date', today).neq('status', 'cancelled').order('scheduled_window'),
+      .eq('scheduled_date', today).neq('status', 'cancelled').neq('job_type', 'quote_visit').order('scheduled_window'),
+    // Active subscriptions — recurring obligations
+    supabase.from('subscriptions')
+      .select('customer_name, services, in_season_monthly_total')
+      .eq('status', 'ACTIVE'),
     supabase.from('leads')
       .select('stage, service_interest, contact_id')
       .in('stage', ['new', 'follow_up'])
@@ -45,17 +51,25 @@ async function getDailyData() {
     supabase.from('quotes')
       .select('customer_name, total, sent_at')
       .eq('status', 'sent').lt('sent_at', threeDaysAgo).is('signed_at', null).is('trashed_at', null).limit(5),
+    // Service jobs past their date — exclude quote visits, cap lookback at 14 days
     supabase.from('jobs')
       .select('service_name, scheduled_date, customer_name')
-      .eq('status', 'scheduled').lt('scheduled_date', today).limit(3),
+      .eq('status', 'scheduled').neq('job_type', 'quote_visit')
+      .gte('scheduled_date', fourteenDaysAgo).lt('scheduled_date', today).limit(3),
   ])
 
   return {
-    todayJobs:      todayJobs.data      ?? [],
-    staleLeads:     staleLeads.data     ?? [],
-    unsignedQuotes: unsignedQuotes.data ?? [],
-    overdueJobs:    overdueJobs.data    ?? [],
-    date:           today,
+    todayJobs:           todayJobs.data   ?? [],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    activeSubscriptions: (activeSubs.data ?? []).map((s: any) => ({
+      customerName: s.customer_name,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      services: (s.services ?? []).map((svc: any) => `${svc.serviceName} (${svc.frequency})`).join(', '),
+    })),
+    staleLeads:          staleLeads.data     ?? [],
+    unsignedQuotes:      unsignedQuotes.data ?? [],
+    overdueServiceJobs:  overdueJobs.data    ?? [],
+    date:                today,
   }
 }
 
@@ -156,7 +170,7 @@ function buildFallbackBriefing(
   const urgent: string[] = []
   if (daily.unsignedQuotes.length > 0) urgent.push(`${daily.unsignedQuotes.length} unsigned quote${daily.unsignedQuotes.length > 1 ? 's' : ''}`)
   if (daily.staleLeads.length > 0)     urgent.push(`${daily.staleLeads.length} stale lead${daily.staleLeads.length > 1 ? 's' : ''}`)
-  if (daily.overdueJobs.length > 0)    urgent.push(`${daily.overdueJobs.length} overdue job${daily.overdueJobs.length > 1 ? 's' : ''}`)
+  if (daily.overdueServiceJobs.length > 0)    urgent.push(`${daily.overdueServiceJobs.length} overdue job${daily.overdueServiceJobs.length > 1 ? 's' : ''}`)
   if (urgent.length > 0) lines.push(`Needs attention: ${urgent.join(', ')}`)
 
   if (weekly) {

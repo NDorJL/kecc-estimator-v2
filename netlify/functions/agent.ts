@@ -835,13 +835,38 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
 
     case 'get_jobs_today': {
       const today = new Date().toISOString().slice(0, 10)
-      const { data } = await supabase
-        .from('jobs')
-        .select('id, service_name, status, scheduled_date, scheduled_window, customer_name, customer_address, customer_phone, notes, internal_notes, property_info')
-        .eq('scheduled_date', today)
-        .neq('status', 'cancelled')
-        .order('scheduled_window')
-      return data ?? []
+      const [jobsRes, subsRes] = await Promise.all([
+        supabase
+          .from('jobs')
+          .select('id, job_type, service_name, status, scheduled_date, scheduled_window, customer_name, customer_address, customer_phone, notes, internal_notes, property_info')
+          .eq('scheduled_date', today)
+          .neq('status', 'cancelled')
+          .neq('job_type', 'quote_visit')
+          .order('scheduled_window'),
+        supabase
+          .from('subscriptions')
+          .select('id, customer_name, customer_address, services, in_season_monthly_total')
+          .eq('status', 'ACTIVE'),
+      ])
+      const jobs = jobsRes.data ?? []
+      // Summarise active subscriptions as recurring obligations
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const recurringObligations = (subsRes.data ?? []).map((s: any) => ({
+        subscriptionId:   s.id,
+        customerName:     s.customer_name,
+        customerAddress:  s.customer_address,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        services: (s.services ?? []).map((svc: any) => `${svc.serviceName} (${svc.frequency})`).join(', '),
+        monthlyTotal:     s.in_season_monthly_total,
+      }))
+      return {
+        date: today,
+        scheduledJobs: jobs,
+        activeSubscriptions: recurringObligations,
+        note: jobs.length === 0
+          ? 'No explicit job records for today. Recurring service obligations come from active subscriptions below — check frequencies to know which are due.'
+          : null,
+      }
     }
 
     case 'get_jobs': {
@@ -1473,12 +1498,17 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
       const threeDaysAgo = new Date(Date.now() - 3 * 86400000).toISOString()
       const fiveDaysAgo  = new Date(Date.now() - 5 * 86400000).toISOString()
       const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString()
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10)
 
-      const [todayJobs, staleNew, staleFollowUp, unsignedQuotes, overdueJobs] = await Promise.all([
-        // Jobs scheduled today
+      const [todayJobs, activeSubs, staleNew, staleFollowUp, unsignedQuotes, overdueJobs] = await Promise.all([
+        // Jobs scheduled today (exclude quote visits — those are appointments, not service jobs)
         supabase.from('jobs')
-          .select('id, service_name, status, scheduled_window, customer_name, customer_address, customer_phone, property_info')
-          .eq('scheduled_date', today).neq('status', 'cancelled').order('scheduled_window'),
+          .select('id, job_type, service_name, status, scheduled_window, customer_name, customer_address, customer_phone, property_info')
+          .eq('scheduled_date', today).neq('status', 'cancelled').neq('job_type', 'quote_visit').order('scheduled_window'),
+        // Active subscriptions — recurring obligations not tracked as individual job records
+        supabase.from('subscriptions')
+          .select('id, customer_name, customer_address, services, in_season_monthly_total')
+          .eq('status', 'ACTIVE'),
         // Leads stuck in 'new' for 7+ days
         supabase.from('leads')
           .select('id, stage, service_interest, created_at, contact_id')
@@ -1491,19 +1521,31 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
         supabase.from('quotes')
           .select('id, customer_name, total, sent_at, status')
           .eq('status', 'sent').lt('sent_at', threeDaysAgo).is('signed_at', null).is('trashed_at', null).limit(10),
-        // Jobs still 'scheduled' past their date
+        // Service jobs past their date and still open — exclude quote visits, cap lookback at 14 days
         supabase.from('jobs')
           .select('id, service_name, scheduled_date, customer_name, customer_address')
-          .eq('status', 'scheduled').lt('scheduled_date', today).limit(10),
+          .eq('status', 'scheduled')
+          .neq('job_type', 'quote_visit')
+          .gte('scheduled_date', fourteenDaysAgo)
+          .lt('scheduled_date', today)
+          .limit(10),
       ])
 
       return {
         date: today,
-        todayJobs:       todayJobs.data      ?? [],
-        staleNewLeads:   staleNew.data       ?? [],
-        staleFollowUps:  staleFollowUp.data  ?? [],
-        unsignedQuotes:  unsignedQuotes.data ?? [],
-        overdueJobs:     overdueJobs.data    ?? [],
+        todayJobs:          todayJobs.data   ?? [],
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        activeSubscriptions: (activeSubs.data ?? []).map((s: any) => ({
+          customerName:    s.customer_name,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          services: (s.services ?? []).map((svc: any) => `${svc.serviceName} (${svc.frequency})`).join(', '),
+          monthlyTotal:    s.in_season_monthly_total,
+        })),
+        staleNewLeads:      staleNew.data       ?? [],
+        staleFollowUps:     staleFollowUp.data  ?? [],
+        unsignedQuotes:     unsignedQuotes.data ?? [],
+        overdueServiceJobs: overdueJobs.data    ?? [],
+        note: 'Recurring service obligations come from activeSubscriptions — no job records are auto-created per visit. overdueServiceJobs are one-time jobs past their scheduled date with no status update.',
       }
     }
 
