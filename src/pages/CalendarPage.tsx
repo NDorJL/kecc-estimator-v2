@@ -1790,6 +1790,381 @@ function DayTimelineView({
 
 type CalView = 'month' | 'year' | 'day'
 
+/* ── Universal Add Event Sheet ───────────────────────────────────────────── */
+
+const EVENT_TYPES = [
+  { value: 'one_time',    label: 'One-Time Service', icon: '🔧', desc: 'Individual service visit' },
+  { value: 'quote_visit', label: 'Quote Visit',      icon: '📋', desc: 'In-person estimate appointment' },
+  { value: 'sub_visit',   label: 'Subscription Visit', icon: '🔄', desc: 'Scheduled recurring client visit' },
+] as const
+type EventType = typeof EVENT_TYPES[number]['value']
+
+const TIME_WINDOWS = [
+  { value: 'anytime',   label: 'Anytime' },
+  { value: 'morning',   label: 'Morning  (8 am – 12 pm)' },
+  { value: 'afternoon', label: 'Afternoon (12 pm – 5 pm)' },
+  { value: 'evening',   label: 'Evening  (5 pm – 8 pm)' },
+  { value: 'specific',  label: 'Specific time…' },
+]
+
+function UniversalEventSheet({
+  open, onClose, defaultDate, onCreated,
+}: {
+  open: boolean
+  onClose: () => void
+  defaultDate: string
+  onCreated: () => void
+}) {
+  const { toast } = useToast()
+
+  // Event type
+  const [eventType, setEventType] = useState<EventType>('one_time')
+
+  // Date / time
+  const [date, setDate]             = useState(defaultDate)
+  const [endDate, setEndDate]       = useState('')
+  const [window, setWindow]         = useState('anytime')
+  const [specificTime, setSpecificTime] = useState('09:00')
+
+  // Contact search
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null)
+  const [contactSearch, setContactSearch]     = useState('')
+  const [showDropdown, setShowDropdown]       = useState(false)
+  const searchRef   = useRef<HTMLInputElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  // Customer fields (auto-filled or manual)
+  const [customerName, setCustomerName]       = useState('')
+  const [customerPhone, setCustomerPhone]     = useState('')
+  const [customerAddress, setCustomerAddress] = useState('')
+
+  // Service / content
+  const [serviceName, setServiceName] = useState('')
+  const [notes, setNotes]             = useState('')
+  const [internalNotes, setInternalNotes] = useState('')
+
+  // Subscription picker (for sub_visit)
+  const [subId, setSubId] = useState('')
+
+  const [loading, setLoading] = useState(false)
+
+  // Reset when opened / date changes
+  useEffect(() => {
+    if (open) {
+      setDate(defaultDate)
+      setEventType('one_time')
+      setEndDate('')
+      setWindow('anytime')
+      setSpecificTime('09:00')
+      setSelectedContact(null)
+      setContactSearch('')
+      setCustomerName('')
+      setCustomerPhone('')
+      setCustomerAddress('')
+      setServiceName('')
+      setNotes('')
+      setInternalNotes('')
+      setSubId('')
+    }
+  }, [open, defaultDate])
+
+  // Auto-fill service name for quote visits
+  useEffect(() => {
+    if (eventType === 'quote_visit') setServiceName('In-Person Quote')
+    else if (eventType === 'one_time') setServiceName('')
+  }, [eventType])
+
+  // Load contacts for picker
+  const { data: contacts = [] } = useQuery<Contact[]>({
+    queryKey: ['/contacts'],
+    queryFn: () => apiGet('/contacts'),
+    enabled: open,
+  })
+
+  // Load subscriptions for sub_visit
+  const { data: subs = [] } = useQuery<Subscription[]>({
+    queryKey: ['/subscriptions'],
+    queryFn: () => apiGet('/subscriptions'),
+    enabled: open && eventType === 'sub_visit',
+  })
+  const activeSubs = subs.filter(s => s.status === 'ACTIVE')
+
+  // Contact search filter
+  const filteredContacts = contactSearch.trim().length > 0
+    ? contacts.filter(c =>
+        c.name.toLowerCase().includes(contactSearch.toLowerCase()) ||
+        (c.phone ?? '').includes(contactSearch)
+      ).slice(0, 8)
+    : contacts.slice(0, 8)
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!showDropdown) return
+    const handler = (e: MouseEvent) => {
+      if (
+        dropdownRef.current && !dropdownRef.current.contains(e.target as Node) &&
+        searchRef.current && !searchRef.current.contains(e.target as Node)
+      ) setShowDropdown(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showDropdown])
+
+  async function selectContact(c: Contact) {
+    setSelectedContact(c)
+    setCustomerName(c.name)
+    setCustomerPhone(c.phone ?? '')
+    setContactSearch('')
+    setShowDropdown(false)
+    try {
+      const props = await apiGet<Array<{ address: string }>>(`/properties?contactId=${c.id}`)
+      if (props?.[0]?.address) setCustomerAddress(props[0].address)
+    } catch { /* non-fatal */ }
+  }
+
+  // Auto-fill from selected subscription
+  useEffect(() => {
+    if (eventType !== 'sub_visit' || !subId) return
+    const sub = activeSubs.find(s => s.id === subId)
+    if (!sub) return
+    setCustomerName(sub.customerName ?? '')
+    setCustomerAddress(sub.customerAddress ?? '')
+    const svcNames = (sub.services ?? []).map((s: { serviceName: string }) => s.serviceName).join(', ')
+    setServiceName(svcNames || '')
+  }, [subId, eventType]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function handleSubmit() {
+    if (!date) { toast({ title: 'Date is required', variant: 'destructive' }); return }
+    if (eventType === 'one_time' && !serviceName.trim()) {
+      toast({ title: 'Service name is required', variant: 'destructive' }); return
+    }
+    if (eventType === 'sub_visit' && !subId) {
+      toast({ title: 'Please select a subscription', variant: 'destructive' }); return
+    }
+
+    setLoading(true)
+    try {
+      const body: Record<string, unknown> = {
+        jobType:         eventType === 'sub_visit' ? 'one_time' : eventType,
+        serviceName:     serviceName.trim() || 'Service Visit',
+        status:          'scheduled',
+        scheduledDate:   date,
+        scheduledWindow: window === 'specific' ? 'specific' : window,
+        notes:           notes.trim() || null,
+        internalNotes:   internalNotes.trim() || null,
+        customerName:    customerName.trim() || null,
+        customerPhone:   customerPhone.trim() || null,
+        customerAddress: customerAddress.trim() || null,
+      }
+      if (endDate && endDate > date) body.scheduledEndDate = endDate
+      if (window === 'specific') body.scheduledTime = specificTime
+      if (selectedContact) body.contactId = selectedContact.id
+      if (eventType === 'sub_visit') body.subscriptionId = subId
+
+      await apiRequest('POST', '/jobs', body)
+      toast({ title: '✓ Event added', description: `${serviceName || 'Event'} on ${date}` })
+      onCreated()
+      onClose()
+    } catch (err) {
+      toast({ title: 'Failed to create event', description: String(err), variant: 'destructive' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Sheet open={open} onOpenChange={v => !v && onClose()}>
+      <SheetContent side="bottom" className="h-[90dvh] flex flex-col p-0">
+        <SheetHeader className="px-4 pt-4 pb-2 border-b shrink-0">
+          <SheetTitle>Add Event</SheetTitle>
+        </SheetHeader>
+
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-5">
+
+          {/* Event type selector */}
+          <div>
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2 block">Event Type</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {EVENT_TYPES.map(t => (
+                <button
+                  key={t.value}
+                  onClick={() => setEventType(t.value)}
+                  className={`flex flex-col items-center gap-1 rounded-xl border p-3 text-center transition-all ${
+                    eventType === t.value
+                      ? 'border-primary bg-primary/5 text-primary'
+                      : 'border-border bg-muted/30 text-muted-foreground hover:border-primary/40'
+                  }`}
+                >
+                  <span className="text-xl">{t.icon}</span>
+                  <span className="text-[11px] font-semibold leading-tight">{t.label}</span>
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1.5 text-center">
+              {EVENT_TYPES.find(t => t.value === eventType)?.desc}
+            </p>
+          </div>
+
+          {/* Date */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="ev-date" className="text-xs font-semibold mb-1.5 block">Date *</Label>
+              <Input id="ev-date" type="date" value={date} onChange={e => setDate(e.target.value)} />
+            </div>
+            {eventType === 'one_time' && (
+              <div>
+                <Label htmlFor="ev-end" className="text-xs font-semibold mb-1.5 block">End Date <span className="text-muted-foreground font-normal">(optional)</span></Label>
+                <Input id="ev-end" type="date" value={endDate} min={date} onChange={e => setEndDate(e.target.value)} />
+              </div>
+            )}
+          </div>
+
+          {/* Time window */}
+          <div>
+            <Label className="text-xs font-semibold mb-1.5 block">Time Window</Label>
+            <div className="flex flex-wrap gap-2">
+              {TIME_WINDOWS.map(tw => (
+                <button
+                  key={tw.value}
+                  onClick={() => setWindow(tw.value)}
+                  className={`text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all ${
+                    window === tw.value
+                      ? 'border-primary bg-primary/5 text-primary'
+                      : 'border-border text-muted-foreground hover:border-primary/40'
+                  }`}
+                >
+                  {tw.value === 'specific' ? '⏰ Specific time' : tw.label.split(' ')[0]}
+                </button>
+              ))}
+            </div>
+            {window === 'specific' && (
+              <Input
+                type="time"
+                value={specificTime}
+                onChange={e => setSpecificTime(e.target.value)}
+                className="mt-2 w-36"
+              />
+            )}
+          </div>
+
+          {/* Subscription picker — only for sub_visit */}
+          {eventType === 'sub_visit' && (
+            <div>
+              <Label className="text-xs font-semibold mb-1.5 block">Subscription *</Label>
+              <Select value={subId} onValueChange={setSubId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a subscription…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeSubs.map(s => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.customerName} — {(s.services ?? []).map((sv: { serviceName: string }) => sv.serviceName).join(', ')}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {/* Contact search */}
+          <div>
+            <Label className="text-xs font-semibold mb-1.5 block">
+              Customer / Contact <span className="text-muted-foreground font-normal">{eventType === 'quote_visit' ? '(recommended)' : '(optional)'}</span>
+            </Label>
+            {selectedContact ? (
+              <div className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-3 py-2">
+                <div>
+                  <p className="text-sm font-semibold">{selectedContact.name}</p>
+                  {selectedContact.phone && <p className="text-xs text-muted-foreground">{selectedContact.phone}</p>}
+                </div>
+                <button onClick={() => { setSelectedContact(null); setCustomerName(''); setCustomerPhone(''); setCustomerAddress('') }} className="text-muted-foreground hover:text-destructive">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  ref={searchRef}
+                  placeholder="Search contacts…"
+                  value={contactSearch}
+                  onChange={e => { setContactSearch(e.target.value); setShowDropdown(true) }}
+                  onFocus={() => setShowDropdown(true)}
+                  className="pl-8"
+                />
+                {showDropdown && (
+                  <div ref={dropdownRef} className="absolute z-50 top-full mt-1 left-0 right-0 bg-popover border border-border rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                    {filteredContacts.length === 0 ? (
+                      <p className="text-xs text-muted-foreground px-3 py-2">No contacts found</p>
+                    ) : filteredContacts.map(c => (
+                      <button key={c.id} onClick={() => selectContact(c)} className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors">
+                        <p className="text-sm font-semibold">{c.name}</p>
+                        {c.phone && <p className="text-xs text-muted-foreground">{c.phone}</p>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {/* Manual fallback fields if no contact selected */}
+            {!selectedContact && (customerName || customerPhone || customerAddress) && (
+              <div className="grid grid-cols-2 gap-2 mt-2">
+                <Input placeholder="Name" value={customerName} onChange={e => setCustomerName(e.target.value)} />
+                <Input placeholder="Phone" value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} />
+              </div>
+            )}
+          </div>
+
+          {/* Service name */}
+          {eventType !== 'sub_visit' && (
+            <div>
+              <Label htmlFor="ev-service" className="text-xs font-semibold mb-1.5 block">
+                {eventType === 'quote_visit' ? 'Appointment Label' : 'Service Name *'}
+              </Label>
+              <Input
+                id="ev-service"
+                placeholder={eventType === 'quote_visit' ? 'In-Person Quote' : 'e.g. House Wash, Lawn Mow…'}
+                value={serviceName}
+                onChange={e => setServiceName(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* Address */}
+          <div>
+            <Label htmlFor="ev-addr" className="text-xs font-semibold mb-1.5 block">Location / Address <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <Input
+              id="ev-addr"
+              placeholder="123 Main St, Knoxville TN"
+              value={customerAddress}
+              onChange={e => setCustomerAddress(e.target.value)}
+            />
+          </div>
+
+          {/* Notes */}
+          <div>
+            <Label htmlFor="ev-notes" className="text-xs font-semibold mb-1.5 block">Notes <span className="text-muted-foreground font-normal">(visible to customer)</span></Label>
+            <Textarea id="ev-notes" rows={2} placeholder="Any details for this event…" value={notes} onChange={e => setNotes(e.target.value)} />
+          </div>
+          <div>
+            <Label htmlFor="ev-internal" className="text-xs font-semibold mb-1.5 block">Internal Notes <span className="text-muted-foreground font-normal">(crew only)</span></Label>
+            <Textarea id="ev-internal" rows={2} placeholder="Gate code, dog on property, parking notes…" value={internalNotes} onChange={e => setInternalNotes(e.target.value)} />
+          </div>
+
+        </div>
+
+        {/* Footer */}
+        <div className="shrink-0 border-t px-4 py-3 flex gap-3">
+          <Button variant="outline" className="flex-1" onClick={onClose}>Cancel</Button>
+          <Button className="flex-1" onClick={handleSubmit} disabled={loading}>
+            {loading ? 'Adding…' : 'Add Event'}
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 export default function CalendarPage() {
   const today = new Date()
   const [year, setYear]   = useState(today.getFullYear())
@@ -1802,6 +2177,7 @@ export default function CalendarPage() {
   const [showNewQuoteVisit, setShowNewQuoteVisit] = useState(false)
   const [showAddService, setShowAddService] = useState(false)
   const [showAddSubVisit, setShowAddSubVisit] = useState(false)
+  const [showUniversalEvent, setShowUniversalEvent] = useState(false)
   const [editingJob, setEditingJob] = useState<Job | null>(null)
   const { toast } = useToast()
   const qc = useQueryClient()
@@ -2035,24 +2411,12 @@ export default function CalendarPage() {
                 {v.charAt(0).toUpperCase() + v.slice(1)}
               </button>
             ))}
-            <div className="ml-auto flex items-center gap-1 shrink-0">
+            <div className="ml-auto shrink-0">
               <button
-                onClick={() => setShowAddService(true)}
-                className="flex items-center gap-1 text-xs font-semibold py-1.5 px-2.5 rounded-lg border border-green-300 text-green-700 dark:text-green-300 hover:bg-green-50 dark:hover:bg-green-950/30 transition-colors"
+                onClick={() => setShowUniversalEvent(true)}
+                className="flex items-center gap-1.5 text-xs font-semibold py-1.5 px-3 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 active:scale-95 transition-all"
               >
-                <Plus className="h-3 w-3" />Service
-              </button>
-              <button
-                onClick={() => setShowAddSubVisit(true)}
-                className="flex items-center gap-1 text-xs font-semibold py-1.5 px-2.5 rounded-lg border border-blue-300 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30 transition-colors"
-              >
-                <Plus className="h-3 w-3" />Sub
-              </button>
-              <button
-                onClick={() => setShowNewQuoteVisit(true)}
-                className="flex items-center gap-1 text-xs font-semibold py-1.5 px-2.5 rounded-lg border border-purple-300 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/30 transition-colors"
-              >
-                <Plus className="h-3 w-3" />Visit
+                <Plus className="h-3.5 w-3.5" />Add Event
               </button>
             </div>
           </div>
@@ -2189,7 +2553,15 @@ export default function CalendarPage() {
         }}
       />
 
-      {/* New Quote Visit */}
+      {/* Universal Add Event */}
+      <UniversalEventSheet
+        open={showUniversalEvent}
+        onClose={() => setShowUniversalEvent(false)}
+        defaultDate={selectedDateKey ?? `${year}-${String(month + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`}
+        onCreated={() => { qc.invalidateQueries({ queryKey: ['/jobs'] }); qc.invalidateQueries({ queryKey: ['/leads'] }) }}
+      />
+
+      {/* New Quote Visit (still used by existing shortcuts elsewhere) */}
       <NewQuoteVisitSheet
         open={showNewQuoteVisit}
         onClose={() => setShowNewQuoteVisit(false)}

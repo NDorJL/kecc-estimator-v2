@@ -193,16 +193,25 @@
 }
 
 /* ── Demo mode — blur sensitive data ────────────────────────────────────────── */
-.demo-mode [data-sensitive] {
+/* Layer 1: manually-tagged via <Sensitive> component or DOM scanner            */
+/* Layer 2: CSS-targeted patterns (tabular numbers, phone/email links)          */
+.demo-mode [data-sensitive],
+.demo-mode .tabular-nums,
+.demo-mode a[href^="tel:"],
+.demo-mode a[href^="mailto:"] {
   filter: blur(8px);
   user-select: none;
   pointer-events: none;
-  transition: filter 0.2s ease;
+  transition: filter 0.15s ease;
 }
-/* Remove blur on hover so the owner can still read if needed */
-.demo-mode [data-sensitive]:hover {
-  filter: blur(0px);
+/* Hover to reveal — lets the owner read during the demo */
+.demo-mode [data-sensitive]:hover,
+.demo-mode .tabular-nums:hover,
+.demo-mode a[href^="tel:"]:hover,
+.demo-mode a[href^="mailto:"]:hover {
+  filter: blur(0);
   pointer-events: auto;
+  cursor: pointer;
 }
 
 /* ── Page enter animation ────────────────────────────────────────────────────── */
