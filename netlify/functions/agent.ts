@@ -616,6 +616,7 @@ GENERAL RULES
 - Keep responses short and direct — this is a mobile-friendly chat widget used in the field and office
 - Use plain language. Bullet points for lists. No essays.
 - If you don't know something, say so clearly rather than guessing
+- NEVER invent or guess record IDs. All IDs are UUIDs (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx). Always call search_contacts, get_leads, or find_job first, then use the id field from those results. Any other format is wrong.
 
 FIELD CREW GUIDANCE
 - Field crew will refer to jobs and customers by name or address, not by ID — use find_job or search_contacts to look them up first
@@ -746,6 +747,19 @@ export function toAnthropicMessages(messages: any[]): Anthropic.MessageParam[] {
   })
 }
 
+// ── UUID validator — catches hallucinated IDs before they hit the DB ──────────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function requireUUID(id: string, label = 'ID'): void {
+  if (!UUID_RE.test(id)) {
+    throw new Error(
+      `${label} "${id}" is not a valid UUID. IDs look like: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx. ` +
+      `Call search_contacts, get_leads, or find_job first to get the real ID — never guess or construct IDs.`
+    )
+  }
+}
+
 // ── Tool execution (all queries run server-side with the service key) ─────────
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -763,6 +777,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
     }
 
     case 'get_contact_details': {
+      requireUUID(String(args.contactId), 'contactId')
       const { data } = await supabase
         .from('contacts')
         .select('*')
@@ -913,6 +928,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
     }
 
     case 'update_lead_stage': {
+      requireUUID(String(args.leadId), 'leadId')
       const updates: Record<string, unknown> = { stage: String(args.stage) }
       if (args.stage === 'contacted') updates.contacted_at = new Date().toISOString()
       const { data, error } = await supabase
@@ -928,6 +944,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
     case 'add_note': {
       const type = String(args.recordType)
       const id   = String(args.recordId)
+      requireUUID(id, 'recordId')
 
       if (type === 'lead') {
         const { error } = await supabase.from('leads').update({ notes: args.notes }).eq('id', id)
@@ -955,6 +972,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
 
     case 'update_contact': {
       const id = String(args.contactId)
+      requireUUID(id, 'contactId')
       // Build patch — only include fields that were passed
       const patch: Record<string, unknown> = {}
       if (args.name         != null) patch.name          = String(args.name)
@@ -989,6 +1007,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
     }
 
     case 'complete_job': {
+      requireUUID(String(args.jobId), 'jobId')
       const updates: Record<string, unknown> = {
         status:       'completed',
         completed_at: new Date().toISOString(),
@@ -1005,6 +1024,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
     }
 
     case 'schedule_job': {
+      requireUUID(String(args.jobId), 'jobId')
       const updates: Record<string, unknown> = {
         scheduled_date: String(args.scheduledDate),
       }
@@ -1021,6 +1041,7 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
 
     case 'get_customer_history': {
       const cid = String(args.contactId)
+      requireUUID(cid, 'contactId')
       const [leadsRes, quotesRes, jobsRes, subsRes] = await Promise.all([
         supabase.from('leads').select('id, stage, service_interest, estimated_value, created_at, notes').eq('contact_id', cid).order('created_at', { ascending: false }),
         supabase.from('quotes').select('id, customer_name, total, status, created_at, signed_at, quote_type').eq('contact_id', cid).is('trashed_at', null).order('created_at', { ascending: false }),
