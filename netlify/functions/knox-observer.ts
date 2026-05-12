@@ -8,7 +8,7 @@
  * Required env vars:
  *   ANTHROPIC_API_KEY    — Anthropic API key
  *   OWNER_PHONE          — owner's personal cell
- *   CLAUDE_AGENT_MODEL   — optional model override (default: claude-3-5-sonnet-20241022)
+ *   CLAUDE_AGENT_MODEL   — optional model override (default: claude-sonnet-4-5)
  */
 import type { Handler } from '@netlify/functions'
 import Anthropic from '@anthropic-ai/sdk'
@@ -20,7 +20,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-const CLAUDE_MODEL = process.env.CLAUDE_AGENT_MODEL ?? process.env.CLAUDE_MODEL ?? 'claude-3-5-sonnet-20241022'
+const CLAUDE_MODEL = process.env.CLAUDE_AGENT_MODEL ?? process.env.CLAUDE_MODEL ?? 'claude-sonnet-4-5'
 const OWNER_PHONE  = process.env.OWNER_PHONE ?? '8656036396'
 
 // ── Date helpers ───────────────────────────────────────────────────────────────
