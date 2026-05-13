@@ -2616,8 +2616,11 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
     campaignCookie: string | null
   }>({ utmSource: null, utmMedium: null, utmCampaign: null, campaignCookie: null })
 
+  // Also track an inbound campaignId from the URL (e.g. from the phone campaign "Log a Lead" button)
+  const [urlCampaignId, setUrlCampaignId] = useState<string | null>(null)
+
   useEffect(() => {
-    // UTM params live in window.location.search (before the # in hash-router URLs)
+    if (!open) return   // re-read every time the sheet opens so URL params are fresh
     const params = new URLSearchParams(window.location.search)
     const utmSource   = params.get('utm_source')
     const utmMedium   = params.get('utm_medium')
@@ -2628,7 +2631,41 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
     const campaignCookie = cookieEntry ? cookieEntry.trim().slice('kecc_campaign='.length) : null
 
     setTracking({ utmSource, utmMedium, utmCampaign, campaignCookie })
-  }, [])
+
+    // Inbound campaignId + source from the "Log a Lead" button on phone campaign cards
+    const inboundCampaignId = params.get('campaignId')
+    const inboundSource     = params.get('source')
+    setUrlCampaignId(inboundCampaignId)
+
+    if (inboundSource) {
+      // Normalize display name → dropdown value (best-effort; skips if no match)
+      const normalized = ({
+        'google ads':          'google_ads',
+        'google lsa':          'google_lsa',
+        'facebook ads':        'facebook_ads',
+        'instagram ads':       'instagram_ads',
+        'instagram':           'instagram_ads',
+        'facebook':            'facebook_ads',
+        'referral':            'referral',
+        'word of mouth':       'referral',
+        'nextdoor':            'nextdoor',
+        'thumbtack':           'thumbtack',
+        'yelp ads':            'yelp_ads',
+        'yard signs':          'yard_signs',
+        'door hangers':        'door_hangers',
+        'direct mail':         'mailers',
+        'mailers':             'mailers',
+        'website':             'website',
+        'seo':                 'website',
+        'email marketing':     'email_marketing',
+        'community sponsorship': 'community',
+        'cold call':           'cold_call',
+        'inbound sms':         'inbound_sms',
+        'other':               'other',
+      } as Record<string, string>)[inboundSource.toLowerCase().trim()] ?? ''
+      if (normalized) setForm(f => ({ ...f, source: normalized }))
+    }
+  }, [open])
   // ── End attribution ───────────────────────────────────────────────────────
 
   // ── Referral / promo code → campaign match ────────────────────────────────
@@ -2652,6 +2689,13 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
     }, 400)
     return () => { if (promoTimer.current) clearTimeout(promoTimer.current) }
   }, [promoCode, allCampaigns])
+
+  // Resolve inbound campaignId (from URL) → promoMatch once campaigns have loaded
+  useEffect(() => {
+    if (!urlCampaignId || allCampaigns.length === 0) return
+    const campaign = allCampaigns.find(c => c.id === urlCampaignId) ?? null
+    if (campaign) setPromoMatch(campaign)
+  }, [urlCampaignId, allCampaigns])
   // ── End promo code ────────────────────────────────────────────────────────
 
   const queryClient = useQueryClient()
@@ -2684,7 +2728,7 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
       toast({ title: 'Lead created' })
       setForm({ contactId: '', serviceInterest: '', estimatedValue: '', source: '', notes: '' })
-      setPromoCode(''); setPromoMatch(null)
+      setPromoCode(''); setPromoMatch(null); setUrlCampaignId(null)
       setContactError(false)   // ← NEW: reset on successful create
       onClose()
     },
