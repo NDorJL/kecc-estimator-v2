@@ -488,6 +488,7 @@ function CampaignCard({
   onArchive: () => void
 }) {
   const { toast } = useToast()
+  const [, navigate] = useLocation()
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [qrLoading, setQrLoading] = useState(false)
 
@@ -674,6 +675,24 @@ function CampaignCard({
           </div>
         )}
 
+        {/* ── Phone: Log a Lead ─────────────────────────────────────── */}
+        {campaign.campaignType === 'phone' && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full text-xs"
+            onClick={() => {
+              const params = new URLSearchParams({
+                campaignId: campaign.id,
+                source:     channel?.name ?? 'Phone',
+              })
+              navigate(`/leads?${params.toString()}`)
+            }}
+          >
+            📋 Log a Lead
+          </Button>
+        )}
+
         {/* ── Digital UTM URL ───────────────────────────────────────── */}
         {campaign.campaignType === 'digital' && campaign.destinationUrl && (
           <div className="border border-border/60 rounded-lg p-3">
@@ -833,18 +852,23 @@ function CampaignSheet({
           {/* Campaign type */}
           <div>
             <Label className="text-xs">Campaign Type</Label>
-            <div className="flex gap-1.5 mt-1">
-              {(['digital', 'qr', 'referral'] as Campaign['campaignType'][]).map(t => (
+            <div className="grid grid-cols-2 gap-1.5 mt-1">
+              {([
+                { value: 'digital',  label: '🌐 Digital' },
+                { value: 'qr',       label: '📷 QR Code' },
+                { value: 'referral', label: '🤝 Referral' },
+                { value: 'phone',    label: '📞 Phone / Call' },
+              ] as { value: Campaign['campaignType']; label: string }[]).map(({ value, label }) => (
                 <button
-                  key={t}
-                  onClick={() => setCampaignType(t)}
-                  className={`flex-1 rounded-lg border py-2 text-xs font-medium transition-colors capitalize ${
-                    campaignType === t
+                  key={value}
+                  onClick={() => setCampaignType(value)}
+                  className={`rounded-lg border py-2 text-xs font-medium transition-colors ${
+                    campaignType === value
                       ? 'bg-primary text-primary-foreground border-primary'
                       : 'bg-transparent border-border text-muted-foreground hover:border-foreground'
                   }`}
                 >
-                  {t === 'qr' ? 'QR Code' : t}
+                  {label}
                 </button>
               ))}
             </div>
@@ -939,6 +963,17 @@ function CampaignSheet({
                 <Input className="mt-1 font-mono text-sm" value={referralCode} onChange={e => setReferralCode(e.target.value)} placeholder="REF-CHANNEL-XXXX" />
               </div>
               <p className="text-[11px] text-muted-foreground">This code will be shown prominently on the campaign card. Share it with referrers.</p>
+            </div>
+          )}
+
+          {campaignType === 'phone' && (
+            <div className="rounded-lg border border-border/60 bg-muted/30 p-3">
+              <p className="text-xs font-semibold mb-1.5">📞 How phone campaigns work</p>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Phone campaigns track leads manually. Use the <strong>Log a Lead</strong> button
+                on the campaign card when a call comes in — the lead will be pre-attributed to
+                this campaign automatically.
+              </p>
             </div>
           )}
         </div>
