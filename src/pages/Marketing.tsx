@@ -438,9 +438,6 @@ function ChannelDetailSheet({
                             {cam.startDate}{cam.endDate ? ` – ${cam.endDate}` : ''}
                           </span>
                         )}
-                        {cam.budget != null && (
-                          <span className="text-[11px] text-muted-foreground">Budget: {fmtCurrency(cam.budget)}</span>
-                        )}
                       </div>
                       {cam.utmCampaign && (
                         <div className="mt-1 font-mono text-[10px] text-muted-foreground/60 truncate">
@@ -515,8 +512,6 @@ function CampaignCard({
   const convViewsLeads  = metrics.views > 0  ? `${(metrics.leads  / metrics.views  * 100).toFixed(0)}%` : null
   const convLeadsClosed = metrics.leads > 0  ? `${(metrics.closed / metrics.leads  * 100).toFixed(0)}%` : null
 
-  const budgetPct    = campaign.budget && campaign.budget > 0 ? Math.min((metrics.spend / campaign.budget) * 100, 100) : null
-  const isOverBudget = !!(campaign.budget && metrics.spend > campaign.budget)
 
   function copyText(text: string) {
     navigator.clipboard.writeText(text).then(() => toast({ title: 'Copied!' })).catch(() => {})
@@ -569,23 +564,36 @@ function CampaignCard({
           </div>
         </div>
 
-        {/* ── Budget progress ───────────────────────────────────────── */}
-        {campaign.budget && campaign.budget > 0 ? (
-          <div>
-            <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
-              <span>Spend: {fmtCurrency(metrics.spend)}</span>
-              <span className={isOverBudget ? 'text-destructive font-semibold' : ''}>Budget: {fmtCurrency(campaign.budget)}</span>
+        {/* ── Return on Ad Spend bar ────────────────────────────────── */}
+        {metrics.spend > 0 ? (() => {
+          const roas     = metrics.revenue / metrics.spend
+          const fillPct  = Math.min((roas) * 100, 300) / 3   // map 0–300% ROAS → 0–100% width
+          const barColor = metrics.revenue < metrics.spend
+            ? 'bg-red-500'
+            : metrics.revenue < metrics.spend * 3
+              ? 'bg-amber-500'
+              : 'bg-emerald-500'
+          const label    = metrics.revenue > 0
+            ? `${roas.toFixed(1)}× return`
+            : 'No revenue yet'
+          return (
+            <div>
+              <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
+                <span className="font-medium">{label}</span>
+                <span>ROAS</span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+                <div
+                  className={`h-1.5 rounded-full transition-all ${barColor}`}
+                  style={{ width: `${fillPct}%` }}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-1">
+                {fmtCurrency(metrics.revenue)} earned / {fmtCurrency(metrics.spend)} spent
+              </p>
             </div>
-            <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
-              <div
-                className={`h-1.5 rounded-full transition-all ${isOverBudget ? 'bg-destructive' : (budgetPct ?? 0) > 80 ? 'bg-amber-500' : 'bg-primary'}`}
-                style={{ width: `${budgetPct ?? 0}%` }}
-              />
-            </div>
-          </div>
-        ) : metrics.spend > 0 ? (
-          <p className="text-[11px] text-muted-foreground">Spend: {fmtCurrency(metrics.spend)} (no budget set)</p>
-        ) : null}
+          )
+        })() : null}
 
         {/* ── Funnel: Views → Leads → Closed ───────────────────────── */}
         <div className="grid grid-cols-5 items-center gap-1 text-center">
@@ -703,7 +711,6 @@ function CampaignSheet({
   const [campaignType,   setCampaignType]   = useState<Campaign['campaignType']>('digital')
   const [startDate,      setStartDate]      = useState('')
   const [endDate,        setEndDate]        = useState('')
-  const [budget,         setBudget]         = useState('')
   // Digital
   const [destinationUrl, setDestinationUrl] = useState('')
   const [utmMedium,      setUtmMedium]      = useState('paid')
@@ -722,7 +729,6 @@ function CampaignSheet({
       setCampaignType(editCampaign.campaignType)
       setStartDate(editCampaign.startDate ?? '')
       setEndDate(editCampaign.endDate ?? '')
-      setBudget(editCampaign.budget != null ? String(editCampaign.budget) : '')
       setDestinationUrl(editCampaign.destinationUrl ?? '')
       setUtmMedium(editCampaign.utmMedium ?? 'paid')
       setUtmCampaignSlug(editCampaign.utmCampaign ?? '')
@@ -731,7 +737,7 @@ function CampaignSheet({
     } else {
       setName(''); setChannelId(''); setCampaignType('digital')
       setStartDate(new Date().toISOString().slice(0, 10)); setEndDate('')
-      setBudget(''); setDestinationUrl(''); setUtmMedium('paid')
+      setDestinationUrl(''); setUtmMedium('paid')
       setUtmCampaignSlug(''); setReferralCode('')
     }
   }, [open, editCampaign])
@@ -769,7 +775,6 @@ function CampaignSheet({
         name, channelId, campaignType,
         startDate: startDate || null,
         endDate:   endDate   || null,
-        budget:    budget    ? parseFloat(budget) : null,
         status:    editCampaign?.status ?? 'active',
       }
       let extra: Record<string, unknown> = {}
@@ -845,7 +850,7 @@ function CampaignSheet({
             </div>
           </div>
 
-          {/* Dates + Budget */}
+          {/* Dates */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Start Date</Label>
@@ -855,10 +860,6 @@ function CampaignSheet({
               <Label className="text-xs">End Date</Label>
               <Input type="date" className="mt-1" value={endDate} onChange={e => setEndDate(e.target.value)} />
             </div>
-          </div>
-          <div>
-            <Label className="text-xs">Budget ($)</Label>
-            <Input type="number" min="0" className="mt-1" placeholder="0" value={budget} onChange={e => setBudget(e.target.value)} />
           </div>
 
           {/* ── Type-specific fields ──────────────────────────────── */}
@@ -1722,7 +1723,7 @@ export default function Marketing() {
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedChannelRows.map(({ ch, spend, leadsCount, views, convRate, closedJobs, closeRate, chRevenue, chCpl, chCpa, chRoi, sparkline }) => (
+                      {sortedChannelRows.map(({ ch, spend, leadsCount, views, convRate, closedJobs, closeRate, chRevenue, chRevenueEst, chCpl, chCpa, chRoi, sparkline }) => (
                         <tr
                           key={ch.id}
                           className="border-b last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
