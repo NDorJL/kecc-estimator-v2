@@ -38,7 +38,7 @@ export const handler: Handler = async (event) => {
     // Look up campaign by redirect_token
     const { data: campaign, error } = await supabase
       .from('campaigns')
-      .select('id, destination_url, status')
+      .select('id, destination_url, status, utm_source')
       .eq('redirect_token', token)
       .maybeSingle()
 
@@ -54,19 +54,24 @@ export const handler: Handler = async (event) => {
       .then(() => {/* fire-and-forget */})
       .catch(() => {/* non-fatal */})
 
-    // Cookie: 7 days, same-site Lax so it survives the redirect
-    const maxAge = 7 * 24 * 60 * 60 // seconds
-    const cookie = `kecc_campaign=${token}; Path=/; Max-Age=${maxAge}; SameSite=Lax`
-
     const destination = campaign.destination_url ?? HOMEPAGE
+    const maxAge = 2592000 // 30 days in seconds
+
+    // Two cookies — must use multiValueHeaders; a plain headers object
+    // would silently drop the second Set-Cookie due to duplicate key collision.
+    const cookies = [
+      `kecc_campaign=${campaign.id}; Max-Age=${maxAge}; Path=/; SameSite=Lax`,
+      `kecc_utm_source=${campaign.utm_source ?? ''}; Max-Age=${maxAge}; Path=/; SameSite=Lax`,
+    ]
 
     return {
       statusCode: 302,
       headers: {
         Location: destination,
-        'Set-Cookie': cookie,
-        // Prevent browsers from caching the redirect
         'Cache-Control': 'no-store',
+      },
+      multiValueHeaders: {
+        'Set-Cookie': cookies,
       },
       body: '',
     }
