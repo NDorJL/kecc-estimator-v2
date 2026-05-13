@@ -4,7 +4,7 @@ import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import { quoCallUrl, quoTextUrl } from '@/lib/utils'
 import { useQuoteContext } from '@/lib/quote-context'
-import { Lead, Quote, Job, LeadStage, LineItem, Contact, QuoteAttachment, LeadPhotoStack, QuoteAmendment, AmendmentType, QuoteOptionGroup } from '@/types'
+import { Lead, Quote, Job, LeadStage, LineItem, Contact, QuoteAttachment, LeadPhotoStack, QuoteAmendment, AmendmentType, QuoteOptionGroup, Campaign } from '@/types'
 import {
   DndContext,
   DragEndEvent,
@@ -2631,6 +2631,29 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
   }, [])
   // ── End attribution ───────────────────────────────────────────────────────
 
+  // ── Referral / promo code → campaign match ────────────────────────────────
+  const [promoCode,  setPromoCode]  = useState('')
+  const [promoMatch, setPromoMatch] = useState<Campaign | null>(null)
+  const promoTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const { data: allCampaigns = [] } = useQuery<Campaign[]>({
+    queryKey: ['/campaigns'],
+    queryFn:  () => apiGet('/campaigns'),
+    enabled:  open,
+  })
+
+  useEffect(() => {
+    if (promoTimer.current) clearTimeout(promoTimer.current)
+    if (!promoCode.trim()) { setPromoMatch(null); return }
+    promoTimer.current = setTimeout(() => {
+      const code = promoCode.trim().toLowerCase()
+      const match = allCampaigns.find(c => c.utmCampaign?.toLowerCase() === code) ?? null
+      setPromoMatch(match)
+    }, 400)
+    return () => { if (promoTimer.current) clearTimeout(promoTimer.current) }
+  }, [promoCode, allCampaigns])
+  // ── End promo code ────────────────────────────────────────────────────────
+
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const [, navigate] = useLocation()
@@ -2649,16 +2672,19 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
       source: form.source || null,
       notes: form.notes || null,
       stage: 'new',
-      // Attribution — backend resolves campaign_id; UTM takes priority over cookie
-      utmSource:      tracking.utmSource,
-      utmMedium:      tracking.utmMedium,
-      utmCampaign:    tracking.utmCampaign,
-      campaignCookie: tracking.campaignCookie,
+      // Promo/referral code match takes priority as explicit campaign attribution
+      campaignId:     promoMatch?.id ?? null,
+      // Attribution — backend resolves campaign_id from UTM/cookie when no manual match
+      utmSource:      promoMatch ? null : tracking.utmSource,
+      utmMedium:      promoMatch ? null : tracking.utmMedium,
+      utmCampaign:    promoMatch ? null : tracking.utmCampaign,
+      campaignCookie: promoMatch ? null : tracking.campaignCookie,
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
       toast({ title: 'Lead created' })
       setForm({ contactId: '', serviceInterest: '', estimatedValue: '', source: '', notes: '' })
+      setPromoCode(''); setPromoMatch(null)
       setContactError(false)   // ← NEW: reset on successful create
       onClose()
     },
@@ -2754,6 +2780,26 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
                 <SelectItem value="other">Other</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          {/* Referral / promo code */}
+          <div>
+            <Label className="text-xs">Referral / Promo Code <span className="text-muted-foreground font-normal">(optional)</span></Label>
+            <input
+              type="text"
+              value={promoCode}
+              onChange={e => setPromoCode(e.target.value)}
+              placeholder="e.g. REF-GOOGLE-A1B2"
+              className="mt-1 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            {promoCode.trim() && (
+              promoMatch ? (
+                <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                  ✓ Matched: {promoMatch.name}
+                </p>
+              ) : (
+                <p className="mt-1 text-[11px] text-muted-foreground">No matching campaign</p>
+              )
+            )}
           </div>
           <div>
             <Label className="text-xs">Notes</Label>
