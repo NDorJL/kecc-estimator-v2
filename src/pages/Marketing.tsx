@@ -25,7 +25,7 @@ import {
   TrendingUp, TrendingDown, Minus, DollarSign, Users, Briefcase,
   Target, ChevronUp, ChevronDown, Plus, Pencil, Trash2, Download, Megaphone,
   Award, BarChart2, Pause, Play, Archive, Copy, QrCode,
-  ExternalLink, Link2, CheckCircle2, AlertCircle,
+  ExternalLink, Link2, CheckCircle2, AlertCircle, Loader2,
 } from 'lucide-react'
 
 // ── Period types ─────────────────────────────────────────────────────────────
@@ -228,6 +228,217 @@ function SparklineChart({ data }: { data: { v: number }[] }) {
         </LineChart>
       </ResponsiveContainer>
     </div>
+  )
+}
+
+// ── HistoricalSyncSheet ───────────────────────────────────────────────────────
+// One-time tool: attribute existing leads (that have source but no campaignId)
+// to the correct campaigns based on their source value.
+
+const SKIP_SOURCES = new Set(['quote', 'other', 'unknown'])   // can't meaningfully attribute
+
+function HistoricalSyncSheet({
+  open, onClose, allLeads, allCampaigns, channels, sourceToChannelId,
+}: {
+  open: boolean
+  onClose: () => void
+  allLeads: Lead[]
+  allCampaigns: Campaign[]
+  channels: MarketingChannel[]
+  sourceToChannelId: Record<string, string>
+}) {
+  const qc = useQueryClient()
+  const { toast } = useToast()
+
+  // Build full source→channel map (all types, not referral-filtered)
+  const fullSourceToChannel = useMemo(() => {
+    const m: Record<string, string> = { ...sourceToChannelId }
+    // extra aliases that the referral-only version might not expose
+    for (const ch of channels) {
+      m[ch.name.toLowerCase()] = ch.id
+      m[ch.name.toLowerCase().replace(/[\s/]+/g, '_')] = ch.id
+    }
+    return m
+  }, [sourceToChannelId, channels])
+
+  // Best campaign for a channel: prefer active, then most recently started
+  const bestCampaignForChannel = useMemo(() => {
+    const map: Record<string, Campaign | null> = {}
+    for (const ch of channels) {
+      const cams = allCampaigns
+        .filter(c => c.channelId === ch.id)
+        .sort((a, b) => {
+          const aActive = a.status === 'active' ? 1 : 0
+          const bActive = b.status === 'active' ? 1 : 0
+          if (bActive !== aActive) return bActive - aActive
+          return b.createdAt.localeCompare(a.createdAt)
+        })
+      map[ch.id] = cams[0] ?? null
+    }
+    return map
+  }, [channels, allCampaigns])
+
+  // Group unattributed leads by source
+  const groups = useMemo(() => {
+    const unattributed = allLeads.filter(l => l.source && !l.campaignId && !l.sourceLocked)
+    const bySource: Record<string, Lead[]> = {}
+    for (const l of unattributed) {
+      const s = l.source!
+      bySource[s] = bySource[s] ?? []
+      bySource[s].push(l)
+    }
+    return Object.entries(bySource)
+      .map(([source, leads]) => {
+        const channelId = fullSourceToChannel[source.toLowerCase()] ?? null
+        const channel   = channels.find(c => c.id === channelId) ?? null
+        const campaign  = channelId ? (bestCampaignForChannel[channelId] ?? null) : null
+        return { source, leads, channel, campaign }
+      })
+      .sort((a, b) => b.leads.length - a.leads.length)
+  }, [allLeads, fullSourceToChannel, channels, bestCampaignForChannel])
+
+  // Per-group campaign assignment (user can override)
+  const [assignments, setAssignments] = useState<Record<string, string | 'skip'>>({})
+
+  // Initialise assignments when groups change
+  useEffect(() => {
+    if (!open) return
+    const init: Record<string, string | 'skip'> = {}
+    for (const g of groups) {
+      if (SKIP_SOURCES.has(g.source)) {
+        init[g.source] = 'skip'
+      } else if (g.campaign) {
+        init[g.source] = g.campaign.id
+      } else {
+        init[g.source] = 'skip'
+      }
+    }
+    setAssignments(init)
+  }, [open, groups])
+
+  const [applying, setApplying] = useState(false)
+  const [done, setDone]         = useState(false)
+  const [applied, setApplied]   = useState(0)
+
+  async function applySync() {
+    setApplying(true)
+    let count = 0
+    for (const g of groups) {
+      const camId = assignments[g.source]
+      if (!camId || camId === 'skip') continue
+      for (const lead of g.leads) {
+        await apiRequest('PATCH', `/leads/${lead.id}`, { campaignId: camId })
+        count++
+      }
+    }
+    await qc.invalidateQueries({ queryKey: ['/leads'] })
+    setApplied(count)
+    setDone(true)
+    setApplying(false)
+    toast({ title: `${count} lead${count !== 1 ? 's' : ''} attributed` })
+  }
+
+  const toSync = groups.filter(g => assignments[g.source] && assignments[g.source] !== 'skip')
+  const toSyncCount = toSync.reduce((n, g) => n + g.leads.length, 0)
+
+  const sourceLabel = (s: string) =>
+    s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+
+  return (
+    <Sheet open={open} onOpenChange={o => { if (!o) { onClose(); setDone(false) } }}>
+      <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[90dvh] overflow-y-auto">
+        <SheetHeader className="mb-4">
+          <SheetTitle>Sync Historical Leads</SheetTitle>
+          <p className="text-xs text-muted-foreground">
+            Attributes existing leads to campaigns based on their recorded source.
+            Only referral leads auto-match — ambiguous sources let you choose.
+            This runs once; leads already attributed are untouched.
+          </p>
+        </SheetHeader>
+
+        {done ? (
+          <div className="py-8 text-center space-y-2">
+            <div className="text-3xl">✅</div>
+            <p className="font-semibold">{applied} lead{applied !== 1 ? 's' : ''} attributed</p>
+            <p className="text-sm text-muted-foreground">The marketing page will now reflect these leads in their campaigns.</p>
+            <Button className="mt-4 w-full" onClick={() => { onClose(); setDone(false) }}>Done</Button>
+          </div>
+        ) : (
+          <>
+            <div className="space-y-3 mb-5">
+              {groups.map(g => {
+                const assignment = assignments[g.source] ?? 'skip'
+                const isSkip = assignment === 'skip'
+                return (
+                  <div key={g.source} className={`rounded-lg border p-3 space-y-2 ${isSkip ? 'opacity-50' : ''}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <span className="text-sm font-medium">{sourceLabel(g.source)}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">{g.leads.length} lead{g.leads.length !== 1 ? 's' : ''}</span>
+                      </div>
+                      <button
+                        className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                        onClick={() => setAssignments(a => ({ ...a, [g.source]: isSkip ? (g.campaign?.id ?? 'skip') : 'skip' }))}
+                      >
+                        {isSkip ? 'Include' : 'Skip'}
+                      </button>
+                    </div>
+
+                    {!isSkip && (
+                      <div>
+                        <label className="text-[11px] text-muted-foreground block mb-1">Attribute to campaign</label>
+                        <Select
+                          value={assignment}
+                          onValueChange={v => setAssignments(a => ({ ...a, [g.source]: v }))}
+                        >
+                          <SelectTrigger className="h-8 text-xs">
+                            <SelectValue placeholder="Choose campaign…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {allCampaigns.map(c => {
+                              const ch = channels.find(ch => ch.id === c.channelId)
+                              return (
+                                <SelectItem key={c.id} value={c.id} className="text-xs">
+                                  {ch?.name} → {c.name}
+                                </SelectItem>
+                              )
+                            })}
+                          </SelectContent>
+                        </Select>
+                        {g.campaign && assignment === g.campaign.id && (
+                          <p className="text-[11px] text-emerald-600 mt-1">✓ Auto-matched</p>
+                        )}
+                        {!g.campaign && (
+                          <p className="text-[11px] text-amber-500 mt-1">⚠ No auto-match — pick a campaign above</p>
+                        )}
+                      </div>
+                    )}
+
+                    {isSkip && SKIP_SOURCES.has(g.source) && (
+                      <p className="text-[11px] text-muted-foreground">
+                        {g.source === 'quote' ? 'Created internally from quotes — not a marketing touchpoint.' : 'No specific source — cannot attribute accurately.'}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <Button
+              className="w-full"
+              disabled={applying || toSyncCount === 0}
+              onClick={applySync}
+            >
+              {applying
+                ? <><Loader2 className="h-3.5 w-3.5 mr-2 animate-spin" />Syncing…</>
+                : toSyncCount === 0
+                  ? 'No leads to sync'
+                  : `Sync ${toSyncCount} lead${toSyncCount !== 1 ? 's' : ''}`}
+            </Button>
+          </>
+        )}
+      </SheetContent>
+    </Sheet>
   )
 }
 
@@ -1212,9 +1423,10 @@ export default function Marketing() {
   const [deleteId, setDeleteId] = useState<string | null>(null)
   // Campaign manager state
   const [campaignFilter,  setCampaignFilter]  = useState<'all' | 'active' | 'paused' | 'ended'>('all')
-  const [showNewChannel,  setShowNewChannel]  = useState(false)
-  const [showNewCampaign, setShowNewCampaign] = useState(false)
-  const [showTestPanel,   setShowTestPanel]   = useState(false)
+  const [showNewChannel,    setShowNewChannel]    = useState(false)
+  const [showNewCampaign,   setShowNewCampaign]   = useState(false)
+  const [showTestPanel,     setShowTestPanel]     = useState(false)
+  const [showHistoricalSync, setShowHistoricalSync] = useState(false)
   const [editCampaign,    setEditCampaign]    = useState<Campaign | null>(null)
 
   function handleSort(col: SortCol) {
@@ -1934,6 +2146,14 @@ export default function Marketing() {
           <Megaphone className="h-5 w-5 text-primary" />
           <h2 className="text-lg font-bold">Marketing</h2>
         </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs gap-1 px-2 text-muted-foreground"
+          onClick={() => setShowHistoricalSync(true)}
+        >
+          🔄 Sync Historical
+        </Button>
         <Button
           size="sm"
           variant="outline"
@@ -2721,6 +2941,15 @@ export default function Marketing() {
 
       {/* ── Spend Entry Sheet ────────────────────────────────────────────── */}
       <MarketingTestPanel open={showTestPanel} onClose={() => setShowTestPanel(false)} />
+
+      <HistoricalSyncSheet
+        open={showHistoricalSync}
+        onClose={() => setShowHistoricalSync(false)}
+        allLeads={allLeads}
+        allCampaigns={allCampaigns}
+        channels={channels}
+        sourceToChannelId={sourceToChannelId}
+      />
 
       <NewChannelSheet open={showNewChannel} onClose={() => setShowNewChannel(false)} />
 
