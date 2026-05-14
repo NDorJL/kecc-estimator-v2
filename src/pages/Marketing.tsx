@@ -1098,9 +1098,17 @@ export default function Marketing() {
     queryFn: () => apiGet('/campaigns'),
   })
 
+  // Limit event history to 13 months — covers the 12-month trend window plus current month.
+  // Prevents unbounded growth as QR scans and click-tracking events accumulate.
+  const eventsSince = useMemo(() => {
+    const d = new Date()
+    d.setMonth(d.getMonth() - 13)
+    return d.toISOString().slice(0, 10)
+  }, [])  // stable — computed once at mount, doesn't need to react to period changes
+
   const { data: allEvents = [] } = useQuery<CampaignEvent[]>({
-    queryKey: ['/campaign-events'],
-    queryFn: () => apiGet('/campaign-events'),
+    queryKey: ['/campaign-events', eventsSince],
+    queryFn: () => apiGet(`/campaign-events?since=${eventsSince}`),
   })
 
   const { data: allJobs = [] } = useQuery<Job[]>({
@@ -1209,14 +1217,19 @@ export default function Marketing() {
 
   // ── KPI computations ──────────────────────────────────────────────────────
 
-  const totalSpend    = useMemo(() => periodSpend.reduce((s, e) => s + e.amount, 0), [periodSpend])
-  const prevTotalSpend = useMemo(() => prevSpend.reduce((s, e) => s + e.amount, 0), [prevSpend])
+  const totalSpend     = useMemo(() => periodSpend.reduce((s, e) => s + e.amount, 0), [periodSpend])
+  // null when prevRange is null (custom period) so KPI arrows show flat "no comparison" rather than
+  // a misleading colored arrow compared against an implicit 0 baseline
+  const prevTotalSpend = useMemo(
+    () => prevRange ? prevSpend.reduce((s, e) => s + e.amount, 0) : null,
+    [prevSpend, prevRange],
+  )
 
-  const totalLeads    = periodLeads.length
-  const prevTotalLeads = prevLeads.length
+  const totalLeads      = periodLeads.length
+  const prevTotalLeads  = prevRange ? prevLeads.length : null
 
-  const closedCount   = periodClosed.length
-  const prevClosedCount = prevClosed.length
+  const closedCount     = periodClosed.length
+  const prevClosedCount = prevRange ? prevClosed.length : null
 
   const { total: revenue, hasEstimated: revenueIsEst } =
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1224,15 +1237,19 @@ export default function Marketing() {
   const { total: prevRevenue } =
     // eslint-disable-next-line react-hooks/exhaustive-deps
     useMemo(() => revenueFor(prevClosed), [prevClosed, allQuotes, allJobs])
+  const prevRevenueOrNull = prevRange ? prevRevenue : null
 
-  const cpl           = totalLeads  > 0 && totalSpend > 0 ? totalSpend / totalLeads  : null
-  const prevCpl       = prevTotalLeads > 0 && prevTotalSpend > 0 ? prevTotalSpend / prevTotalLeads : null
+  const cpl     = totalLeads  > 0 && totalSpend > 0 ? totalSpend / totalLeads  : null
+  const prevCpl = prevTotalLeads !== null && prevTotalLeads > 0 && prevTotalSpend !== null && prevTotalSpend > 0
+    ? prevTotalSpend / prevTotalLeads : null
 
-  const cpa           = closedCount > 0 && totalSpend > 0 ? totalSpend / closedCount : null
-  const prevCpa       = prevClosedCount > 0 && prevTotalSpend > 0 ? prevTotalSpend / prevClosedCount : null
+  const cpa     = closedCount > 0 && totalSpend > 0 ? totalSpend / closedCount : null
+  const prevCpa = prevClosedCount !== null && prevClosedCount > 0 && prevTotalSpend !== null && prevTotalSpend > 0
+    ? prevTotalSpend / prevClosedCount : null
 
-  const roi           = totalSpend > 0 ? ((revenue - totalSpend) / totalSpend) * 100 : null
-  const prevRoi       = prevTotalSpend > 0 ? ((prevRevenue - prevTotalSpend) / prevTotalSpend) * 100 : null
+  const roi     = totalSpend > 0 ? ((revenue - totalSpend) / totalSpend) * 100 : null
+  const prevRoi = prevTotalSpend !== null && prevTotalSpend > 0
+    ? ((prevRevenue - prevTotalSpend) / prevTotalSpend) * 100 : null
 
   // Best channel: lowest CPA with ≥1 closed job
   const bestChannel = useMemo(() => {
@@ -1700,7 +1717,7 @@ export default function Marketing() {
                 title="Revenue"
                 icon={<TrendingUp className="h-3.5 w-3.5" />}
                 value={revenue}
-                prev={prevRevenue}
+                prev={prevRevenueOrNull}
                 kind="currency"
                 isEstimated={revenueIsEst}
               />
