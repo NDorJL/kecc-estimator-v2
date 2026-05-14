@@ -4,7 +4,7 @@ import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import { quoCallUrl, quoTextUrl } from '@/lib/utils'
 import { useQuoteContext } from '@/lib/quote-context'
-import { Lead, Quote, Job, LeadStage, LineItem, Contact, QuoteAttachment, LeadPhotoStack, QuoteAmendment, AmendmentType, QuoteOptionGroup, Campaign } from '@/types'
+import { Lead, Quote, Job, LeadStage, LineItem, Contact, Property, QuoteAttachment, LeadPhotoStack, QuoteAmendment, AmendmentType, QuoteOptionGroup, Campaign } from '@/types'
 import {
   DndContext,
   DragEndEvent,
@@ -2702,11 +2702,28 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
   const { toast } = useToast()
   const [, navigate] = useLocation()
 
-  const { data: contacts = [] } = useQuery<{ id: string; name: string }[]>({
+  const { data: contacts = [] } = useQuery<Contact[]>({
     queryKey: ['/contacts'],
     queryFn: () => apiGet('/contacts'),
     enabled: open,
   })
+
+  // Fetch properties for the selected contact so we can show their address
+  const { data: selectedProperties = [] } = useQuery<Property[]>({
+    queryKey: ['/properties', form.contactId],
+    queryFn: () => apiGet(`/properties?contactId=${form.contactId}`),
+    enabled: open && !!form.contactId,
+  })
+  const primaryAddress = selectedProperties[0]?.address ?? null
+
+  // When a contact is selected, auto-fill source from contact.source if not already set
+  useEffect(() => {
+    if (!form.contactId) return
+    const contact = contacts.find(c => c.id === form.contactId)
+    if (!contact?.source) return
+    // Only auto-fill if source field is currently empty (don't overwrite URL params or user choice)
+    setForm(f => f.source ? f : { ...f, source: contact.source! })
+  }, [form.contactId, contacts])
 
   const createMutation = useMutation({
     mutationFn: () => apiRequest('POST', '/leads', {
@@ -2755,8 +2772,16 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
             <Select
               value={form.contactId}
               onValueChange={v => {
-                setForm(f => ({ ...f, contactId: v }))
-                setContactError(false)   // ← NEW: clear error when contact is selected
+                // Clear auto-filled source when switching contacts so the new contact's source takes over
+                const prevContact = contacts.find(c => c.id === form.contactId)
+                const prevAutoSource = prevContact?.source ?? null
+                setForm(f => ({
+                  ...f,
+                  contactId: v,
+                  // Clear source only if it was auto-filled from the previous contact
+                  source: f.source === prevAutoSource ? '' : f.source,
+                }))
+                setContactError(false)
               }}
             >
               <SelectTrigger className={`mt-1 ${contactError ? 'border-destructive ring-1 ring-destructive' : ''}`}>
@@ -2768,6 +2793,13 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
                 ))}
               </SelectContent>
             </Select>
+            {/* Address pulled from contact's property — shown as confirmation, no re-entry needed */}
+            {primaryAddress && (
+              <div className="mt-1.5 flex items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
+                <MapPin className="h-3 w-3 shrink-0 text-primary" />
+                <span className="truncate">{primaryAddress}</span>
+              </div>
+            )}
             {/* ← NEW: inline validation error */}
             {contactError && (
               <p className="mt-1 text-xs text-destructive font-medium">A contact is required to create a lead.</p>
