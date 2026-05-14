@@ -656,7 +656,7 @@ export function rowToSca(r: any): SubcontractorAgreement {
 export type ChannelType = 'digital' | 'print' | 'referral' | 'other';
 export type CampaignStatus = 'active' | 'paused' | 'ended';
 export type CampaignType = 'digital' | 'qr' | 'referral' | 'phone';
-export type CampaignEventType = 'view' | 'click' | 'scan';
+export type CampaignEventType = 'view' | 'click' | 'scan' | 'phone_click' | 'email_click';
 
 export interface MarketingChannel {
   id: string;
@@ -694,8 +694,9 @@ export interface Campaign {
 
 export interface CampaignEvent {
   id: string;
-  campaignId: string;
+  campaignId: string | null;   // null for click events with no campaign context
   eventType: CampaignEventType;
+  metadata: Record<string, unknown>;
   createdAt: string;
 }
 
@@ -746,8 +747,9 @@ export function rowToCampaign(r: any): Campaign {
 export function rowToCampaignEvent(r: any): CampaignEvent {
   return {
     id: r.id,
-    campaignId: r.campaign_id,
+    campaignId: r.campaign_id ?? null,
     eventType: r.event_type,
+    metadata: r.metadata ?? {},
     createdAt: r.created_at,
   };
 }

@@ -475,6 +475,7 @@ interface CampaignMetrics {
   views: number; leads: number; closed: number
   spend: number; revenue: number; revenueIsEst: boolean
   cpl: number | null; cpa: number | null; roi: number | null
+  phoneClicks: number; emailClicks: number
 }
 
 function CampaignCard({
@@ -672,6 +673,18 @@ function CampaignCard({
                 <Copy className="h-3.5 w-3.5" />
               </Button>
             </div>
+          </div>
+        )}
+
+        {/* ── Phone: click tracking stats ───────────────────────────── */}
+        {campaign.campaignType === 'phone' && (metrics.phoneClicks > 0 || metrics.emailClicks > 0) && (
+          <div className="flex gap-3 text-[11px] text-muted-foreground">
+            {metrics.phoneClicks > 0 && (
+              <span>📞 {metrics.phoneClicks} call tap{metrics.phoneClicks !== 1 ? 's' : ''}</span>
+            )}
+            {metrics.emailClicks > 0 && (
+              <span>✉️ {metrics.emailClicks} email tap{metrics.emailClicks !== 1 ? 's' : ''}</span>
+            )}
           </div>
         )}
 
@@ -1160,11 +1173,11 @@ export default function Marketing() {
   // isEstimated = true when no completed job has been found (so the number is
   // the quote total / estimatedValue, not a confirmed invoice amount).
   function leadRevenue(lead: Lead): { amount: number; isEstimated: boolean } {
-    const completedJob = allJobs.find(j =>
-      j.status === 'completed' &&
-      ((lead.quoteId    && j.quoteId    === lead.quoteId) ||
-       (lead.contactId  && j.contactId  === lead.contactId))
-    )
+    // Only match by quoteId — the contactId fallback is too broad and can
+    // confirm revenue from an unrelated completed job on the same contact.
+    const completedJob = lead.quoteId
+      ? allJobs.find(j => j.status === 'completed' && j.quoteId === lead.quoteId)
+      : undefined
     const q = allQuotes.find(q => q.id === lead.quoteId)
     const amount = q?.total ?? lead.estimatedValue ?? 0
     return { amount, isEstimated: !completedJob }
@@ -1238,7 +1251,7 @@ export default function Marketing() {
 
       // Views = campaign_events for campaigns belonging to this channel, in period
       const chCampaignIds = new Set(allCampaigns.filter(c => c.channelId === ch.id).map(c => c.id))
-      const views = periodEvents.filter(e => chCampaignIds.has(e.campaignId)).length
+      const views = periodEvents.filter(e => e.campaignId !== null && chCampaignIds.has(e.campaignId) && e.eventType === 'scan').length
 
       // Conversion rate: leads / views %
       const convRate = views > 0 ? (leadsCount / views) * 100 : null
@@ -1362,16 +1375,22 @@ export default function Marketing() {
   // ── Per-campaign metrics ──────────────────────────────────────────────────
 
   function campaignMetrics(cam: Campaign): CampaignMetrics {
-    const views = allEvents.filter(e => e.campaignId === cam.id).length
+    // Only count 'scan' events as views — phone_click/email_click are not impressions
+    const views = allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'scan').length
+    const phoneClicks = allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'phone_click').length
+    const emailClicks = allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'email_click').length
+
     const campLeads = allLeads.filter(l => l.campaignId === cam.id)
     const leads = campLeads.length
     const closedLeads = campLeads.filter(isClosed)
     const closed = closedLeads.length
 
-    // Spend = sum of channel spend during the campaign's date range
+    // Spend = channel spend during campaign's date range.
+    // Fall back to createdAt month when no explicit dates are set so campaigns
+    // without dates still show spend instead of always showing $0.
     let spend = 0
-    if (cam.channelId && (cam.startDate || cam.endDate)) {
-      const startYM = cam.startDate ? cam.startDate.slice(0, 7) : '0000-01'
+    if (cam.channelId) {
+      const startYM = cam.startDate ? cam.startDate.slice(0, 7) : cam.createdAt.slice(0, 7)
       const endYM   = cam.endDate   ? cam.endDate.slice(0, 7)   : thisMonthStr()
       spend = allSpend
         .filter(s => s.channelId === cam.channelId && s.month >= startYM && s.month <= endYM)
@@ -1382,7 +1401,7 @@ export default function Marketing() {
     const cpl = leads  > 0 && spend > 0 ? spend / leads  : null
     const cpa = closed > 0 && spend > 0 ? spend / closed : null
     const roi = spend  > 0              ? ((revenue - spend) / spend) * 100 : null
-    return { views, leads, closed, spend, revenue, revenueIsEst, cpl, cpa, roi }
+    return { views, leads, closed, spend, revenue, revenueIsEst, cpl, cpa, roi, phoneClicks, emailClicks }
   }
 
   // ── Filtered campaigns for section 4 ─────────────────────────────────────
