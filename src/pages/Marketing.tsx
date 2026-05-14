@@ -1272,8 +1272,8 @@ export default function Marketing() {
       'yard signs':             ['yard_signs'],
       'door hangers':           ['door_hangers'],
       'truck wrap':             ['truck_wrap', 'truck'],
-      'referral':               ['referral'],
-      'word of mouth':          ['word_of_mouth', 'wom'],
+      // "Word of Mouth" is the canonical referral channel — catch every referral-flavoured source value
+      'word of mouth':          ['word_of_mouth', 'wom', 'referral', 'word_of_mouth_referral'],
       'sponsorship':            ['sponsorship', 'sponsor', 'event'],
     }
     for (const ch of channels) {
@@ -1578,10 +1578,26 @@ export default function Marketing() {
     //   automatically appears here without any extra step on the marketing page.
     let campLeads: Lead[]
     if (cam.campaignType === 'phone' || cam.campaignType === 'referral') {
-      campLeads = allLeads.filter(l =>
-        l.campaignId === cam.id ||
-        (!l.campaignId && cam.channelId && getLeadChannelId(l) === cam.channelId)
-      )
+      // For referral campaigns: match any lead whose source resolves to a channel
+      // of type 'referral' — not just the exact channel ID. This means source="referral",
+      // "word_of_mouth", "wom" etc. all count toward any referral-type campaign
+      // without the user needing to pick a specific channel name.
+      //
+      // For phone campaigns: require exact channel match (GBP vs LSA are distinct channels).
+      const myChannel = channels.find(c => c.id === cam.channelId)
+      const referralChannelIds = new Set(channels.filter(c => c.type === 'referral').map(c => c.id))
+
+      campLeads = allLeads.filter(l => {
+        if (l.campaignId === cam.id) return true
+        if (l.campaignId) return false  // attributed to a different campaign — don't double-count
+        const leadChId = getLeadChannelId(l)
+        if (leadChId === cam.channelId) return true  // exact match always works
+        if (cam.campaignType === 'referral' && myChannel?.type === 'referral') {
+          // Also match leads whose source resolves to any referral-type channel
+          return leadChId != null && referralChannelIds.has(leadChId)
+        }
+        return false
+      })
     } else {
       campLeads = allLeads.filter(l => l.campaignId === cam.id)
     }
