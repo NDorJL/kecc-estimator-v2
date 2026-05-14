@@ -120,14 +120,16 @@ export const handler: Handler = async (event) => {
           ].filter(Boolean).join('\n')
 
           // Non-fatal: if lead stub creation fails, the event is still recorded
-          await supabase.from('leads').insert({
-            contact_id:    contactId,
-            stage:         'new',
-            source:        sourceLabel,
-            source_locked: true,
-            campaign_id:   campaignId ?? null,
-            notes:         noteLines,
-          }).catch(() => { /* silent — event is more important than the stub */ })
+          try {
+            await supabase.from('leads').insert({
+              contact_id:    contactId,
+              stage:         'new',
+              source:        sourceLabel,
+              source_locked: true,
+              campaign_id:   campaignId ?? null,
+              notes:         noteLines,
+            })
+          } catch { /* silent — event is more important than the stub */ }
         }
       }
 
