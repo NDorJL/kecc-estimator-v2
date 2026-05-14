@@ -75,6 +75,61 @@ export const handler: Handler = async (event) => {
         .select()
         .single()
       if (error) throw error
+
+      // ── Auto-create a lead stub on phone_click ──────────────────────────
+      // When someone taps a phone number link, we know their number and
+      // campaign context. Create a minimal lead card so the user can fill
+      // in details during the call. Source is locked (cannot be changed).
+      if (body.eventType === 'phone_click') {
+        const phoneNumber = (body.metadata?.number as string | null) ?? null
+        const page        = (body.metadata?.page   as string | null) ?? null
+
+        // Try to match an existing contact by phone number
+        let contactId: string | null = null
+        if (phoneNumber) {
+          const { data: contact } = await supabase
+            .from('contacts')
+            .select('id')
+            .eq('phone', phoneNumber)
+            .maybeSingle()
+          contactId = contact?.id ?? null
+        }
+
+        // Deduplicate: skip if a source-locked lead already exists for this
+        // contact (or phone number in notes) created in the last 4 hours
+        const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()
+        let skipCreate = false
+        if (contactId) {
+          const { data: recent } = await supabase
+            .from('leads')
+            .select('id')
+            .eq('contact_id', contactId)
+            .eq('source_locked', true)
+            .gte('created_at', fourHoursAgo)
+            .maybeSingle()
+          if (recent) skipCreate = true
+        }
+
+        if (!skipCreate) {
+          const sourceLabel = 'website'   // phone number clicked on the website
+          const noteLines = [
+            '📞 Auto-created from website phone number click.',
+            phoneNumber ? `Phone: ${phoneNumber}` : null,
+            page ? `Page: ${page}` : null,
+            'Fill in name and details during the call.',
+          ].filter(Boolean).join('\n')
+
+          await supabase.from('leads').insert({
+            contact_id:    contactId,
+            stage:         'new',
+            source:        sourceLabel,
+            source_locked: true,
+            campaign_id:   campaignId ?? null,
+            notes:         noteLines,
+          })
+        }
+      }
+
       return { statusCode: 201, headers: CORS, body: JSON.stringify(rowToCampaignEvent(data)) }
     }
 

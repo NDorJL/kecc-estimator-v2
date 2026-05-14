@@ -77,7 +77,7 @@ export const handler: Handler = async (event) => {
     // channelId + month = logical unique key; upsert if already exists
     if (method === 'POST' && !id) {
       const body = JSON.parse(event.body ?? '{}')
-      const { channelId, month, amount, notes } = body
+      const { channelId, month, amount, notes, isRecurring } = body
       if (!channelId || !month) {
         return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'channelId and month are required' }) }
       }
@@ -94,7 +94,7 @@ export const handler: Handler = async (event) => {
       if (existing) {
         const { data, error } = await supabase
           .from('marketing_spend')
-          .update({ amount: Number(amount ?? 0), notes: notes ?? null })
+          .update({ amount: Number(amount ?? 0), notes: notes ?? null, is_recurring: isRecurring ?? false })
           .eq('id', existing.id)
           .select()
           .single()
@@ -103,7 +103,7 @@ export const handler: Handler = async (event) => {
       } else {
         const { data, error } = await supabase
           .from('marketing_spend')
-          .insert({ channel_id: channelId, month, amount: Number(amount ?? 0), notes: notes ?? null })
+          .insert({ channel_id: channelId, month, amount: Number(amount ?? 0), notes: notes ?? null, is_recurring: isRecurring ?? false })
           .select()
           .single()
         if (error) throw error
@@ -117,10 +117,11 @@ export const handler: Handler = async (event) => {
     if (method === 'PATCH' && id) {
       const body = JSON.parse(event.body ?? '{}')
       const updates: Record<string, unknown> = {}
-      if (body.amount    !== undefined) updates.amount     = Number(body.amount)
-      if (body.notes     !== undefined) updates.notes      = body.notes
-      if (body.month     !== undefined) updates.month      = body.month
-      if (body.channelId !== undefined) updates.channel_id = body.channelId
+      if (body.amount      !== undefined) updates.amount       = Number(body.amount)
+      if (body.notes       !== undefined) updates.notes        = body.notes
+      if (body.month       !== undefined) updates.month        = body.month
+      if (body.channelId   !== undefined) updates.channel_id  = body.channelId
+      if (body.isRecurring !== undefined) updates.is_recurring = body.isRecurring
 
       const { data, error } = await supabase
         .from('marketing_spend')

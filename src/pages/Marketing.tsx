@@ -246,10 +246,11 @@ function SpendEntrySheet({
   const { toast } = useToast()
   const tm = thisMonthStr()
 
-  const [channelId, setChannelId] = useState(editEntry?.channelId ?? initialChannelId ?? '')
-  const [month,     setMonth]     = useState(editEntry?.month ?? initialMonth ?? tm)
-  const [amount,    setAmount]    = useState(editEntry ? String(editEntry.amount) : '')
-  const [notes,     setNotes]     = useState(editEntry?.notes ?? '')
+  const [channelId,    setChannelId]    = useState(editEntry?.channelId ?? initialChannelId ?? '')
+  const [month,        setMonth]        = useState(editEntry?.month ?? initialMonth ?? tm)
+  const [amount,       setAmount]       = useState(editEntry ? String(editEntry.amount) : '')
+  const [notes,        setNotes]        = useState(editEntry?.notes ?? '')
+  const [isRecurring,  setIsRecurring]  = useState(editEntry?.isRecurring ?? false)
 
   // Reset when sheet opens
   const handleOpen = (o: boolean) => {
@@ -258,6 +259,7 @@ function SpendEntrySheet({
       setMonth(editEntry?.month ?? initialMonth ?? tm)
       setAmount(editEntry ? String(editEntry.amount) : '')
       setNotes(editEntry?.notes ?? '')
+      setIsRecurring(editEntry?.isRecurring ?? false)
     } else {
       onClose()
     }
@@ -265,7 +267,7 @@ function SpendEntrySheet({
 
   const saveMutation = useMutation({
     mutationFn: () => {
-      const payload = { channelId, month, amount: parseFloat(amount) || 0, notes: notes || null }
+      const payload = { channelId, month, amount: parseFloat(amount) || 0, notes: notes || null, isRecurring }
       if (editEntry) {
         return apiRequest('PATCH', `/marketing-spend/${editEntry.id}`, payload)
       }
@@ -330,6 +332,25 @@ function SpendEntrySheet({
               onChange={e => setNotes(e.target.value)}
             />
           </div>
+          <button
+            type="button"
+            onClick={() => setIsRecurring(v => !v)}
+            className={`flex items-center gap-2.5 w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${
+              isRecurring
+                ? 'border-primary/40 bg-primary/5 text-primary'
+                : 'border-border text-muted-foreground hover:border-foreground'
+            }`}
+          >
+            <div className={`h-4 w-4 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+              isRecurring ? 'border-primary bg-primary' : 'border-muted-foreground'
+            }`}>
+              {isRecurring && <div className="h-1.5 w-1.5 rounded-sm bg-white" />}
+            </div>
+            <div>
+              <div className="text-xs font-medium">Recurring monthly</div>
+              <div className="text-[11px] opacity-70">Auto-copies to the next month so you don't have to re-enter it</div>
+            </div>
+          </button>
         </div>
         <SheetFooter className="mt-5 flex flex-row gap-2">
           <Button variant="ghost" className="flex-1" onClick={onClose}>Cancel</Button>
@@ -1210,6 +1231,44 @@ export default function Marketing() {
     queryFn: () => apiGet('/marketing-spend'),
   })
 
+  // ── Auto-populate recurring spend entries for the current month ────────────
+  // Runs once after spend data loads. For each recurring entry from last month
+  // that doesn't already have a current-month entry, create one automatically.
+  const recurringSeeded = useRef(false)
+  const recurringMutation = useMutation({
+    mutationFn: async (entries: { channelId: string; amount: number; notes: string | null }[]) => {
+      const currentMonth = thisMonthStr()
+      for (const e of entries) {
+        await apiRequest('POST', '/marketing-spend', {
+          channelId: e.channelId,
+          month: currentMonth,
+          amount: e.amount,
+          notes: e.notes,
+          isRecurring: true,
+        })
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/marketing-spend'] })
+    },
+  })
+
+  useEffect(() => {
+    if (recurringSeeded.current || loadingSpend || allSpend.length === 0) return
+    recurringSeeded.current = true
+
+    const currentMonth = thisMonthStr()
+    const lastMonth    = addMonths(currentMonth, -1)
+    const lastMonthRecurring = allSpend.filter(s => s.month === lastMonth && s.isRecurring)
+    if (lastMonthRecurring.length === 0) return
+
+    const currentMonthChannels = new Set(allSpend.filter(s => s.month === currentMonth).map(s => s.channelId))
+    const toCreate = lastMonthRecurring.filter(s => !currentMonthChannels.has(s.channelId))
+    if (toCreate.length > 0) {
+      recurringMutation.mutate(toCreate.map(s => ({ channelId: s.channelId, amount: s.amount, notes: s.notes })))
+    }
+  }, [allSpend, loadingSpend])
+
   const { data: allLeads = [] } = useQuery<Lead[]>({
     queryKey: ['/leads'],
     queryFn: () => apiGet('/leads'),
@@ -1286,7 +1345,16 @@ export default function Marketing() {
 
   function getLeadChannelId(lead: Lead): string | null {
     if (lead.campaignId) return campaignChannelMap[lead.campaignId] ?? null
-    if (lead.source)     return sourceToChannelId[lead.source.toLowerCase()] ?? null
+    // Source-based attribution is ONLY used for referral-type channels.
+    // Every other source value ("door_hangers", "google_ads", etc.) is a
+    // customer-reported note and must not be counted in the marketing page —
+    // that data is tracked automatically via campaigns and we must not duplicate it.
+    if (lead.source) {
+      const chId = sourceToChannelId[lead.source.toLowerCase()]
+      if (!chId) return null
+      const ch = channels.find(c => c.id === chId)
+      if (ch?.type === 'referral') return chId
+    }
     return null
   }
 

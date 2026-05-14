@@ -317,6 +317,7 @@ export interface Lead {
   agreementSignedAt: string | null;
   photoStacks: LeadPhotoStack[];
   campaignId: string | null;
+  sourceLocked: boolean;
 }
 
 export interface LeadPhotoStack {
@@ -499,6 +500,7 @@ export function rowToLead(r: any): Lead {
     agreementSignedAt: r.agreement_signed_at ?? null,
     photoStacks: Array.isArray(r.photo_stacks) ? r.photo_stacks : [],
     campaignId: r.campaign_id ?? null,
+    sourceLocked: r.source_locked ?? false,
   };
 }
 
@@ -672,6 +674,7 @@ export interface MarketingSpend {
   month: string;         // 'YYYY-MM' — stored as text in DB
   amount: number;
   notes: string | null;
+  isRecurring: boolean;
   createdAt: string;
 }
 
@@ -719,6 +722,7 @@ export function rowToMarketingSpend(r: any): MarketingSpend {
     month: r.month,
     amount: Number(r.amount),
     notes: r.notes ?? null,
+    isRecurring: r.is_recurring ?? false,
     createdAt: r.created_at,
   };
 }

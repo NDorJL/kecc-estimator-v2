@@ -1614,11 +1614,16 @@ function LeadDetailSheet({
             )}
           </div>
 
-          {/* ── Marketing attribution status ──────────────────────────────── */}
+          {/* ── Source / attribution status ───────────────────────────────── */}
           {(lead.campaignId || lead.source) && (
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-xs text-muted-foreground">Marketing:</span>
-              {lead.campaignId ? (
+              <span className="text-xs text-muted-foreground">Source:</span>
+              {lead.sourceLocked ? (
+                // Auto-created from a tracked event — source is fixed, show as locked badge
+                <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 text-[11px] text-amber-700 dark:text-amber-400 font-medium">
+                  🔒 {lead.source?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) ?? 'Auto-tracked'}
+                </span>
+              ) : lead.campaignId ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-400 font-medium">
                   <CheckCircle2 className="h-3 w-3" /> Auto-tracked
                 </span>
@@ -1627,8 +1632,8 @@ function LeadDetailSheet({
                   <User className="h-3 w-3" /> {lead.source?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) ?? 'Manual source'}
                 </span>
               )}
-              {lead.campaignId && lead.source && (
-                <span className="text-[11px] text-muted-foreground">· customer said: {lead.source?.replace(/_/g, ' ')}</span>
+              {lead.sourceLocked && (
+                <span className="text-[11px] text-muted-foreground">— source is fixed (auto-created from tracked event)</span>
               )}
             </div>
           )}
