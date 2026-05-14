@@ -1614,6 +1614,25 @@ function LeadDetailSheet({
             )}
           </div>
 
+          {/* ── Marketing attribution status ──────────────────────────────── */}
+          {(lead.campaignId || lead.source) && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-muted-foreground">Marketing:</span>
+              {lead.campaignId ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-400 font-medium">
+                  <CheckCircle2 className="h-3 w-3" /> Auto-tracked
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-[11px] text-blue-700 dark:text-blue-400 font-medium">
+                  <User className="h-3 w-3" /> {lead.source?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) ?? 'Manual source'}
+                </span>
+              )}
+              {lead.campaignId && lead.source && (
+                <span className="text-[11px] text-muted-foreground">· customer said: {lead.source?.replace(/_/g, ' ')}</span>
+              )}
+            </div>
+          )}
+
           {/* ── Stage ─────────────────────────────────────────────────────── */}
           <div>
             <Label className="text-xs">Stage</Label>
@@ -2832,16 +2851,33 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
             />
           </div>
           <div>
-            <Label className="text-xs">Source</Label>
+            <Label className="text-xs">
+              How they found you
+              <span className="ml-1 font-normal text-muted-foreground">(customer-reported)</span>
+            </Label>
+            {/* Show auto-tracking status so the user knows whether this field drives marketing attribution */}
+            {(tracking.campaignCookie || promoMatch) ? (
+              <div className="mt-1 mb-1.5 flex items-start gap-1.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1.5 text-xs text-emerald-700 dark:text-emerald-400">
+                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span>
+                  {promoMatch
+                    ? `Auto-attributed to "${promoMatch.name}" — this field is a backup note only and won't affect marketing counts.`
+                    : `Campaign tracking detected — this lead will be auto-attributed. This field is a backup record only and won't create a duplicate.`}
+                </span>
+              </div>
+            ) : (
+              <p className="mt-0.5 mb-1 text-[11px] text-muted-foreground">
+                Used for marketing attribution when no campaign tracking exists. Skip if the lead came through a tracked link or QR scan.
+              </p>
+            )}
             <Select value={form.source} onValueChange={v => setForm(f => ({ ...f, source: v }))}>
-              <SelectTrigger className="mt-1"><SelectValue placeholder="How did they find you?" /></SelectTrigger>
+              <SelectTrigger className="mt-0.5"><SelectValue placeholder="What did they tell you?" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="referral">Word of Mouth / Referral</SelectItem>
-                <SelectItem value="website">Website / SEO</SelectItem>
+                <SelectItem value="website">Website / Online Search</SelectItem>
                 <SelectItem value="google_ads">Google Ads</SelectItem>
                 <SelectItem value="google_lsa">Google LSA</SelectItem>
-                <SelectItem value="facebook_ads">Facebook Ads</SelectItem>
-                <SelectItem value="instagram_ads">Instagram Ads</SelectItem>
+                <SelectItem value="meta_ads">Meta Ads (Facebook / Instagram)</SelectItem>
                 <SelectItem value="social_organic">Social Media (Organic)</SelectItem>
                 <SelectItem value="mailers">Mailers / Direct Mail</SelectItem>
                 <SelectItem value="yard_signs">Yard Signs</SelectItem>
@@ -2850,7 +2886,7 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
                 <SelectItem value="thumbtack">Thumbtack</SelectItem>
                 <SelectItem value="yelp_ads">Yelp Ads</SelectItem>
                 <SelectItem value="email_marketing">Email Marketing</SelectItem>
-                <SelectItem value="community">Community Sponsorship</SelectItem>
+                <SelectItem value="sponsorship">Sponsorship / Event</SelectItem>
                 <SelectItem value="cold_call">Cold Call / Outreach</SelectItem>
                 <SelectItem value="inbound_sms">Inbound SMS</SelectItem>
                 <SelectItem value="other">Other</SelectItem>

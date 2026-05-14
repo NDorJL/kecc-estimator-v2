@@ -1263,7 +1263,7 @@ export default function Marketing() {
     }
     // Common manual aliases for UTM sources people type
     const manualAliases: Record<string, string[]> = {
-      'meta ads':               ['facebook', 'fb', 'facebook_ads', 'instagram', 'ig', 'instagram_ads', 'meta', 'meta_ads', 'social_ads'],
+      'meta ads':               ['facebook', 'fb', 'facebook_ads', 'instagram', 'ig', 'instagram_ads', 'meta', 'meta_ads', 'social_ads', 'meta ads'],
       'google ads':             ['google', 'google_ads', 'gads'],
       'google business profile':['google_business', 'gbp', 'gmb', 'google_business_profile'],
       'nextdoor':               ['nextdoor'],
