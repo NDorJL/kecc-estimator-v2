@@ -1486,7 +1486,11 @@ export default function Marketing() {
     const maxCount = Math.max(...counts, 1)
 
     function dp(from: number, to: number): number | null {
-      return from > 0 ? ((from - to) / from) * 100 : null
+      // Return null when next stage exceeds current — funnel levels come from
+      // different tracking paths (e.g. all-source leads vs QR-only impressions),
+      // so to > from is common and doesn't represent a meaningful drop-off.
+      if (from <= 0 || to > from) return null
+      return ((from - to) / from) * 100
     }
     function dc(pct: number | null): string {
       if (pct === null) return 'text-muted-foreground'
@@ -1517,7 +1521,8 @@ export default function Marketing() {
 
   // ── Section 6: trend chart data ───────────────────────────────────────────
 
-  // Names of channels that have at least one lead in the 12-month window
+  // Set of channel names that have ≥1 lead in the 12-month window.
+  // Kept as a Set (not converted to Array) so chart filtering uses O(1) .has() not O(n) .includes()
   const activeChannelNames = useMemo(() => {
     const active = new Set<string>()
     for (const l of allLeads) {
@@ -1530,7 +1535,7 @@ export default function Marketing() {
         active.add('Unattributed')
       }
     }
-    return Array.from(active)
+    return active
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allLeads, trendMonths, channels, campaignChannelMap, sourceToChannelId])
 
@@ -1584,10 +1589,11 @@ export default function Marketing() {
   // ── Section 7: attribution feed ───────────────────────────────────────────
 
   const attributedFeed = useMemo(() => {
-    return [...periodLeads]
+    const all = [...periodLeads]
       .filter(l => l.campaignId || l.source)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .slice(0, 20)
+    // Track total before slicing so the header count is accurate
+    return { items: all.slice(0, 20), total: all.length }
   }, [periodLeads])
 
   const unattributedFeed = useMemo(() => {
@@ -2143,13 +2149,13 @@ export default function Marketing() {
                       <Tooltip wrapperStyle={{ fontSize: 11 }} />
                       <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
                       {channels
-                        .filter(ch => activeChannelNames.includes(ch.name))
+                        .filter(ch => activeChannelNames.has(ch.name))
                         .map((ch, i) => (
                           <Bar key={ch.id} dataKey={ch.name} stackId="a"
                             fill={channelColorMap[ch.id] ?? CHANNEL_PALETTE[i % CHANNEL_PALETTE.length]}
                             isAnimationActive={false} />
                         ))}
-                      {activeChannelNames.includes('Unattributed') && (
+                      {activeChannelNames.has('Unattributed') && (
                         <Bar dataKey="Unattributed" stackId="a" fill="#94a3b8" isAnimationActive={false} />
                       )}
                     </BarChart>
@@ -2229,15 +2235,15 @@ export default function Marketing() {
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold flex items-center gap-1.5">
                 <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                Attributed Leads ({attributedFeed.length})
+                Attributed Leads ({attributedFeed.total})
               </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              {attributedFeed.length === 0 ? (
+              {attributedFeed.total === 0 ? (
                 <p className="px-4 pb-4 text-sm text-muted-foreground">No attributed leads in this period</p>
               ) : (
                 <div>
-                  {attributedFeed.map(lead => {
+                  {attributedFeed.items.map(lead => {
                     const chId  = getLeadChannelId(lead)
                     const ch    = channels.find(c => c.id === chId)
                     const cam   = allCampaigns.find(c => c.id === lead.campaignId)
