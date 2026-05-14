@@ -26,6 +26,11 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
+// Fallback campaign for contact form submissions that arrive with no UTM or
+// campaign cookie — these are organic website visitors who found the form
+// without going through a tracked link or QR code.
+const WEBSITE_ORGANIC_CAMPAIGN_ID = '8548a349-4fc0-48db-b5a0-cd49f7c94e16'
+
 const CORS = {
   'Content-Type':                'application/json',
   'Access-Control-Allow-Origin': '*',
@@ -70,8 +75,9 @@ export const handler: Handler = async (event) => {
       email,
       serviceInterest,
       message,
-      campaignId,
+      campaignId: rawCampaignId,
       utmSource,
+      utmCampaign,   // slug e.g. 'gbp-listing' — resolve to UUID below
       referrer,
     } = JSON.parse(event.body ?? '{}') as {
       name?:            string
@@ -81,6 +87,7 @@ export const handler: Handler = async (event) => {
       message?:         string
       campaignId?:      string
       utmSource?:       string
+      utmCampaign?:     string
       referrer?:        string
     }
 
@@ -151,16 +158,38 @@ export const handler: Handler = async (event) => {
       contactId = created.id
     }
 
-    // ── 3. Determine lead source ──────────────────────────────────────────────
+    // ── 3. Resolve campaign ID (priority order) ───────────────────────────────
+    //
+    //  1. Explicit campaign UUID (from kecc_campaign cookie via QR/track redirect)
+    //  2. UTM campaign slug → look up the matching campaign row by utm_campaign column
+    //     (covers GBP, Google Ads, and other UTM-tagged digital campaigns)
+    //  3. Organic fallback — visitor arrived with no tracking at all
+    //     (direct type-in, organic Google search without a GBP click)
 
-    const source = determineSource(campaignId, utmSource, referrer)
+    let campaignId: string | null = rawCampaignId ?? null
 
-    // ── 4. Build notes with flag when attribution is uncertain ────────────────
+    if (!campaignId && utmCampaign) {
+      const { data: cam } = await supabase
+        .from('campaigns')
+        .select('id')
+        .eq('utm_campaign', utmCampaign)
+        .maybeSingle()
+      campaignId = cam?.id ?? null
+    }
 
-    const notes = (message ?? '').trim() +
-      (campaignId ? '' : ' [NEEDS INFO — review source]')
+    if (!campaignId) {
+      campaignId = WEBSITE_ORGANIC_CAMPAIGN_ID
+    }
 
-    // ── 5. Insert lead ────────────────────────────────────────────────────────
+    // ── 4. Determine lead source label ────────────────────────────────────────
+
+    const source = determineSource(campaignId !== WEBSITE_ORGANIC_CAMPAIGN_ID ? campaignId : undefined, utmSource, referrer)
+
+    // ── 5. Build notes ────────────────────────────────────────────────────────
+
+    const notes = (message ?? '').trim()
+
+    // ── 6. Insert lead ────────────────────────────────────────────────────────
 
     const { data: lead, error: leadErr } = await supabase
       .from('leads')
@@ -169,7 +198,7 @@ export const handler: Handler = async (event) => {
         stage:            'new',
         source,
         service_interest: serviceInterest?.trim() ?? null,
-        campaign_id:      campaignId ?? null,
+        campaign_id:      campaignId,
         notes:            notes.trim() || null,
       })
       .select('id')
