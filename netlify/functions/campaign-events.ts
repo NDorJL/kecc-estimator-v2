@@ -61,13 +61,17 @@ export const handler: Handler = async (event) => {
         campaignId = row?.id ?? null
       }
 
-      if (!campaignId || !body.eventType) {
-        return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'campaignId (or redirectToken) and eventType are required' }) }
+      if (!body.eventType) {
+        return { statusCode: 400, headers: CORS, body: JSON.stringify({ error: 'eventType is required' }) }
       }
 
       const { data, error } = await supabase
         .from('campaign_events')
-        .insert({ campaign_id: campaignId, event_type: body.eventType })
+        .insert({
+          campaign_id: campaignId ?? null,
+          event_type:  body.eventType,
+          metadata:    body.metadata ?? {},
+        })
         .select()
         .single()
       if (error) throw error
