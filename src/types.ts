@@ -653,9 +653,9 @@ export function rowToSca(r: any): SubcontractorAgreement {
 
 // ── Marketing Intelligence Types ───────────────────────────────────────
 
-export type ChannelType = 'digital' | 'print' | 'referral' | 'other';
+export type ChannelType = 'digital' | 'print' | 'social' | 'referral' | 'sponsorship' | 'other';
 export type CampaignStatus = 'active' | 'paused' | 'ended';
-export type CampaignType = 'digital' | 'qr' | 'referral' | 'phone';
+export type CampaignType = 'digital' | 'qr' | 'referral' | 'phone' | 'sponsorship';
 export type CampaignEventType = 'view' | 'click' | 'scan' | 'phone_click' | 'email_click';
 
 export interface MarketingChannel {

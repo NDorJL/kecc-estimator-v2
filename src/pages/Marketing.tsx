@@ -19,7 +19,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import type { MarketingChannel, MarketingSpend, Campaign, CampaignEvent, Lead, Quote, Job, Contact } from '@/types'
+import type { MarketingChannel, MarketingSpend, Campaign, CampaignEvent, Lead, Quote, Job, Contact, ChannelType } from '@/types'
 import {
   TrendingUp, TrendingDown, Minus, DollarSign, Users, Briefcase,
   Target, ChevronUp, ChevronDown, Plus, Pencil, Trash2, Download, Megaphone,
@@ -346,6 +346,89 @@ function SpendEntrySheet({
   )
 }
 
+// ── NewChannelSheet ───────────────────────────────────────────────────────────
+
+function NewChannelSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const qc = useQueryClient()
+  const { toast } = useToast()
+  const [name, setName] = useState('')
+  const [type, setType] = useState<ChannelType>('digital')
+
+  const handleOpen = (o: boolean) => {
+    if (o) { setName(''); setType('digital') }
+    else onClose()
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: () => apiRequest('POST', '/marketing-channels', { name: name.trim(), type }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/marketing-channels'] })
+      toast({ title: 'Channel created' })
+      onClose()
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
+  const CHANNEL_TYPE_OPTIONS: { value: ChannelType; label: string; desc: string }[] = [
+    { value: 'digital',     label: '🌐 Digital',     desc: 'Paid ads, email, online placements' },
+    { value: 'print',       label: '🖨️ Print / QR',   desc: 'Mailers, door hangers, yard signs' },
+    { value: 'social',      label: '📱 Social Media', desc: 'Organic social, social media management' },
+    { value: 'referral',    label: '🤝 Referral',     desc: 'Word of mouth, partner programs' },
+    { value: 'sponsorship', label: '🎪 Sponsorship',  desc: 'Events, partnerships, community sponsorships' },
+    { value: 'other',       label: '⋯ Other',         desc: 'Anything not listed above' },
+  ]
+
+  return (
+    <Sheet open={open} onOpenChange={handleOpen}>
+      <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[85dvh] overflow-y-auto">
+        <SheetHeader className="mb-4">
+          <SheetTitle>New Channel</SheetTitle>
+        </SheetHeader>
+        <div className="space-y-4">
+          <div>
+            <Label className="text-xs">Channel Name</Label>
+            <Input
+              className="mt-1"
+              placeholder="e.g. Meta Ads, Social Media Management, Ice Bears…"
+              value={name}
+              onChange={e => setName(e.target.value)}
+            />
+          </div>
+          <div>
+            <Label className="text-xs">Channel Type</Label>
+            <div className="grid grid-cols-2 gap-1.5 mt-1">
+              {CHANNEL_TYPE_OPTIONS.map(({ value, label, desc }) => (
+                <button
+                  key={value}
+                  onClick={() => setType(value)}
+                  className={`rounded-lg border p-2 text-left transition-colors ${
+                    type === value
+                      ? 'bg-primary/10 border-primary'
+                      : 'bg-transparent border-border hover:border-foreground'
+                  }`}
+                >
+                  <div className={`text-xs font-medium ${type === value ? 'text-primary' : ''}`}>{label}</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5 leading-snug">{desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <SheetFooter className="mt-5 flex flex-row gap-2">
+          <Button variant="ghost" className="flex-1" onClick={onClose}>Cancel</Button>
+          <Button
+            className="flex-1"
+            disabled={!name.trim() || saveMutation.isPending}
+            onClick={() => saveMutation.mutate()}
+          >
+            {saveMutation.isPending ? 'Creating…' : 'Create Channel'}
+          </Button>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 // ── ChannelDetailSheet ────────────────────────────────────────────────────────
 
 const STATUS_BADGE: Record<string, string> = {
@@ -355,10 +438,12 @@ const STATUS_BADGE: Record<string, string> = {
 }
 
 const TYPE_BADGE_OUTER: Record<string, string> = {
-  digital:  'bg-blue-500/10 text-blue-600 border-blue-500/20',
-  print:    'bg-amber-500/10 text-amber-600 border-amber-500/20',
-  referral: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-  other:    'bg-muted text-muted-foreground border-border',
+  digital:     'bg-blue-500/10 text-blue-600 border-blue-500/20',
+  print:       'bg-amber-500/10 text-amber-600 border-amber-500/20',
+  social:      'bg-purple-500/10 text-purple-600 border-purple-500/20',
+  referral:    'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+  sponsorship: 'bg-rose-500/10 text-rose-600 border-rose-500/20',
+  other:       'bg-muted text-muted-foreground border-border',
 }
 
 function fmtOr(v: number | null, fmt: (n: number) => string, fallback = '—'): string {
@@ -876,15 +961,16 @@ function CampaignSheet({
             <Label className="text-xs">Campaign Type</Label>
             <div className="grid grid-cols-2 gap-1.5 mt-1">
               {([
-                { value: 'digital',  label: '🌐 Digital' },
-                { value: 'qr',       label: '📷 QR Code' },
-                { value: 'referral', label: '🤝 Referral' },
-                { value: 'phone',    label: '📞 Phone / Call' },
+                { value: 'digital',     label: '🌐 Digital' },
+                { value: 'qr',          label: '📷 QR Code' },
+                { value: 'referral',    label: '🤝 Referral' },
+                { value: 'phone',       label: '📞 Phone / Call' },
+                { value: 'sponsorship', label: '🎪 Sponsorship' },
               ] as { value: Campaign['campaignType']; label: string }[]).map(({ value, label }) => (
                 <button
                   key={value}
                   onClick={() => setCampaignType(value)}
-                  className={`rounded-lg border py-2 text-xs font-medium transition-colors ${
+                  className={`rounded-lg border py-2 text-xs font-medium transition-colors ${value === 'sponsorship' ? 'col-span-2' : ''} ${
                     campaignType === value
                       ? 'bg-primary text-primary-foreground border-primary'
                       : 'bg-transparent border-border text-muted-foreground hover:border-foreground'
@@ -964,9 +1050,11 @@ function CampaignSheet({
             </div>
           )}
 
-          {campaignType === 'qr' && (
+          {(campaignType === 'qr' || campaignType === 'sponsorship') && (
             <div className="space-y-3 rounded-lg border border-border/60 p-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">QR Destination</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                {campaignType === 'sponsorship' ? 'Sponsorship QR Destination' : 'QR Destination'}
+              </p>
               <div>
                 <Label className="text-xs">Destination URL</Label>
                 <Input className="mt-1 text-sm" placeholder="https://yoursite.com/landing" value={destinationUrl} onChange={e => setDestinationUrl(e.target.value)} />
@@ -1060,6 +1148,7 @@ export default function Marketing() {
   const [deleteId, setDeleteId] = useState<string | null>(null)
   // Campaign manager state
   const [campaignFilter,  setCampaignFilter]  = useState<'all' | 'active' | 'paused' | 'ended'>('all')
+  const [showNewChannel,  setShowNewChannel]  = useState(false)
   const [showNewCampaign, setShowNewCampaign] = useState(false)
   const [editCampaign,    setEditCampaign]    = useState<Campaign | null>(null)
 
@@ -1623,10 +1712,12 @@ export default function Marketing() {
   // ── Type badge helper ─────────────────────────────────────────────────────
 
   const TYPE_BADGE: Record<string, string> = {
-    digital:  'bg-blue-500/10 text-blue-600 border-blue-500/20',
-    print:    'bg-amber-500/10 text-amber-600 border-amber-500/20',
-    referral: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-    other:    'bg-muted text-muted-foreground border-border',
+    digital:     'bg-blue-500/10 text-blue-600 border-blue-500/20',
+    print:       'bg-amber-500/10 text-amber-600 border-amber-500/20',
+    social:      'bg-purple-500/10 text-purple-600 border-purple-500/20',
+    referral:    'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
+    sponsorship: 'bg-rose-500/10 text-rose-600 border-rose-500/20',
+    other:       'bg-muted text-muted-foreground border-border',
   }
 
   const isLoading = loadingChannels || loadingSpend
@@ -1759,7 +1850,12 @@ export default function Marketing() {
         {/* Section 2 — Channel Performance Table                         */}
         {/* ═══════════════════════════════════════════════════════════════ */}
         <section>
-          <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2">Channel Performance</h3>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Channel Performance</h3>
+            <Button size="sm" className="h-7 text-xs gap-1 px-2" onClick={() => setShowNewChannel(true)}>
+              <Plus className="h-3.5 w-3.5" /> New Channel
+            </Button>
+          </div>
           <Card>
             <CardContent className="p-0">
               {isLoading ? (
@@ -2367,6 +2463,8 @@ export default function Marketing() {
       </div>
 
       {/* ── Spend Entry Sheet ────────────────────────────────────────────── */}
+      <NewChannelSheet open={showNewChannel} onClose={() => setShowNewChannel(false)} />
+
       <SpendEntrySheet
         open={showAddSpend}
         onClose={() => { setShowAddSpend(false); setEditSpend(undefined); setSpendChannelPreset(undefined) }}
