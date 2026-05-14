@@ -476,11 +476,7 @@ function ChannelDetailSheet({
 
 // ── Campaign status badges ────────────────────────────────────────────────────
 
-const CAM_STATUS_BADGE: Record<string, string> = {
-  active: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
-  paused: 'bg-amber-500/10 text-amber-600 border-amber-500/20',
-  ended:  'bg-muted text-muted-foreground border-border',
-}
+// CAM_STATUS_BADGE removed — use STATUS_BADGE (identical)
 
 // ── CampaignCard ──────────────────────────────────────────────────────────────
 
@@ -544,7 +540,7 @@ function CampaignCard({
               {channel && (
                 <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">{channel.name}</Badge>
               )}
-              <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-4 ${CAM_STATUS_BADGE[campaign.status] ?? CAM_STATUS_BADGE.ended}`}>
+              <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-4 ${STATUS_BADGE[campaign.status] ?? STATUS_BADGE.ended}`}>
                 {campaign.status}
               </Badge>
               <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 capitalize">{campaign.campaignType}</Badge>
