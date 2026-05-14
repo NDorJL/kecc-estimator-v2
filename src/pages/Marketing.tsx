@@ -235,7 +235,9 @@ function SparklineChart({ data }: { data: { v: number }[] }) {
 // One-time tool: attribute existing leads (that have source but no campaignId)
 // to the correct campaigns based on their source value.
 
-const SKIP_SOURCES = new Set(['quote', 'other', 'unknown'])   // can't meaningfully attribute
+// 'quote' = auto-created when a quote was made (internal, not a marketing source)
+// 'other' / 'unknown' = no meaningful source recorded
+const SKIP_SOURCES = new Set(['quote', 'other', 'unknown', ''])
 
 function HistoricalSyncSheet({
   open, onClose, allLeads, allCampaigns, channels, sourceToChannelId,
@@ -1594,24 +1596,36 @@ export default function Marketing() {
 
   const periodEvents = useMemo(() => allEvents.filter(e => inRange(e.createdAt, range)), [allEvents, range])
 
-  // Closed leads = finished_paid or finished_unpaid
-  const isClosed = (l: Lead) => l.stage === 'finished_paid' || l.stage === 'finished_unpaid'
+  // "Closed" = converted to a paying customer.
+  // recurring is included — these are active paying customers, not open pipeline.
+  const isClosed = (l: Lead) =>
+    l.stage === 'finished_paid' || l.stage === 'finished_unpaid' || l.stage === 'recurring'
 
   const periodClosed = useMemo(() => periodLeads.filter(isClosed), [periodLeads])
   const prevClosed   = useMemo(() => prevLeads.filter(isClosed),   [prevLeads])
 
   // Returns the revenue figure for one lead.
-  // isEstimated = true when no completed job has been found (so the number is
-  // the quote total / estimatedValue, not a confirmed invoice amount).
+  // For one-time leads: quote total (confirmed if a completed job exists, estimated otherwise).
+  // For recurring leads: quote total × months active since the quote was signed (or lead created).
+  //   This approximates accumulated subscription revenue. Always marked estimated (~).
   function leadRevenue(lead: Lead): { amount: number; isEstimated: boolean } {
-    // Only match by quoteId — the contactId fallback is too broad and can
-    // confirm revenue from an unrelated completed job on the same contact.
+    const q = allQuotes.find(q => q.id === lead.quoteId)
+    const monthlyAmount = q?.total ?? lead.estimatedValue ?? 0
+
+    if (lead.stage === 'recurring') {
+      // Multiply monthly rate by months the customer has been active
+      const since = q?.signedAt ?? lead.createdAt
+      const monthsActive = Math.max(1, Math.round(
+        (Date.now() - new Date(since).getTime()) / (1000 * 60 * 60 * 24 * 30.44)
+      ))
+      return { amount: monthlyAmount * monthsActive, isEstimated: true }
+    }
+
+    // One-time: confirmed if a completed job is linked, estimated otherwise
     const completedJob = lead.quoteId
       ? allJobs.find(j => j.status === 'completed' && j.quoteId === lead.quoteId)
       : undefined
-    const q = allQuotes.find(q => q.id === lead.quoteId)
-    const amount = q?.total ?? lead.estimatedValue ?? 0
-    return { amount, isEstimated: !completedJob }
+    return { amount: monthlyAmount, isEstimated: !completedJob }
   }
 
   // Aggregate revenue across a list of leads.
