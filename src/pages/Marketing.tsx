@@ -107,6 +107,19 @@ const CHANNEL_PALETTE = [
   '#ff6b6b', '#4ecdc4',
 ]
 
+// Lead stage colors — module-level constant so it isn't recreated inside map()
+const LEAD_STAGE_COLOR: Record<string, string> = {
+  new:             'bg-slate-100 text-slate-700',
+  contacted:       'bg-blue-100 text-blue-700',
+  follow_up:       'bg-orange-100 text-orange-700',
+  quoted:          'bg-yellow-100 text-yellow-700',
+  scheduled:       'bg-violet-100 text-violet-700',
+  recurring:       'bg-indigo-100 text-indigo-700',
+  finished_paid:   'bg-emerald-100 text-emerald-700',
+  finished_unpaid: 'bg-amber-100 text-amber-700',
+  lost:            'bg-muted text-muted-foreground',
+}
+
 // ── KpiCard ───────────────────────────────────────────────────────────────────
 
 type MetricKind = 'currency' | 'number' | 'percent' | 'text'
@@ -2102,7 +2115,7 @@ export default function Marketing() {
                   ))}
                 </TabsList>
 
-                {/* Tab 1: Leads by channel, stacked bar */}
+                {/* Tab 1: Leads by channel, stacked bar — only channels with data shown */}
                 <TabsContent value="leads" className="p-4 mt-0">
                   <p className="text-xs text-muted-foreground mb-3">Leads generated per channel per month (stacked)</p>
                   <ResponsiveContainer width="100%" height={220}>
@@ -2112,12 +2125,16 @@ export default function Marketing() {
                       <YAxis allowDecimals={false} tick={{ fontSize: 9 }} />
                       <Tooltip wrapperStyle={{ fontSize: 11 }} />
                       <Legend iconSize={8} wrapperStyle={{ fontSize: 10 }} />
-                      {channels.map((ch, i) => (
-                        <Bar key={ch.id} dataKey={ch.name} stackId="a"
-                          fill={channelColorMap[ch.id] ?? CHANNEL_PALETTE[i % CHANNEL_PALETTE.length]}
-                          isAnimationActive={false} />
-                      ))}
-                      <Bar dataKey="Unattributed" stackId="a" fill="#94a3b8" isAnimationActive={false} />
+                      {channels
+                        .filter(ch => activeChannelNames.includes(ch.name))
+                        .map((ch, i) => (
+                          <Bar key={ch.id} dataKey={ch.name} stackId="a"
+                            fill={channelColorMap[ch.id] ?? CHANNEL_PALETTE[i % CHANNEL_PALETTE.length]}
+                            isAnimationActive={false} />
+                        ))}
+                      {activeChannelNames.includes('Unattributed') && (
+                        <Bar dataKey="Unattributed" stackId="a" fill="#94a3b8" isAnimationActive={false} />
+                      )}
                     </BarChart>
                   </ResponsiveContainer>
                 </TabsContent>
@@ -2211,16 +2228,6 @@ export default function Marketing() {
                     const q     = allQuotes.find(q => q.id === lead.quoteId)
                     const jobVal = isClosed(lead) ? (q?.total ?? lead.estimatedValue ?? null) : null
 
-                    const STAGE_COLOR: Record<string, string> = {
-                      new: 'bg-slate-100 text-slate-700',
-                      contacted: 'bg-blue-100 text-blue-700',
-                      quoted: 'bg-yellow-100 text-yellow-700',
-                      scheduled: 'bg-violet-100 text-violet-700',
-                      finished_paid: 'bg-emerald-100 text-emerald-700',
-                      finished_unpaid: 'bg-amber-100 text-amber-700',
-                      recurring: 'bg-indigo-100 text-indigo-700',
-                      follow_up: 'bg-orange-100 text-orange-700',
-                    }
                     return (
                       <div
                         key={lead.id}
@@ -2244,7 +2251,7 @@ export default function Marketing() {
                           {jobVal !== null && (
                             <span className="text-xs font-semibold text-emerald-600 tabular-nums">{fmtCurrency(jobVal)}</span>
                           )}
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium capitalize ${STAGE_COLOR[lead.stage] ?? 'bg-muted text-muted-foreground'}`}>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium capitalize ${LEAD_STAGE_COLOR[lead.stage] ?? 'bg-muted text-muted-foreground'}`}>
                             {lead.stage.replace(/_/g, ' ')}
                           </span>
                         </div>
