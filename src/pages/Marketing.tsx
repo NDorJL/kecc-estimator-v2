@@ -1312,6 +1312,12 @@ export default function Marketing() {
 
   // ── Spend log data ────────────────────────────────────────────────────────
 
+  // Stable channel name lookup — computed once, reused in spend log and CSV export
+  const channelNameById = useMemo(
+    () => Object.fromEntries(channels.map(c => [c.id, c.name])),
+    [channels],
+  )
+
   const sortedSpendLog = useMemo(() => {
     return [...periodSpend].sort((a, b) => {
       if (b.month !== a.month) return b.month.localeCompare(a.month)
@@ -1341,11 +1347,10 @@ export default function Marketing() {
 
   // CSV export
   function exportCSV() {
-    const channelMap = Object.fromEntries(channels.map(c => [c.id, c.name]))
     const rows = [
       ['Channel', 'Month', 'Amount', 'Notes'],
       ...sortedSpendLog.map(e => [
-        channelMap[e.channelId] ?? e.channelId,
+        channelNameById[e.channelId] ?? e.channelId,
         e.month,
         String(e.amount),
         e.notes ?? '',
@@ -1438,9 +1443,13 @@ export default function Marketing() {
 
   // ── Section 5: funnel data ────────────────────────────────────────────────
   const funnelStages = useMemo(() => {
-    const views  = periodEvents.length
+    // Only QR scans count as impressions — phone/email clicks are not funnel entry points
+    const views  = periodEvents.filter(e => e.eventType === 'scan').length
     const leads  = periodLeads.length
-    const quoted = periodLeads.filter(l => !!l.quoteId).length
+    // "Quotes Sent" = leads where the linked quote was actually sent (not just drafted)
+    const quoted = periodLeads.filter(l =>
+      l.quoteId && allQuotes.some(q => q.id === l.quoteId && (q.status === 'sent' || q.status === 'accepted'))
+    ).length
     const closed = periodClosed.length
 
     const counts  = [views, leads, quoted, closed]
@@ -1473,7 +1482,8 @@ export default function Marketing() {
         dropColor: dc(dropPct),
       }
     })
-  }, [periodEvents, periodLeads, periodClosed])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodEvents, periodLeads, periodClosed, allQuotes])
 
   // ── Section 6: trend chart data ───────────────────────────────────────────
 
@@ -1892,7 +1902,6 @@ export default function Marketing() {
                   {spendMonths.map(month => {
                     const monthEntries = sortedSpendLog.filter(e => e.month === month)
                     const subtotal = monthEntries.reduce((s, e) => s + e.amount, 0)
-                    const channelMap = Object.fromEntries(channels.map(c => [c.id, c.name]))
 
                     return (
                       <div key={month}>
@@ -1909,7 +1918,7 @@ export default function Marketing() {
                           >
                             <div className="flex-1 min-w-0">
                               <div className="text-sm font-medium truncate">
-                                {channelMap[entry.channelId] ?? '—'}
+                                {channelNameById[entry.channelId] ?? '—'}
                               </div>
                               {entry.notes && (
                                 <div className="text-xs text-muted-foreground truncate mt-0.5">{entry.notes}</div>
