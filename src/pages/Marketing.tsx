@@ -573,7 +573,7 @@ interface CampaignMetrics {
 }
 
 function CampaignCard({
-  campaign, channel, metrics, onEdit, onStatusToggle, onArchive,
+  campaign, channel, metrics, onEdit, onStatusToggle, onArchive, onDelete,
 }: {
   campaign: Campaign
   channel: MarketingChannel | undefined
@@ -581,11 +581,13 @@ function CampaignCard({
   onEdit: () => void
   onStatusToggle: () => void
   onArchive: () => void
+  onDelete: () => void
 }) {
   const { toast } = useToast()
   const [, navigate] = useLocation()
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [qrLoading, setQrLoading] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
   // Generate QR for QR-type campaigns
   useEffect(() => {
@@ -657,25 +659,45 @@ function CampaignCard({
                 <Archive className="h-3.5 w-3.5" />
               </Button>
             )}
+            <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive"
+              title="Delete campaign" onClick={() => setConfirmDelete(true)}>
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
           </div>
         </div>
 
+        {/* ── Delete confirmation ───────────────────────────────────── */}
+        {confirmDelete && (
+          <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 flex items-center justify-between gap-2">
+            <p className="text-xs text-destructive font-medium">Delete this campaign permanently?</p>
+            <div className="flex gap-1.5 shrink-0">
+              <Button size="sm" variant="outline" className="h-6 text-xs px-2" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+              <Button size="sm" variant="destructive" className="h-6 text-xs px-2" onClick={() => { setConfirmDelete(false); onDelete() }}>Delete</Button>
+            </div>
+          </div>
+        )}
+
         {/* ── Return on Ad Spend bar ────────────────────────────────── */}
-        {metrics.spend > 0 ? (() => {
-          const roas     = metrics.revenue / metrics.spend
-          const fillPct  = Math.min((roas) * 100, 300) / 3   // map 0–300% ROAS → 0–100% width
-          const barColor = metrics.revenue < metrics.spend
-            ? 'bg-red-500'
-            : metrics.revenue < metrics.spend * 3
-              ? 'bg-amber-500'
-              : 'bg-emerald-500'
-          const label    = metrics.revenue > 0
-            ? `${roas.toFixed(1)}× return`
-            : 'No revenue yet'
+        {(metrics.spend > 0 || metrics.revenue > 0 || metrics.leads > 0) && (() => {
+          const hasSpend = metrics.spend > 0
+          const roas     = hasSpend ? metrics.revenue / metrics.spend : null
+          const fillPct  = roas !== null ? Math.min(roas * 100, 300) / 3 : 0
+          const barColor = !hasSpend
+            ? 'bg-muted-foreground/30'
+            : metrics.revenue < metrics.spend
+              ? 'bg-red-500'
+              : metrics.revenue < metrics.spend * 3
+                ? 'bg-amber-500'
+                : 'bg-emerald-500'
+          const label = !hasSpend
+            ? 'No spend recorded'
+            : metrics.revenue > 0
+              ? `${roas!.toFixed(1)}× return`
+              : 'No revenue yet'
           return (
             <div>
               <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
-                <span className="font-medium">{label}</span>
+                <span className={`font-medium ${!hasSpend ? 'italic' : ''}`}>{label}</span>
                 <span>ROAS</span>
               </div>
               <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
@@ -685,11 +707,13 @@ function CampaignCard({
                 />
               </div>
               <p className="text-[10px] text-muted-foreground mt-1">
-                {fmtCurrency(metrics.revenue)} earned / {fmtCurrency(metrics.spend)} spent
+                {hasSpend
+                  ? `${fmtCurrency(metrics.revenue)} earned / ${fmtCurrency(metrics.spend)} spent`
+                  : `${fmtCurrency(metrics.revenue)} earned — add spend entry to track ROAS`}
               </p>
             </div>
           )
-        })() : null}
+        })()}
 
         {/* ── Funnel: Views → Leads → Closed ───────────────────────── */}
         <div className="grid grid-cols-5 items-center gap-1 text-center">
@@ -1221,17 +1245,18 @@ export default function Marketing() {
     }
     // Common manual aliases for UTM sources people type
     const manualAliases: Record<string, string[]> = {
-      'facebook ads':           ['facebook', 'fb', 'facebook_ads'],
+      'meta ads':               ['facebook', 'fb', 'facebook_ads', 'instagram', 'ig', 'instagram_ads', 'meta', 'meta_ads', 'social_ads'],
       'google ads':             ['google', 'google_ads', 'gads'],
-      'google business profile':['google_business', 'gbp', 'gmb'],
+      'google business profile':['google_business', 'gbp', 'gmb', 'google_business_profile'],
       'nextdoor':               ['nextdoor'],
-      'instagram':              ['instagram', 'instagram_ads', 'ig'],
+      'social media':           ['social', 'social_media', 'organic_social', 'social_organic'],
       'direct mail':            ['mailers', 'direct_mail'],
       'yard signs':             ['yard_signs'],
       'door hangers':           ['door_hangers'],
       'truck wrap':             ['truck_wrap', 'truck'],
-      'referral':               ['referral', 'word_of_mouth', 'wom'],
-      'word of mouth':          ['word_of_mouth', 'wom', 'referral'],
+      'referral':               ['referral'],
+      'word of mouth':          ['word_of_mouth', 'wom'],
+      'sponsorship':            ['sponsorship', 'sponsor', 'event'],
     }
     for (const ch of channels) {
       const name = ch.name.toLowerCase()
@@ -1492,7 +1517,28 @@ export default function Marketing() {
     onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
   })
 
+  const deleteCampaignMutation = useMutation({
+    mutationFn: (id: string) => apiRequest('DELETE', `/campaigns/${id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['/campaigns'] })
+      toast({ title: 'Campaign deleted' })
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
   // ── Per-campaign metrics ──────────────────────────────────────────────────
+
+  // Pro-rate a spend entry for the current month by elapsed days.
+  // e.g. on May 14 of 31, a $500 entry becomes $500 × (14/31) ≈ $226.
+  // Past months and future months are returned at full value.
+  function effectiveSpend(entry: MarketingSpend): number {
+    const today = new Date()
+    const currentYM = today.toISOString().slice(0, 7)
+    if (entry.month !== currentYM) return entry.amount
+    const dayOfMonth   = today.getDate()
+    const daysInMonth  = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate()
+    return entry.amount * (dayOfMonth / daysInMonth)
+  }
 
   function campaignMetrics(cam: Campaign): CampaignMetrics {
     // Only count 'scan' events as views — phone_click/email_click are not impressions
@@ -1505,7 +1551,7 @@ export default function Marketing() {
     const closedLeads = campLeads.filter(isClosed)
     const closed = closedLeads.length
 
-    // Spend = channel spend during campaign's date range.
+    // Spend = channel spend during campaign's date range, with current-month pro-ration.
     // Fall back to createdAt month when no explicit dates are set so campaigns
     // without dates still show spend instead of always showing $0.
     let spend = 0
@@ -1514,7 +1560,7 @@ export default function Marketing() {
       const endYM   = cam.endDate   ? cam.endDate.slice(0, 7)   : thisMonthStr()
       spend = allSpend
         .filter(s => s.channelId === cam.channelId && s.month >= startYM && s.month <= endYM)
-        .reduce((sum, s) => sum + s.amount, 0)
+        .reduce((sum, s) => sum + effectiveSpend(s), 0)
     }
 
     const { total: revenue, hasEstimated: revenueIsEst } = revenueFor(closedLeads)
@@ -1670,6 +1716,36 @@ export default function Marketing() {
       .sort((a, b) => (b.chRoi ?? -Infinity) - (a.chRoi ?? -Infinity))
       .map(r => ({ name: r.ch.name, roi: Math.round(r.chRoi ?? 0), id: r.ch.id }))
   }, [channelRows])
+
+  // ── Historical source breakdown (all leads ever, not period-filtered) ────────
+  // Used for the one-time "how are my existing leads attributed?" sync view.
+  const historicalSourceBreakdown = useMemo(() => {
+    const counts: Record<string, { source: string; channelName: string | null; count: number }> = {}
+    for (const lead of allLeads) {
+      const key = lead.campaignId
+        ? `campaign:${lead.campaignId}`
+        : (lead.source?.toLowerCase() ?? '__none__')
+      if (!counts[key]) {
+        let channelName: string | null = null
+        if (lead.campaignId) {
+          const chId = campaignChannelMap[lead.campaignId]
+          channelName = channels.find(c => c.id === chId)?.name ?? null
+        } else if (lead.source) {
+          const chId = sourceToChannelId[lead.source.toLowerCase()]
+          channelName = channels.find(c => c.id === chId)?.name ?? null
+        }
+        counts[key] = {
+          source:      lead.campaignId ? `Campaign (${allCampaigns.find(c => c.id === lead.campaignId)?.name ?? lead.campaignId.slice(0,8)})` : (lead.source ?? '(none)'),
+          channelName,
+          count: 0,
+        }
+      }
+      counts[key].count++
+    }
+    return Object.values(counts).sort((a, b) => b.count - a.count)
+  }, [allLeads, allCampaigns, campaignChannelMap, sourceToChannelId, channels])
+
+  const [showHistoricalSources, setShowHistoricalSources] = useState(false)
 
   // ── Section 7: attribution feed ───────────────────────────────────────────
 
@@ -2148,6 +2224,7 @@ export default function Marketing() {
                       id: cam.id,
                       updates: { status: 'ended' },
                     })}
+                    onDelete={() => deleteCampaignMutation.mutate(cam.id)}
                   />
                 )
               })}
@@ -2314,6 +2391,53 @@ export default function Marketing() {
               </Tabs>
             </CardContent>
           </Card>
+        </section>
+
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        {/* Section 6.5 — Historical Lead Source Sync                      */}
+        {/* ═══════════════════════════════════════════════════════════════ */}
+        <section>
+          <button
+            className="w-full flex items-center justify-between text-left group"
+            onClick={() => setShowHistoricalSources(v => !v)}
+          >
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground group-hover:text-foreground transition-colors">
+              All-Time Lead Sources ({allLeads.length} total)
+            </h3>
+            <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${showHistoricalSources ? 'rotate-180' : ''}`} />
+          </button>
+          {showHistoricalSources && (
+            <Card className="mt-2">
+              <CardContent className="p-0">
+                <div className="px-3 py-2 border-b bg-muted/30">
+                  <p className="text-[11px] text-muted-foreground">
+                    All leads ever recorded, grouped by source — regardless of the selected time period. Shows how your existing contacts are attributed to channels.
+                  </p>
+                </div>
+                {historicalSourceBreakdown.length === 0 ? (
+                  <p className="px-4 py-6 text-sm text-muted-foreground text-center">No leads recorded yet</p>
+                ) : (
+                  <div>
+                    {historicalSourceBreakdown.map(({ source, channelName, count }) => (
+                      <div key={source} className="flex items-center justify-between px-4 py-2.5 border-b last:border-0 hover:bg-muted/20">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate">{source}</div>
+                          <div className={`text-[11px] mt-0.5 ${channelName ? 'text-emerald-600' : 'text-amber-500'}`}>
+                            {channelName ? `→ ${channelName}` : '⚠ No channel match — update source or fix alias'}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-sm font-bold tabular-nums ml-3">{count}</div>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between px-4 py-2.5 bg-muted/30 border-t">
+                      <span className="text-xs font-semibold text-muted-foreground">Total leads</span>
+                      <span className="text-sm font-bold tabular-nums">{allLeads.length}</span>
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </section>
 
         {/* ═══════════════════════════════════════════════════════════════ */}
