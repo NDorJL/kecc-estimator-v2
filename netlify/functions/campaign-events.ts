@@ -40,7 +40,7 @@ export const handler: Handler = async (event) => {
       if (until)      query = query.lte('created_at', until)
 
       const { data, error } = await query
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToCampaignEvent)) }
     }
 
@@ -74,7 +74,7 @@ export const handler: Handler = async (event) => {
         })
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
 
       // ── Auto-create a lead stub on phone_click ──────────────────────────
       // When someone taps a phone number link, we know their number and
@@ -111,7 +111,7 @@ export const handler: Handler = async (event) => {
         }
 
         if (!skipCreate) {
-          const sourceLabel = 'website'   // phone number clicked on the website
+          const sourceLabel = 'website'
           const noteLines = [
             '📞 Auto-created from website phone number click.',
             phoneNumber ? `Phone: ${phoneNumber}` : null,
@@ -119,6 +119,7 @@ export const handler: Handler = async (event) => {
             'Fill in name and details during the call.',
           ].filter(Boolean).join('\n')
 
+          // Non-fatal: if lead stub creation fails, the event is still recorded
           await supabase.from('leads').insert({
             contact_id:    contactId,
             stage:         'new',
@@ -126,7 +127,7 @@ export const handler: Handler = async (event) => {
             source_locked: true,
             campaign_id:   campaignId ?? null,
             notes:         noteLines,
-          })
+          }).catch(() => { /* silent — event is more important than the stub */ })
         }
       }
 
