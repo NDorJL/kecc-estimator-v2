@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
+import { MarketingTestPanel } from './MarketingTest'
 import { useLocation } from 'wouter'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -1213,6 +1214,7 @@ export default function Marketing() {
   const [campaignFilter,  setCampaignFilter]  = useState<'all' | 'active' | 'paused' | 'ended'>('all')
   const [showNewChannel,  setShowNewChannel]  = useState(false)
   const [showNewCampaign, setShowNewCampaign] = useState(false)
+  const [showTestPanel,   setShowTestPanel]   = useState(false)
   const [editCampaign,    setEditCampaign]    = useState<Campaign | null>(null)
 
   function handleSort(col: SortCol) {
@@ -1932,6 +1934,14 @@ export default function Marketing() {
           <Megaphone className="h-5 w-5 text-primary" />
           <h2 className="text-lg font-bold">Marketing</h2>
         </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs gap-1 px-2 text-muted-foreground"
+          onClick={() => setShowTestPanel(true)}
+        >
+          🧪 Test Tracking
+        </Button>
       </div>
 
       <div className="p-4 space-y-6 pb-12">
@@ -2710,6 +2720,8 @@ export default function Marketing() {
       </div>
 
       {/* ── Spend Entry Sheet ────────────────────────────────────────────── */}
+      <MarketingTestPanel open={showTestPanel} onClose={() => setShowTestPanel(false)} />
+
       <NewChannelSheet open={showNewChannel} onClose={() => setShowNewChannel(false)} />
 
       <SpendEntrySheet
