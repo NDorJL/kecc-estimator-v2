@@ -715,27 +715,45 @@ function CampaignCard({
           )
         })()}
 
-        {/* ── Funnel: Views → Leads → Closed ───────────────────────── */}
-        <div className="grid grid-cols-5 items-center gap-1 text-center">
-          <div className="col-span-1 bg-muted/40 rounded-lg py-2">
-            <div className="text-sm font-bold">{metrics.views}</div>
-            <div className="text-[10px] text-muted-foreground">Views</div>
+        {/* ── Funnel ───────────────────────────────────────────────── */}
+        {/* QR/Sponsorship track scans so show Views → Leads → Closed.  */}
+        {/* All other types have no view-level data — show Leads → Closed only. */}
+        {(campaign.campaignType === 'qr' || campaign.campaignType === 'sponsorship') ? (
+          <div className="grid grid-cols-5 items-center gap-1 text-center">
+            <div className="col-span-1 bg-muted/40 rounded-lg py-2">
+              <div className="text-sm font-bold">{metrics.views}</div>
+              <div className="text-[10px] text-muted-foreground">Scans</div>
+            </div>
+            <div className="col-span-1 text-[10px] text-muted-foreground font-medium">
+              {convViewsLeads ?? '→'}
+            </div>
+            <div className="col-span-1 bg-muted/40 rounded-lg py-2">
+              <div className="text-sm font-bold">{metrics.leads}</div>
+              <div className="text-[10px] text-muted-foreground">Leads</div>
+            </div>
+            <div className="col-span-1 text-[10px] text-muted-foreground font-medium">
+              {convLeadsClosed ?? '→'}
+            </div>
+            <div className="col-span-1 bg-muted/40 rounded-lg py-2">
+              <div className="text-sm font-bold">{metrics.closed}</div>
+              <div className="text-[10px] text-muted-foreground">Closed</div>
+            </div>
           </div>
-          <div className="col-span-1 text-[10px] text-muted-foreground font-medium">
-            {convViewsLeads ?? '→'}
+        ) : (
+          <div className="grid grid-cols-3 items-center gap-1 text-center">
+            <div className="bg-muted/40 rounded-lg py-2">
+              <div className="text-sm font-bold">{metrics.leads}</div>
+              <div className="text-[10px] text-muted-foreground">Leads</div>
+            </div>
+            <div className="text-[10px] text-muted-foreground font-medium">
+              {convLeadsClosed ?? '→'}
+            </div>
+            <div className="bg-muted/40 rounded-lg py-2">
+              <div className="text-sm font-bold">{metrics.closed}</div>
+              <div className="text-[10px] text-muted-foreground">Closed</div>
+            </div>
           </div>
-          <div className="col-span-1 bg-muted/40 rounded-lg py-2">
-            <div className="text-sm font-bold">{metrics.leads}</div>
-            <div className="text-[10px] text-muted-foreground">Leads</div>
-          </div>
-          <div className="col-span-1 text-[10px] text-muted-foreground font-medium">
-            {convLeadsClosed ?? '→'}
-          </div>
-          <div className="col-span-1 bg-muted/40 rounded-lg py-2">
-            <div className="text-sm font-bold">{metrics.closed}</div>
-            <div className="text-[10px] text-muted-foreground">Closed</div>
-          </div>
-        </div>
+        )}
 
         {/* ── CPL / CPA / ROI ──────────────────────────────────────── */}
         <div className="grid grid-cols-3 gap-1 text-center border border-border/40 rounded-lg p-2">
@@ -1541,12 +1559,33 @@ export default function Marketing() {
   }
 
   function campaignMetrics(cam: Campaign): CampaignMetrics {
-    // Only count 'scan' events as views — phone_click/email_click are not impressions
-    const views = allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'scan').length
+    // Views (scans) only meaningful for QR/Sponsorship — other types always 0
+    const views = (cam.campaignType === 'qr' || cam.campaignType === 'sponsorship')
+      ? allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'scan').length
+      : 0
     const phoneClicks = allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'phone_click').length
     const emailClicks = allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'email_click').length
 
-    const campLeads = allLeads.filter(l => l.campaignId === cam.id)
+    // Lead attribution strategy depends on campaign type:
+    //
+    // digital / qr / sponsorship — strict: only leads explicitly attributed
+    //   to this campaign via UTM cookie or QR scan (campaignId === cam.id).
+    //
+    // phone / referral — also include leads manually logged in the pipeline
+    //   whose source maps to this campaign's channel, as long as they are NOT
+    //   already attributed to a different specific campaign (avoids double-counting).
+    //   This means a lead created with source="referral" or source="google_lsa"
+    //   automatically appears here without any extra step on the marketing page.
+    let campLeads: Lead[]
+    if (cam.campaignType === 'phone' || cam.campaignType === 'referral') {
+      campLeads = allLeads.filter(l =>
+        l.campaignId === cam.id ||
+        (!l.campaignId && cam.channelId && getLeadChannelId(l) === cam.channelId)
+      )
+    } else {
+      campLeads = allLeads.filter(l => l.campaignId === cam.id)
+    }
+
     const leads = campLeads.length
     const closedLeads = campLeads.filter(isClosed)
     const closed = closedLeads.length
