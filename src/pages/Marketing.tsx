@@ -1960,10 +1960,14 @@ export default function Marketing() {
         v: allLeads.filter(l => l.createdAt.slice(0, 7) === ym && getLeadChannelId(l) === ch.id).length,
       }))
 
-      return { ch, spend, leadsCount, views, convRate, closedJobs, closeRate, chRevenue, chRevenueEst, chCpl, chCpa, chRoi, sparkline }
+      // Whether this channel has at least one active campaign
+      const hasCampaigns = allCampaigns.some(c => c.channelId === ch.id && c.status !== 'ended')
+
+      return { ch, spend, leadsCount, views, convRate, closedJobs, closeRate, chRevenue, chRevenueEst, chCpl, chCpa, chRoi, sparkline, hasCampaigns }
     })
-    // Only show channels with any activity (spend or leads or events)
-    .filter(r => r.spend > 0 || r.leadsCount > 0 || r.views > 0)
+    // Show channels with campaigns (even if no activity yet in the period) OR any historical activity.
+    // Channels with neither campaigns nor any data are hidden to keep the table clean.
+    .filter(r => r.hasCampaigns || r.spend > 0 || r.leadsCount > 0 || r.views > 0)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channels, periodSpend, periodLeads, periodEvents, allCampaigns, allLeads, allQuotes, allJobs, last6Months, campaignChannelMap, sourceToChannelId])
 
@@ -2634,7 +2638,7 @@ export default function Marketing() {
                       </tr>
                     </thead>
                     <tbody>
-                      {sortedChannelRows.map(({ ch, spend, leadsCount, views, convRate, closedJobs, closeRate, chRevenue, chRevenueEst, chCpl, chCpa, chRoi, sparkline }) => (
+                      {sortedChannelRows.map(({ ch, spend, leadsCount, views, convRate, closedJobs, closeRate, chRevenue, chRevenueEst, chCpl, chCpa, chRoi, sparkline, hasCampaigns }) => (
                         <tr
                           key={ch.id}
                           className="border-b last:border-0 hover:bg-muted/30 cursor-pointer transition-colors"
@@ -2646,10 +2650,17 @@ export default function Marketing() {
                         >
                           {/* Channel name + type badge */}
                           <td className="px-3 py-2.5 min-w-[140px]">
-                            <div className="font-medium leading-tight">{ch.name}</div>
-                            <Badge variant="outline" className={`mt-0.5 text-[10px] px-1 py-0 h-4 ${TYPE_BADGE[ch.type] ?? TYPE_BADGE.other}`}>
-                              {ch.type}
-                            </Badge>
+                            <div className={`font-medium leading-tight ${hasCampaigns && leadsCount === 0 && spend === 0 && views === 0 ? 'text-muted-foreground/70' : ''}`}>
+                              {ch.name}
+                            </div>
+                            <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+                              <Badge variant="outline" className={`text-[10px] px-1 py-0 h-4 ${TYPE_BADGE[ch.type] ?? TYPE_BADGE.other}`}>
+                                {ch.type}
+                              </Badge>
+                              {hasCampaigns && leadsCount === 0 && spend === 0 && views === 0 && (
+                                <span className="text-[10px] text-muted-foreground/50 italic">no activity this period</span>
+                              )}
+                            </div>
                           </td>
                           {/* Spend — click to edit */}
                           <td className="px-3 py-2.5 text-right" data-spend-cell="">
