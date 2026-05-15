@@ -30,17 +30,18 @@ import {
 
 // ── Period types ─────────────────────────────────────────────────────────────
 
-type PeriodPreset = 'this_month' | 'last_month' | 'last_3' | 'last_6' | 'last_12' | 'custom'
-
 interface DateRange { start: string; end: string }  // 'YYYY-MM'
 
-const PRESET_LABELS: Record<PeriodPreset, string> = {
-  this_month: 'This Month',
-  last_month: 'Last Month',
-  last_3:     'Last 3M',
-  last_6:     'Last 6M',
-  last_12:    'Last 12M',
-  custom:     'Custom',
+// Cumulative range modes — only available when viewing the current month
+type RangeMode = 'month' | '3m' | '6m' | '12m' | 'ytd' | 'custom'
+
+const RANGE_LABELS: Record<RangeMode, string> = {
+  month:  'Month Only',
+  '3m':   '3 Month',
+  '6m':   '6 Month',
+  '12m':  '12 Month',
+  ytd:    'YTD',
+  custom: 'Custom',
 }
 
 // ── Period math helpers ───────────────────────────────────────────────────────
@@ -56,20 +57,24 @@ function addMonths(ym: string, n: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
 }
 
-function getPeriodRange(preset: PeriodPreset, custom: DateRange): DateRange {
+function getPeriodRange(selectedMonth: string, rangeMode: RangeMode, custom: DateRange): DateRange {
   const tm = thisMonthStr()
-  switch (preset) {
-    case 'this_month': return { start: tm, end: tm }
-    case 'last_month': return { start: addMonths(tm, -1), end: addMonths(tm, -1) }
-    case 'last_3':     return { start: addMonths(tm, -2), end: tm }
-    case 'last_6':     return { start: addMonths(tm, -5), end: tm }
-    case 'last_12':    return { start: addMonths(tm, -11), end: tm }
-    case 'custom':     return custom
+  const onCurrentMonth = selectedMonth === tm
+  // Historical month or "month only" mode → single isolated month
+  if (!onCurrentMonth || rangeMode === 'month') return { start: selectedMonth, end: selectedMonth }
+  // Cumulative ranges always end at current month
+  switch (rangeMode) {
+    case '3m':     return { start: addMonths(tm, -2),  end: tm }
+    case '6m':     return { start: addMonths(tm, -5),  end: tm }
+    case '12m':    return { start: addMonths(tm, -11), end: tm }
+    case 'ytd':    return { start: `${tm.slice(0, 4)}-01`, end: tm }
+    case 'custom': return custom
+    default:       return { start: tm, end: tm }
   }
 }
 
-function getPrevRange(preset: PeriodPreset, range: DateRange): DateRange | null {
-  if (preset === 'custom') return null
+function getPrevRange(selectedMonth: string, rangeMode: RangeMode, range: DateRange): DateRange | null {
+  if (rangeMode === 'custom') return null
   const [sy, sm] = range.start.split('-').map(Number)
   const [ey, em] = range.end.split('-').map(Number)
   const months = (ey - sy) * 12 + (em - sm) + 1
@@ -1412,12 +1417,32 @@ export default function Marketing() {
   const qc = useQueryClient()
 
   // ── Period state ──────────────────────────────────────────────────────────
-  const [preset, setPreset] = useState<PeriodPreset>('this_month')
-  const [customStart, setCustomStart] = useState(addMonths(thisMonthStr(), -2))
-  const [customEnd,   setCustomEnd]   = useState(thisMonthStr())
+  // ── Period state ──────────────────────────────────────────────────────────
+  // selectedMonth: the month shown in the dropdown (YYYY-MM). Defaults to current month.
+  // rangeMode: cumulative expansion — only available when selectedMonth === current month.
+  const [selectedMonth, setSelectedMonth] = useState(thisMonthStr())
+  const [rangeMode,     setRangeMode]     = useState<RangeMode>('month')
+  const [customStart,   setCustomStart]   = useState(addMonths(thisMonthStr(), -2))
+  const [customEnd,     setCustomEnd]     = useState(thisMonthStr())
 
-  const range    = useMemo(() => getPeriodRange(preset, { start: customStart, end: customEnd }), [preset, customStart, customEnd])
-  const prevRange = useMemo(() => getPrevRange(preset, range), [preset, range])
+  const onCurrentMonth = selectedMonth === thisMonthStr()
+
+  // When navigating to a historical month, collapse rangeMode back to 'month'
+  useEffect(() => {
+    if (!onCurrentMonth) setRangeMode('month')
+  }, [selectedMonth, onCurrentMonth])
+
+  const range     = useMemo(() => getPeriodRange(selectedMonth, rangeMode, { start: customStart, end: customEnd }), [selectedMonth, rangeMode, customStart, customEnd])
+  const prevRange = useMemo(() => getPrevRange(selectedMonth, rangeMode, range), [selectedMonth, rangeMode, range])
+
+  // Build 24-month dropdown options (current month first, then backwards)
+  const monthOptions = useMemo(() => {
+    const tm = thisMonthStr()
+    return Array.from({ length: 24 }, (_, i) => {
+      const ym = addMonths(tm, -i)
+      return { value: ym, label: monthLabel(ym) + (i === 0 ? ' (Current)' : '') }
+    })
+  }, [])
 
   // ── UI state ──────────────────────────────────────────────────────────────
   const [sortCol, setSortCol] = useState<SortCol>('spend')
@@ -2233,33 +2258,55 @@ export default function Marketing() {
       <div className="p-4 space-y-6 pb-12">
 
         {/* ── Period selector ──────────────────────────────────────────── */}
-        <div>
-          <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
-            {(Object.keys(PRESET_LABELS) as PeriodPreset[]).map(p => (
-              <Button
-                key={p}
-                size="sm"
-                variant={preset === p ? 'default' : 'outline'}
-                className="shrink-0 h-8 text-xs px-3"
-                onClick={() => setPreset(p)}
-              >
-                {PRESET_LABELS[p]}
-              </Button>
-            ))}
+        <div className="space-y-2">
+          {/* Row 1: Month dropdown */}
+          <div>
+            <Label className="text-xs text-muted-foreground mb-1 block">Month</Label>
+            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {monthOptions.map(o => (
+                  <SelectItem key={o.value} value={o.value} className="text-sm">{o.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-          {preset === 'custom' && (
-            <div className="flex gap-2 mt-2">
-              <div className="flex-1">
-                <Label className="text-xs text-muted-foreground">From</Label>
-                <Input type="month" className="mt-0.5 h-8 text-sm" value={customStart} onChange={e => setCustomStart(e.target.value)} />
+
+          {/* Row 2: Cumulative range pills — only when viewing current month */}
+          {onCurrentMonth && (
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">View</Label>
+              <div className="flex gap-1.5 flex-wrap">
+                {(Object.keys(RANGE_LABELS) as RangeMode[]).map(m => (
+                  <Button
+                    key={m}
+                    size="sm"
+                    variant={rangeMode === m ? 'default' : 'outline'}
+                    className="h-7 text-xs px-2.5"
+                    onClick={() => setRangeMode(m)}
+                  >
+                    {RANGE_LABELS[m]}
+                  </Button>
+                ))}
               </div>
-              <div className="flex-1">
-                <Label className="text-xs text-muted-foreground">To</Label>
-                <Input type="month" className="mt-0.5 h-8 text-sm" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
-              </div>
+              {rangeMode === 'custom' && (
+                <div className="flex gap-2 mt-2">
+                  <div className="flex-1">
+                    <Label className="text-xs text-muted-foreground">From</Label>
+                    <Input type="month" className="mt-0.5 h-8 text-sm" value={customStart} onChange={e => setCustomStart(e.target.value)} />
+                  </div>
+                  <div className="flex-1">
+                    <Label className="text-xs text-muted-foreground">To</Label>
+                    <Input type="month" className="mt-0.5 h-8 text-sm" value={customEnd} onChange={e => setCustomEnd(e.target.value)} />
+                  </div>
+                </div>
+              )}
             </div>
           )}
-          <p className="mt-1.5 text-xs text-muted-foreground">
+
+          <p className="text-xs text-muted-foreground">
             {range.start === range.end
               ? monthLabel(range.start)
               : `${monthLabel(range.start)} – ${monthLabel(range.end)}`}
