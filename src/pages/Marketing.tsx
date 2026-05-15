@@ -914,23 +914,25 @@ function CampaignCard({
         {(metrics.spend > 0 || metrics.revenue > 0 || metrics.leads > 0) && (() => {
           const hasSpend = metrics.spend > 0
           const roas     = hasSpend ? metrics.revenue / metrics.spend : null
-          const fillPct  = roas !== null ? Math.min(roas * 100, 300) / 3 : 0
+          // No-spend campaigns (referral, organic, word-of-mouth) are perpetually
+          // profitable — show a full green bar to reflect infinite positive ROAS.
+          const fillPct  = !hasSpend ? 100 : roas !== null ? Math.min(roas * 100, 300) / 3 : 0
           const barColor = !hasSpend
-            ? 'bg-muted-foreground/30'
+            ? 'bg-emerald-500'
             : metrics.revenue < metrics.spend
               ? 'bg-red-500'
               : metrics.revenue < metrics.spend * 3
                 ? 'bg-amber-500'
                 : 'bg-emerald-500'
           const label = !hasSpend
-            ? 'No spend recorded'
+            ? '∞ No cost — pure profit'
             : metrics.revenue > 0
               ? `${roas!.toFixed(1)}× return`
               : 'No revenue yet'
           return (
             <div>
               <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
-                <span className={`font-medium ${!hasSpend ? 'italic' : ''}`}>{label}</span>
+                <span className="font-medium">{label}</span>
                 <span>ROAS</span>
               </div>
               <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
@@ -942,7 +944,9 @@ function CampaignCard({
               <p className="text-[10px] text-muted-foreground mt-1">
                 {hasSpend
                   ? `${fmtCurrency(metrics.revenue)} earned / ${fmtCurrency(metrics.spend)} spent`
-                  : `${fmtCurrency(metrics.revenue)} earned — add spend entry to track ROAS`}
+                  : metrics.revenue > 0
+                    ? `${fmtCurrency(metrics.revenue)} earned at no cost`
+                    : 'No revenue yet — all future revenue is pure profit'}
               </p>
             </div>
           )
