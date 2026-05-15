@@ -1641,11 +1641,15 @@ export default function Marketing() {
 
   // ── KPI computations ──────────────────────────────────────────────────────
 
-  const totalSpend     = useMemo(() => periodSpend.reduce((s, e) => s + e.amount, 0), [periodSpend])
+  // Use effectiveSpend (prorated for current month) to match what campaign cards show.
+  // Previous months are always full months so proration has no effect on them.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const totalSpend     = useMemo(() => periodSpend.reduce((s, e) => s + effectiveSpend(e), 0), [periodSpend])
   // null when prevRange is null (custom period) so KPI arrows show flat "no comparison" rather than
   // a misleading colored arrow compared against an implicit 0 baseline
   const prevTotalSpend = useMemo(
-    () => prevRange ? prevSpend.reduce((s, e) => s + e.amount, 0) : null,
+    () => prevRange ? prevSpend.reduce((s, e) => s + effectiveSpend(e), 0) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [prevSpend, prevRange],
   )
 
