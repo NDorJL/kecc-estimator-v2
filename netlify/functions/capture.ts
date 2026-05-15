@@ -183,7 +183,9 @@ export const handler: Handler = async (event) => {
 
     // ── 4. Determine lead source label ────────────────────────────────────────
 
-    const source = determineSource(campaignId !== WEBSITE_ORGANIC_CAMPAIGN_ID ? campaignId : undefined, utmSource, referrer)
+    // Use the raw (explicit) campaignId for source determination, not the fallback.
+    // This ensures the source label reflects the actual UTM/campaign, not the catch-all.
+    const source = determineSource(rawCampaignId ?? undefined, utmSource, referrer)
 
     // ── 5. Build notes ────────────────────────────────────────────────────────
 
