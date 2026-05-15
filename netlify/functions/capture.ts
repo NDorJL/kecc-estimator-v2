@@ -26,10 +26,10 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-// Fallback campaign for contact form submissions that arrive with no UTM or
-// campaign cookie — these are organic website visitors who found the form
-// without going through a tracked link or QR code.
-const WEBSITE_ORGANIC_CAMPAIGN_ID = '8548a349-4fc0-48db-b5a0-cd49f7c94e16'
+// Fallback campaign for contact form submissions with no UTM or campaign cookie.
+// Kept separate from Website/Organic (which tracks clicks) so you can see
+// the conversion rate: clicks on Website/Organic → submissions on Contact Form.
+const CONTACT_FORM_CAMPAIGN_ID = '9f0ac3ec-2ed2-4dc3-8745-af674dad3ac1'
 
 const CORS = {
   'Content-Type':                'application/json',
@@ -178,7 +178,7 @@ export const handler: Handler = async (event) => {
     }
 
     if (!campaignId) {
-      campaignId = WEBSITE_ORGANIC_CAMPAIGN_ID
+      campaignId = CONTACT_FORM_CAMPAIGN_ID
     }
 
     // ── 4. Determine lead source label ────────────────────────────────────────

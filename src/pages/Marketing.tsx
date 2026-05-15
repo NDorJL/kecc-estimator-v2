@@ -1047,8 +1047,8 @@ function CampaignCard({
           </div>
         )}
 
-        {/* ── Phone: click tracking stats ───────────────────────────── */}
-        {campaign.campaignType === 'phone' && (metrics.phoneClicks > 0 || metrics.emailClicks > 0) && (
+        {/* ── Click tracking stats (phone campaigns + any digital with click data) ── */}
+        {(metrics.phoneClicks > 0 || metrics.emailClicks > 0) && (
           <div className="flex gap-3 text-[11px] text-muted-foreground">
             {metrics.phoneClicks > 0 && (
               <span>📞 {metrics.phoneClicks} call tap{metrics.phoneClicks !== 1 ? 's' : ''}</span>
