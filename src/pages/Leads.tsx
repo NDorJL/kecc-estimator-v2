@@ -2726,6 +2726,7 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
     estimatedValue: '',
     source: '',
     notes: '',
+    propertyId: '',
   })
   const [contactError, setContactError] = useState(false)   // ← inline validation state
 
@@ -2837,7 +2838,14 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
     queryFn: () => apiGet(`/properties?contactId=${form.contactId}`),
     enabled: open && !!form.contactId,
   })
-  const primaryAddress = selectedProperties[0]?.address ?? null
+  // Auto-select the first property when properties load (or contact changes)
+  useEffect(() => {
+    if (selectedProperties.length > 0 && !form.propertyId) {
+      setForm(f => ({ ...f, propertyId: selectedProperties[0].id }))
+    }
+  }, [selectedProperties])
+
+  const selectedProperty = selectedProperties.find(p => p.id === form.propertyId) ?? selectedProperties[0] ?? null
 
   // When a contact is selected, auto-fill source from contact.source if not already set
   useEffect(() => {
@@ -2851,6 +2859,7 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
   const createMutation = useMutation({
     mutationFn: () => apiRequest('POST', '/leads', {
       contactId: form.contactId || null,
+      propertyId: form.propertyId || null,
       serviceInterest: form.serviceInterest || null,
       estimatedValue: form.estimatedValue ? parseFloat(form.estimatedValue) : null,
       source: form.source || null,
@@ -2867,7 +2876,7 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
       toast({ title: 'Lead created' })
-      setForm({ contactId: '', serviceInterest: '', estimatedValue: '', source: '', notes: '' })
+      setForm({ contactId: '', serviceInterest: '', estimatedValue: '', source: '', notes: '', propertyId: '' })
       setPromoCode(''); setPromoMatch(null); setUrlCampaignId(null)
       setContactError(false)   // ← NEW: reset on successful create
       onClose()
@@ -2901,6 +2910,7 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
                 setForm(f => ({
                   ...f,
                   contactId: v,
+                  propertyId: '',  // reset so the new contact's first property auto-selects
                   // Clear source only if it was auto-filled from the previous contact
                   source: f.source === prevAutoSource ? '' : f.source,
                 }))
@@ -2916,11 +2926,33 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
                 ))}
               </SelectContent>
             </Select>
-            {/* Address pulled from contact's property — shown as confirmation, no re-entry needed */}
-            {primaryAddress && (
+            {/* Property selector — dropdown when multiple, chip when only one */}
+            {selectedProperties.length > 1 && (
+              <div className="mt-1.5">
+                <Select
+                  value={form.propertyId}
+                  onValueChange={v => setForm(f => ({ ...f, propertyId: v }))}
+                >
+                  <SelectTrigger className="h-8 text-xs mt-0">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <MapPin className="h-3 w-3 shrink-0 text-primary" />
+                      <SelectValue placeholder="Select service address…" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {selectedProperties.map(p => (
+                      <SelectItem key={p.id} value={p.id} className="text-xs">
+                        {p.label ? `${p.label} — ` : ''}{p.address}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {selectedProperties.length === 1 && selectedProperty && (
               <div className="mt-1.5 flex items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
                 <MapPin className="h-3 w-3 shrink-0 text-primary" />
-                <span className="truncate">{primaryAddress}</span>
+                <span className="truncate">{selectedProperty.address}</span>
               </div>
             )}
             {/* ← NEW: inline validation error */}

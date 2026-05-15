@@ -320,6 +320,7 @@ export interface Lead {
   photoStacks: LeadPhotoStack[];
   campaignId: string | null;
   sourceLocked: boolean;
+  propertyId: string | null;
 }
 
 export interface LeadPhotoStack {
@@ -505,6 +506,7 @@ export function rowToLead(r: any): Lead {
     photoStacks: Array.isArray(r.photo_stacks) ? r.photo_stacks : [],
     campaignId: r.campaign_id ?? null,
     sourceLocked: r.source_locked ?? false,
+    propertyId: r.property_id ?? null,
   };
 }
 

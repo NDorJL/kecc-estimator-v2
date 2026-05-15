@@ -142,6 +142,7 @@ export const handler: Handler = async (event) => {
         .from('leads')
         .insert({
           contact_id: body.contactId ?? null,
+          property_id: body.propertyId ?? null,
           stage: body.stage ?? 'new',
           source: resolvedSource,
           service_interest: body.serviceInterest ?? null,
@@ -180,6 +181,7 @@ export const handler: Handler = async (event) => {
       if (body.serviceInterest !== undefined)  updates.service_interest = body.serviceInterest
       if (body.quoteId !== undefined)          updates.quote_id = body.quoteId
       if (body.contactId !== undefined)        updates.contact_id = body.contactId
+      if (body.propertyId !== undefined)       updates.property_id = body.propertyId
       if (body.photoStacks !== undefined)      updates.photo_stacks = body.photoStacks
       // Stamp contacted_at whenever a lead is manually moved to 'contacted'
       if (body.stage === 'contacted')         updates.contacted_at = new Date().toISOString()
