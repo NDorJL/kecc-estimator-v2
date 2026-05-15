@@ -608,6 +608,7 @@ function NewChannelSheet({ open, onClose }: { open: boolean; onClose: () => void
     { value: 'social',      label: '📱 Social Media', desc: 'Organic social, social media management' },
     { value: 'referral',    label: '🤝 Referral',     desc: 'Word of mouth, partner programs' },
     { value: 'sponsorship', label: '🎪 Sponsorship',  desc: 'Events, partnerships, community sponsorships' },
+    { value: 'phone',       label: '📞 Phone / LSA',  desc: 'Pay-per-lead channels like Google LSA, inbound calls' },
     { value: 'other',       label: '⋯ Other',         desc: 'Anything not listed above' },
   ]
 
@@ -676,6 +677,7 @@ const TYPE_BADGE_OUTER: Record<string, string> = {
   social:      'bg-purple-500/10 text-purple-600 border-purple-500/20',
   referral:    'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
   sponsorship: 'bg-rose-500/10 text-rose-600 border-rose-500/20',
+  phone:       'bg-sky-500/10 text-sky-600 border-sky-500/20',
   other:       'bg-muted text-muted-foreground border-border',
 }
 
@@ -2197,6 +2199,7 @@ export default function Marketing() {
     social:      'bg-purple-500/10 text-purple-600 border-purple-500/20',
     referral:    'bg-emerald-500/10 text-emerald-600 border-emerald-500/20',
     sponsorship: 'bg-rose-500/10 text-rose-600 border-rose-500/20',
+    phone:       'bg-sky-500/10 text-sky-600 border-sky-500/20',
     other:       'bg-muted text-muted-foreground border-border',
   }
 
