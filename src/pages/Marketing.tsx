@@ -1639,9 +1639,12 @@ export default function Marketing() {
         // If cancelled, revenue stops accumulating at cancelledAt
         const endDate = sub.cancelledAt ? new Date(sub.cancelledAt) : new Date()
 
-        const monthsActive = Math.max(1, Math.round(
-          (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24 * 30.44)
-        ))
+        // Calendar-month counting: each new billing month (1st of month after start)
+        // adds 1 so the revenue "locks in" at the start of each month, not mid-month.
+        const monthsActive = Math.max(1,
+          (endDate.getFullYear() - startDate.getFullYear()) * 12 +
+          (endDate.getMonth() - startDate.getMonth()) + 1
+        )
 
         const isCancelled = sub.status.toLowerCase() === 'cancelled'
         return {
@@ -1652,12 +1655,14 @@ export default function Marketing() {
         }
       }
 
-      // No linked subscription — estimate from quote
+      // No linked subscription — estimate from quote using calendar months
       const monthlyAmount = q?.total ?? lead.estimatedValue ?? 0
-      const since = q?.signedAt ?? lead.createdAt
-      const monthsActive = Math.max(1, Math.round(
-        (Date.now() - new Date(since).getTime()) / (1000 * 60 * 60 * 24 * 30.44)
-      ))
+      const since = new Date(q?.signedAt ?? lead.createdAt)
+      const now   = new Date()
+      const monthsActive = Math.max(1,
+        (now.getFullYear() - since.getFullYear()) * 12 +
+        (now.getMonth() - since.getMonth()) + 1
+      )
       return { amount: monthlyAmount * monthsActive, isEstimated: true }
     }
 

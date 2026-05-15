@@ -857,6 +857,29 @@ function LeadDetailSheet({
   const [estimatedValue, setEstimatedValue] = useState(lead?.estimatedValue?.toString() ?? '')
   const [contractorCost, setContractorCost] = useState(lead?.contractorCost?.toString() ?? '')
   const [showSchedule, setShowSchedule] = useState(false)
+  const [confirmCancelSub, setConfirmCancelSub] = useState(false)
+
+  // ── Subscription linked to this recurring lead ────────────────────────────
+  const { data: linkedSubs = [] } = useQuery<{ id: string; status: string; inSeasonMonthlyTotal: number; startDate: string; cancelledAt: string | null }[]>({
+    queryKey: ['/subscriptions', lead?.quoteId],
+    queryFn: () => apiGet('/subscriptions'),
+    enabled: open && lead?.stage === 'recurring' && !!lead?.quoteId,
+    select: (subs: { id: string; status: string; inSeasonMonthlyTotal: number; startDate: string; cancelledAt: string | null; quoteId: string | null }[]) =>
+      subs.filter(s => s.quoteId === lead?.quoteId),
+  })
+  const linkedSub = linkedSubs[0] ?? null
+
+  const cancelSubMutation = useMutation({
+    mutationFn: () => apiRequest('PATCH', `/subscriptions/${linkedSub!.id}`, { status: 'CANCELLED' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/subscriptions'] })
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      toast({ title: 'Subscription cancelled', description: 'Revenue is now frozen on the marketing page.' })
+      setConfirmCancelSub(false)
+    },
+    onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
+  })
+
   const [emailConfirmQuote, setEmailConfirmQuote] = useState<Quote | null>(null)  // ← NEW (FIX 1)
   const [emailSending, setEmailSending] = useState(false)                          // ← NEW (FIX 1)
 
@@ -2057,6 +2080,82 @@ function LeadDetailSheet({
               </div>
             )
           })()}
+
+          {/* ── Recurring subscription status ─────────────────────────────── */}
+          {lead.stage === 'recurring' && (
+            <div className="rounded-xl border border-dashed border-indigo-400/60 bg-indigo-50/30 dark:bg-indigo-950/20 p-3 space-y-2">
+              <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-400 uppercase tracking-wide">
+                Recurring Subscription
+              </p>
+              {linkedSub ? (
+                <>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Monthly rate</span>
+                    <span className="font-semibold">${linkedSub.inSeasonMonthlyTotal.toFixed(2)}/mo</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Started</span>
+                    <span className="font-medium">{linkedSub.startDate}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">Status</span>
+                    <span className={`font-semibold ${linkedSub.status === 'ACTIVE' ? 'text-emerald-600' : 'text-rose-500'}`}>
+                      {linkedSub.status}
+                    </span>
+                  </div>
+                  {linkedSub.cancelledAt && (
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground">Cancelled</span>
+                      <span className="font-medium text-rose-500">
+                        {new Date(linkedSub.cancelledAt).toLocaleDateString()}
+                      </span>
+                    </div>
+                  )}
+                  {linkedSub.status === 'ACTIVE' && (
+                    !confirmCancelSub ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full text-rose-600 border-rose-300 hover:bg-rose-50 mt-1"
+                        onClick={() => setConfirmCancelSub(true)}
+                      >
+                        Cancel Subscription
+                      </Button>
+                    ) : (
+                      <div className="space-y-2 pt-1">
+                        <p className="text-xs text-rose-700 font-medium">
+                          This will freeze revenue on the marketing page. Cannot be undone.
+                        </p>
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" className="flex-1" onClick={() => setConfirmCancelSub(false)}>
+                            Keep Active
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="flex-1 bg-rose-600 hover:bg-rose-700 text-white"
+                            disabled={cancelSubMutation.isPending}
+                            onClick={() => cancelSubMutation.mutate()}
+                          >
+                            {cancelSubMutation.isPending ? 'Cancelling…' : 'Confirm Cancel'}
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  No linked subscription found. Revenue is estimated from the quote total.{' '}
+                  <button
+                    className="text-primary underline-offset-2 hover:underline"
+                    onClick={() => navigate('/subscriptions')}
+                  >
+                    View subscriptions
+                  </button>
+                </p>
+              )}
+            </div>
+          )}
 
           {/* ── Generate QB Invoice (Finished/Unpaid only) ────────────────── */}
           {inFinishedUnpaid && effectiveQuote && (
