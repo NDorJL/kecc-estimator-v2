@@ -20,7 +20,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { apiGet, apiRequest } from '@/lib/queryClient'
-import type { MarketingChannel, MarketingSpend, Campaign, CampaignEvent, Lead, Quote, Job, Contact, ChannelType } from '@/types'
+import type { MarketingChannel, MarketingSpend, Campaign, CampaignEvent, Lead, Quote, Job, Contact, ChannelType, Subscription } from '@/types'
 import {
   TrendingUp, TrendingDown, Minus, DollarSign, Users, Briefcase,
   Target, ChevronUp, ChevronDown, Plus, Pencil, Trash2, Download, Megaphone,
@@ -1513,6 +1513,17 @@ export default function Marketing() {
     queryFn: () => apiGet(`/campaign-events?since=${eventsSince}`),
   })
 
+  const { data: allSubscriptions = [] } = useQuery<Subscription[]>({
+    queryKey: ['/subscriptions'],
+    queryFn: () => apiGet('/subscriptions'),
+  })
+
+  // quote_id → subscription — lets leadRevenue use confirmed amounts + cancellation date
+  const subByQuoteId = useMemo(
+    () => Object.fromEntries(allSubscriptions.filter(s => s.quoteId).map(s => [s.quoteId!, s])),
+    [allSubscriptions],
+  )
+
   const { data: allJobs = [] } = useQuery<Job[]>({
     queryKey: ['/jobs'],
     queryFn: () => apiGet('/jobs'),
@@ -1605,15 +1616,44 @@ export default function Marketing() {
   const prevClosed   = useMemo(() => prevLeads.filter(isClosed),   [prevLeads])
 
   // Returns the revenue figure for one lead.
+  //
   // For one-time leads: quote total (confirmed if a completed job exists, estimated otherwise).
-  // For recurring leads: quote total × months active since the quote was signed (or lead created).
-  //   This approximates accumulated subscription revenue. Always marked estimated (~).
+  //
+  // For recurring leads: monthly rate × months active, using subscription data when available.
+  //   Subscription data (via quoteId link) gives us:
+  //     • Confirmed monthly amount (inSeasonMonthlyTotal) instead of the quote estimate
+  //     • Accurate start date (subscription.startDate)
+  //     • Cancellation awareness: stops accumulating at cancelledAt so ROAS freezes
+  //   Without subscription data: falls back to quote.total × months (estimated, ~).
   function leadRevenue(lead: Lead): { amount: number; isEstimated: boolean } {
     const q = allQuotes.find(q => q.id === lead.quoteId)
-    const monthlyAmount = q?.total ?? lead.estimatedValue ?? 0
 
     if (lead.stage === 'recurring') {
-      // Multiply monthly rate by months the customer has been active
+      const sub = lead.quoteId ? subByQuoteId[lead.quoteId] : undefined
+
+      if (sub) {
+        // Confirmed subscription data available
+        const monthlyRate = sub.inSeasonMonthlyTotal
+        const startDate   = new Date(sub.startDate ?? sub.createdAt)
+
+        // If cancelled, revenue stops accumulating at cancelledAt
+        const endDate = sub.cancelledAt ? new Date(sub.cancelledAt) : new Date()
+
+        const monthsActive = Math.max(1, Math.round(
+          (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24 * 30.44)
+        ))
+
+        const isCancelled = sub.status.toLowerCase() === 'cancelled'
+        return {
+          amount: monthlyRate * monthsActive,
+          // Confirmed if active (we know the real rate + real start date).
+          // Marked estimated only if cancelled without a cancelledAt stamp.
+          isEstimated: isCancelled && !sub.cancelledAt,
+        }
+      }
+
+      // No linked subscription — estimate from quote
+      const monthlyAmount = q?.total ?? lead.estimatedValue ?? 0
       const since = q?.signedAt ?? lead.createdAt
       const monthsActive = Math.max(1, Math.round(
         (Date.now() - new Date(since).getTime()) / (1000 * 60 * 60 * 24 * 30.44)
@@ -1622,6 +1662,7 @@ export default function Marketing() {
     }
 
     // One-time: confirmed if a completed job is linked, estimated otherwise
+    const monthlyAmount = q?.total ?? lead.estimatedValue ?? 0
     const completedJob = lead.quoteId
       ? allJobs.find(j => j.status === 'completed' && j.quoteId === lead.quoteId)
       : undefined

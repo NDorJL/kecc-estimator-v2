@@ -142,6 +142,8 @@ export interface Subscription {
   changeHistory: ChangeHistoryEntry[];
   createdAt: string;
   contactId: string | null;
+  quoteId: string | null;          // links back to the originating quote → lead → campaign
+  cancelledAt: string | null;      // stamped when status changes to cancelled
   agreementId: string | null;
   qbInvoiceId: string | null;
   serviceSchedules: ServiceSchedule[];
@@ -397,6 +399,8 @@ export function rowToSubscription(r: any): Subscription {
     changeHistory: Array.isArray(r.change_history) ? r.change_history : [],
     createdAt: r.created_at,
     contactId: r.contact_id ?? null,
+    quoteId: r.quote_id ?? null,
+    cancelledAt: r.cancelled_at ?? null,
     agreementId: r.agreement_id ?? null,
     qbInvoiceId: r.qb_invoice_id ?? null,
     serviceSchedules: Array.isArray(r.service_schedules) ? r.service_schedules : [],

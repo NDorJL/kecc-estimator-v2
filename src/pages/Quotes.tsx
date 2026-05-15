@@ -522,6 +522,8 @@ export function QuoteDetail({ quote, onBack, onUpdate }: { quote: Quote; onBack:
       services: subServices,
       inSeasonMonthlyTotal: totals.inSeason,
       offSeasonMonthlyTotal: totals.offSeason,
+      quoteId: quote.id,          // links subscription back to the originating quote → lead → campaign
+      contactId: quote.contactId ?? null,
       changeHistory: [{ timestamp: new Date().toISOString(), changedBy: "Owner", summary: "Subscription created from quote " + quote.id.slice(0, 8).toUpperCase() }],
     });
     return res.json();

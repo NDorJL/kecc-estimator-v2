@@ -56,6 +56,7 @@ export const handler: Handler = async (event) => {
         quickbooks_reference: body.quickbooksReference ?? null,
         change_history: body.changeHistory ?? [],
         contact_id: body.contactId ?? null,
+        quote_id: body.quoteId ?? null,
         agreement_id: body.agreementId ?? null,
         qb_invoice_id: body.qbInvoiceId ?? null,
         service_schedules: body.serviceSchedules ?? [],
@@ -90,9 +91,13 @@ export const handler: Handler = async (event) => {
       if (body.quickbooksReference !== undefined) update.quickbooks_reference = body.quickbooksReference
       if (body.changeHistory !== undefined)       update.change_history = body.changeHistory
       if (body.contactId !== undefined)           update.contact_id = body.contactId
+      if (body.quoteId !== undefined)             update.quote_id = body.quoteId
       if (body.agreementId !== undefined)         update.agreement_id = body.agreementId
       if (body.qbInvoiceId !== undefined)         update.qb_invoice_id = body.qbInvoiceId
       if (body.serviceSchedules !== undefined)    update.service_schedules = body.serviceSchedules
+      // Stamp cancelled_at when status changes to CANCELLED (so revenue stops accumulating)
+      if (body.status === 'CANCELLED' && !body.cancelledAt) update.cancelled_at = new Date().toISOString()
+      if (body.cancelledAt !== undefined)         update.cancelled_at = body.cancelledAt
       const { data, error } = await supabase.from('subscriptions').update(update).eq('id', id).select().single()
       if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Subscription not found' }) }
       // If subscription was just activated (e.g. un-paused or re-activated), move lead to Recurring
