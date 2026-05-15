@@ -460,24 +460,22 @@ function SpendEntrySheet({
   const { toast } = useToast()
   const tm = thisMonthStr()
 
-  const [channelId,    setChannelId]    = useState(editEntry?.channelId ?? initialChannelId ?? '')
-  const [month,        setMonth]        = useState(editEntry?.month ?? initialMonth ?? tm)
-  const [amount,       setAmount]       = useState(editEntry ? String(editEntry.amount) : '')
-  const [notes,        setNotes]        = useState(editEntry?.notes ?? '')
-  const [isRecurring,  setIsRecurring]  = useState(editEntry?.isRecurring ?? false)
+  const [channelId,    setChannelId]    = useState('')
+  const [month,        setMonth]        = useState(tm)
+  const [amount,       setAmount]       = useState('')
+  const [notes,        setNotes]        = useState('')
+  const [isRecurring,  setIsRecurring]  = useState(false)
 
-  // Reset when sheet opens
-  const handleOpen = (o: boolean) => {
-    if (o) {
-      setChannelId(editEntry?.channelId ?? initialChannelId ?? '')
-      setMonth(editEntry?.month ?? initialMonth ?? tm)
-      setAmount(editEntry ? String(editEntry.amount) : '')
-      setNotes(editEntry?.notes ?? '')
-      setIsRecurring(editEntry?.isRecurring ?? false)
-    } else {
-      onClose()
-    }
-  }
+  // Sync form when sheet opens — useEffect instead of onOpenChange because
+  // Radix only fires onOpenChange for user-triggered events, not programmatic open.
+  useEffect(() => {
+    if (!open) return
+    setChannelId(editEntry?.channelId ?? initialChannelId ?? '')
+    setMonth(editEntry?.month ?? initialMonth ?? tm)
+    setAmount(editEntry ? String(editEntry.amount) : '')
+    setNotes(editEntry?.notes ?? '')
+    setIsRecurring(editEntry?.isRecurring ?? false)
+  }, [open, editEntry, initialChannelId, initialMonth])
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -498,7 +496,7 @@ function SpendEntrySheet({
   const isValid = channelId && month && amount && parseFloat(amount) >= 0
 
   return (
-    <Sheet open={open} onOpenChange={handleOpen}>
+    <Sheet open={open} onOpenChange={o => { if (!o) onClose() }}>
       <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[85dvh] overflow-y-auto">
         <SheetHeader className="mb-4">
           <SheetTitle>{editEntry ? 'Edit Spend Entry' : 'Add Spend Entry'}</SheetTitle>
@@ -589,10 +587,10 @@ function NewChannelSheet({ open, onClose }: { open: boolean; onClose: () => void
   const [name, setName] = useState('')
   const [type, setType] = useState<ChannelType>('digital')
 
-  const handleOpen = (o: boolean) => {
-    if (o) { setName(''); setType('digital') }
-    else onClose()
-  }
+  // Reset when sheet re-opens for a new channel
+  useEffect(() => {
+    if (open) { setName(''); setType('digital') }
+  }, [open])
 
   const saveMutation = useMutation({
     mutationFn: () => apiRequest('POST', '/marketing-channels', { name: name.trim(), type }),
@@ -614,7 +612,7 @@ function NewChannelSheet({ open, onClose }: { open: boolean; onClose: () => void
   ]
 
   return (
-    <Sheet open={open} onOpenChange={handleOpen}>
+    <Sheet open={open} onOpenChange={o => { if (!o) onClose() }}>
       <SheetContent side="bottom" className="rounded-t-2xl pb-safe max-h-[85dvh] overflow-y-auto">
         <SheetHeader className="mb-4">
           <SheetTitle>New Channel</SheetTitle>

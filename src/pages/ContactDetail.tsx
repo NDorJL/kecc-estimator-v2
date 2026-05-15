@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useParams } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
@@ -43,6 +43,22 @@ function InfoTab({ contact }: { contact: Contact }) {
   })
   const [showNewProperty, setShowNewProperty] = useState(false)
   const queryClient = useQueryClient()
+
+  // Re-sync form if contact data changes after a save (cache revalidation)
+  // so a second Edit session shows the freshly-saved values, not the pre-save state.
+  useEffect(() => {
+    if (!editing) {
+      setForm({
+        name: contact.name,
+        phone: contact.phone ?? '',
+        email: contact.email ?? '',
+        type: contact.type,
+        businessName: contact.businessName ?? '',
+        source: contact.source ?? '',
+        notes: contact.notes ?? '',
+      })
+    }
+  }, [contact, editing])
   const { toast } = useToast()
 
   const { data: properties, isLoading: propsLoading } = useQuery<Property[]>({
