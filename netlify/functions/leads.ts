@@ -182,6 +182,8 @@ export const handler: Handler = async (event) => {
       if (body.quoteId !== undefined)          updates.quote_id = body.quoteId
       if (body.contactId !== undefined)        updates.contact_id = body.contactId
       if (body.propertyId !== undefined)       updates.property_id = body.propertyId
+      if (body.source !== undefined)           updates.source = body.source
+      if (body.campaignId !== undefined)       updates.campaign_id = body.campaignId
       if (body.photoStacks !== undefined)      updates.photo_stacks = body.photoStacks
       // Stamp contacted_at whenever a lead is manually moved to 'contacted'
       if (body.stage === 'contacted')         updates.contacted_at = new Date().toISOString()

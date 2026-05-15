@@ -856,6 +856,7 @@ function LeadDetailSheet({
   const [serviceInterest, setServiceInterest] = useState(lead?.serviceInterest ?? '')
   const [estimatedValue, setEstimatedValue] = useState(lead?.estimatedValue?.toString() ?? '')
   const [contractorCost, setContractorCost] = useState(lead?.contractorCost?.toString() ?? '')
+  const [leadSource, setLeadSource] = useState(lead?.source ?? '')
   const [showSchedule, setShowSchedule] = useState(false)
   const [confirmCancelSub, setConfirmCancelSub] = useState(false)
 
@@ -1029,6 +1030,7 @@ function LeadDetailSheet({
     setServiceInterest(lead?.serviceInterest ?? '')
     setEstimatedValue(lead?.estimatedValue?.toString() ?? '')
     setContractorCost(lead?.contractorCost?.toString() ?? '')
+    setLeadSource(lead?.source ?? '')
     setEditingQuote(false)
     setLocalQuote(null)
     setShowMarkLost(false)
@@ -1638,11 +1640,10 @@ function LeadDetailSheet({
           </div>
 
           {/* ── Source / attribution status ───────────────────────────────── */}
-          {(lead.campaignId || lead.source) && (
+          <div className="space-y-1.5">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-muted-foreground">Source:</span>
               {lead.sourceLocked ? (
-                // Auto-created from a tracked event — source is fixed, show as locked badge
                 <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 text-[11px] text-amber-700 dark:text-amber-400 font-medium">
                   🔒 {lead.source?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) ?? 'Auto-tracked'}
                 </span>
@@ -1652,14 +1653,35 @@ function LeadDetailSheet({
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 rounded-full bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 text-[11px] text-blue-700 dark:text-blue-400 font-medium">
-                  <User className="h-3 w-3" /> {lead.source?.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) ?? 'Manual source'}
+                  <User className="h-3 w-3" /> {leadSource ? leadSource.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'No source set'}
                 </span>
               )}
-              {lead.sourceLocked && (
-                <span className="text-[11px] text-muted-foreground">— source is fixed (auto-created from tracked event)</span>
-              )}
             </div>
-          )}
+            {/* Source selector — editable when not auto-locked */}
+            {!lead.sourceLocked && (
+              <Select value={leadSource} onValueChange={setLeadSource}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="Change source…" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="referral">Word of Mouth / Referral</SelectItem>
+                  <SelectItem value="website">Website / Online Search</SelectItem>
+                  <SelectItem value="google_ads">Google Ads</SelectItem>
+                  <SelectItem value="google_lsa">Google LSA</SelectItem>
+                  <SelectItem value="meta_ads">Meta Ads (Facebook / Instagram)</SelectItem>
+                  <SelectItem value="social_organic">Social Media (Organic)</SelectItem>
+                  <SelectItem value="mailers">Mailers / Direct Mail</SelectItem>
+                  <SelectItem value="yard_signs">Yard Signs</SelectItem>
+                  <SelectItem value="door_hangers">Door Hangers</SelectItem>
+                  <SelectItem value="nextdoor">Nextdoor</SelectItem>
+                  <SelectItem value="thumbtack">Thumbtack</SelectItem>
+                  <SelectItem value="sponsorship">Sponsorship / Event</SelectItem>
+                  <SelectItem value="cold_call">Cold Call / Outreach</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
 
           {/* ── Stage ─────────────────────────────────────────────────────── */}
           <div>
@@ -2415,6 +2437,7 @@ function LeadDetailSheet({
                 serviceInterest: serviceInterest.trim() || null,
                 estimatedValue: estimatedValue ? parseFloat(estimatedValue) : null,
                 contractorCost: contractorCost ? parseFloat(contractorCost) : null,
+                source: leadSource || null,
               })}
             >
               {updateMutation.isPending ? 'Saving…' : 'Save Changes'}
