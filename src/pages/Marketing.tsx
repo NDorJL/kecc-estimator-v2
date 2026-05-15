@@ -1620,55 +1620,51 @@ export default function Marketing() {
   const periodClosed = useMemo(() => periodLeads.filter(isClosed), [periodLeads])
   const prevClosed   = useMemo(() => prevLeads.filter(isClosed),   [prevLeads])
 
-  // Returns the revenue figure for one lead.
+  // ── Period-aware revenue helper ──────────────────────────────────────────
   //
-  // For one-time leads: quote total (confirmed if a completed job exists, estimated otherwise).
+  // Single-month periods (range.start === range.end, e.g. "This Month" / "Last Month"):
+  //   Each period is an isolated column — recurring leads contribute exactly
+  //   1 month so April and May can be compared as standalone pillars.
   //
-  // For recurring leads: monthly rate × months active, using subscription data when available.
-  //   Subscription data (via quoteId link) gives us:
-  //     • Confirmed monthly amount (inSeasonMonthlyTotal) instead of the quote estimate
-  //     • Accurate start date (subscription.startDate)
-  //     • Cancellation awareness: stops accumulating at cancelledAt so ROAS freezes
-  //   Without subscription data: falls back to quote.total × months (estimated, ~).
+  // Multi-month periods (3M, 6M, YTD, 1Y):
+  //   Recurring revenue accumulates across the full period window, capped
+  //   at the subscription's start and cancellation dates.
+
+  function countActiveMonthsInPeriod(
+    subStartYM: string,        // 'YYYY-MM' — first billing month
+    cancelledYM: string | null, // 'YYYY-MM' — last billing month (inclusive), null = still active
+    periodStart: string,        // 'YYYY-MM'
+    periodEnd:   string,        // 'YYYY-MM'
+  ): number {
+    const activeFrom = subStartYM  > periodStart ? subStartYM  : periodStart
+    const activeTo   = cancelledYM && cancelledYM < periodEnd ? cancelledYM : periodEnd
+    if (activeFrom > activeTo) return 0
+    const [fy, fm] = activeFrom.split('-').map(Number)
+    const [ty, tm] = activeTo.split('-').map(Number)
+    return Math.max(1, (ty - fy) * 12 + (tm - fm) + 1)
+  }
+
   function leadRevenue(lead: Lead): { amount: number; isEstimated: boolean } {
     const q = allQuotes.find(q => q.id === lead.quoteId)
+    const isSingleMonth = range.start === range.end
 
     if (lead.stage === 'recurring') {
       const sub = lead.quoteId ? subByQuoteId[lead.quoteId] : undefined
+      const monthlyRate  = sub?.inSeasonMonthlyTotal ?? q?.total ?? lead.estimatedValue ?? 0
+      const isCancelled  = sub?.status?.toLowerCase() === 'cancelled'
 
-      if (sub) {
-        // Confirmed subscription data available
-        const monthlyRate = sub.inSeasonMonthlyTotal
-        const startDate   = new Date(sub.startDate ?? sub.createdAt)
+      // Determine the subscription's first billing month
+      const subStartYM = (sub?.startDate ?? q?.signedAt ?? lead.createdAt).slice(0, 7)
+      const cancelledYM = sub?.cancelledAt ? sub.cancelledAt.slice(0, 7) : null
 
-        // If cancelled, revenue stops accumulating at cancelledAt
-        const endDate = sub.cancelledAt ? new Date(sub.cancelledAt) : new Date()
+      const months = isSingleMonth
+        ? (subStartYM <= range.start && (!cancelledYM || cancelledYM >= range.start) ? 1 : 0)
+        : countActiveMonthsInPeriod(subStartYM, cancelledYM, range.start, range.end)
 
-        // Calendar-month counting: each new billing month (1st of month after start)
-        // adds 1 so the revenue "locks in" at the start of each month, not mid-month.
-        const monthsActive = Math.max(1,
-          (endDate.getFullYear() - startDate.getFullYear()) * 12 +
-          (endDate.getMonth() - startDate.getMonth()) + 1
-        )
-
-        const isCancelled = sub.status.toLowerCase() === 'cancelled'
-        return {
-          amount: monthlyRate * monthsActive,
-          // Confirmed if active (we know the real rate + real start date).
-          // Marked estimated only if cancelled without a cancelledAt stamp.
-          isEstimated: isCancelled && !sub.cancelledAt,
-        }
+      return {
+        amount: monthlyRate * months,
+        isEstimated: !sub || (isCancelled && !sub.cancelledAt),
       }
-
-      // No linked subscription — estimate from quote using calendar months
-      const monthlyAmount = q?.total ?? lead.estimatedValue ?? 0
-      const since = new Date(q?.signedAt ?? lead.createdAt)
-      const now   = new Date()
-      const monthsActive = Math.max(1,
-        (now.getFullYear() - since.getFullYear()) * 12 +
-        (now.getMonth() - since.getMonth()) + 1
-      )
-      return { amount: monthlyAmount * monthsActive, isEstimated: true }
     }
 
     // One-time: confirmed if a completed job is linked, estimated otherwise
