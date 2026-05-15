@@ -1410,6 +1410,100 @@ function SortTh({
   )
 }
 
+// ── PDF report generator ──────────────────────────────────────────────────────
+// Opens a print-ready HTML page in a new window and auto-triggers the browser's
+// print dialog (Save as PDF works on all platforms via the print dialog).
+
+function generateReport(ctx: {
+  range: DateRange; selectedMonth: string; rangeMode: string
+  totalSpend: number; totalLeads: number; closedCount: number
+  revenue: number; revenueIsEst: boolean
+  cpl: number | null; cpa: number | null; roi: number | null
+  channels: MarketingChannel[]
+  channelRows: { ch: MarketingChannel; spend: number; leadsCount: number; closedJobs: number; chRevenue: number; chRoi: number | null }[]
+  allCampaigns: Campaign[]
+  campaignMetrics: (cam: Campaign) => { leads: number; closed: number; spend: number; revenue: number; roi: number | null }
+}) {
+  const { range, totalSpend, totalLeads, closedCount, revenue, revenueIsEst, cpl, cpa, roi, channelRows, allCampaigns, campaignMetrics } = ctx
+  const $ = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const period = range.start === range.end ? monthLabel(range.start) : `${monthLabel(range.start)} – ${monthLabel(range.end)}`
+  const generated = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+
+  const channelTable = channelRows.map(r => `
+    <tr>
+      <td>${r.ch.name}</td>
+      <td>${r.spend > 0 ? $(r.spend) : '—'}</td>
+      <td>${r.leadsCount || '—'}</td>
+      <td>${r.closedJobs || '—'}</td>
+      <td>${r.chRevenue > 0 ? (revenueIsEst ? '~' : '') + $(r.chRevenue) : '—'}</td>
+      <td>${r.chRoi !== null ? (r.chRoi >= 0 ? '+' : '') + r.chRoi.toFixed(1) + '%' : r.spend === 0 ? '∞' : '—'}</td>
+    </tr>`).join('')
+
+  const activeCampaigns = allCampaigns.filter(c => c.status !== 'ended')
+  const campaignTable = activeCampaigns.map(cam => {
+    const m = campaignMetrics(cam)
+    const chName = ctx.channels.find(ch => ch.id === cam.channelId)?.name ?? '—'
+    return `<tr>
+      <td>${cam.name}</td>
+      <td>${chName}</td>
+      <td>${m.spend > 0 ? $(m.spend) : '—'}</td>
+      <td>${m.leads || '—'}</td>
+      <td>${m.closed || '—'}</td>
+      <td>${m.revenue > 0 ? $(m.revenue) : '—'}</td>
+      <td>${m.roi !== null ? (m.roi >= 0 ? '+' : '') + m.roi.toFixed(1) + '%' : m.spend === 0 ? '∞' : '—'}</td>
+    </tr>`}).join('')
+
+  const html = `<!DOCTYPE html><html><head><title>KECC Marketing Report — ${period}</title>
+<style>
+  body { font-family: system-ui, sans-serif; font-size: 12px; color: #111; max-width: 900px; margin: 0 auto; padding: 32px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .meta { color: #666; font-size: 11px; margin-bottom: 28px; }
+  h2 { font-size: 14px; font-weight: 700; margin: 24px 0 10px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; }
+  .kpi { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 8px; }
+  .kpi-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }
+  .kpi-label { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; }
+  .kpi-value { font-size: 20px; font-weight: 700; margin-top: 2px; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th { text-align: left; padding: 6px 8px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; font-weight: 600; }
+  td { padding: 6px 8px; border-bottom: 1px solid #f3f4f6; }
+  tr:last-child td { border-bottom: none; }
+  .footer { margin-top: 32px; font-size: 10px; color: #9ca3af; }
+  @media print { body { padding: 16px; } }
+</style></head><body>
+<h1>Knox Exterior Care Co. — Marketing Report</h1>
+<p class="meta">Period: <strong>${period}</strong> &nbsp;·&nbsp; Generated ${generated}</p>
+
+<h2>Performance Summary</h2>
+<div class="kpi">
+  <div class="kpi-card"><div class="kpi-label">Total Spend</div><div class="kpi-value">${$(totalSpend)}</div></div>
+  <div class="kpi-card"><div class="kpi-label">Total Leads</div><div class="kpi-value">${totalLeads}</div></div>
+  <div class="kpi-card"><div class="kpi-label">Jobs Closed</div><div class="kpi-value">${closedCount}</div></div>
+  <div class="kpi-card"><div class="kpi-label">Revenue${revenueIsEst ? ' (est.)' : ''}</div><div class="kpi-value">${$(revenue)}</div></div>
+  <div class="kpi-card"><div class="kpi-label">Cost Per Lead</div><div class="kpi-value">${cpl !== null ? $(cpl) : '—'}</div></div>
+  <div class="kpi-card"><div class="kpi-label">Cost Per Acquisition</div><div class="kpi-value">${cpa !== null ? $(cpa) : '—'}</div></div>
+  <div class="kpi-card"><div class="kpi-label">Blended ROI</div><div class="kpi-value">${roi !== null ? (roi >= 0 ? '+' : '') + roi.toFixed(1) + '%' : totalSpend === 0 ? '∞' : '—'}</div></div>
+</div>
+
+<h2>Channel Performance</h2>
+<table>
+  <thead><tr><th>Channel</th><th>Spend</th><th>Leads</th><th>Jobs</th><th>Revenue</th><th>ROI</th></tr></thead>
+  <tbody>${channelTable || '<tr><td colspan="6">No channel data for this period</td></tr>'}</tbody>
+</table>
+
+<h2>Campaigns</h2>
+<table>
+  <thead><tr><th>Campaign</th><th>Channel</th><th>Spend</th><th>Leads</th><th>Jobs</th><th>Revenue</th><th>ROI</th></tr></thead>
+  <tbody>${campaignTable || '<tr><td colspan="7">No active campaigns</td></tr>'}</tbody>
+</table>
+
+<p class="footer">Knox Exterior Care Co. &nbsp;·&nbsp; KECC CRM &nbsp;·&nbsp; Confidential</p>
+<script>window.onload = function(){ window.print(); }</script>
+</body></html>`
+
+  const win = window.open('', '_blank')
+  if (win) { win.document.write(html); win.document.close() }
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function Marketing() {
@@ -1637,10 +1731,63 @@ export default function Marketing() {
 
   const periodEvents = useMemo(() => allEvents.filter(e => inRange(e.createdAt, range)), [allEvents, range])
 
-  // "Closed" = converted to a paying customer.
-  // recurring is included — these are active paying customers, not open pipeline.
+  // "Closed" for REVENUE calculation — a lead that converted to a paying customer.
   const isClosed = (l: Lead) =>
     l.stage === 'finished_paid' || l.stage === 'finished_unpaid' || l.stage === 'recurring'
+
+  // ── Job-visit counting (calendar-based) ──────────────────────────────────
+  // "Closed Jobs" on the marketing page counts actual service visits that
+  // occurred in the period, not just the number of leads that converted.
+  // A recurring customer with 3 visits/month contributes 3, not 1.
+  //
+  // A job counts as "done" when:
+  //   - status = 'completed', OR
+  //   - scheduled_date has passed and status is not 'cancelled'
+  //     (subscription visits are rarely manually marked complete)
+
+  const todayStr = new Date().toISOString().slice(0, 10)
+
+  function isJobDone(job: Job): boolean {
+    if (!job.scheduledDate || job.status === 'cancelled') return false
+    return job.status === 'completed' || job.scheduledDate <= todayStr
+  }
+
+  function jobInRange(job: Job, r: DateRange): boolean {
+    if (!job.scheduledDate) return false
+    const jm = job.scheduledDate.slice(0, 7)
+    return jm >= r.start && jm <= r.end
+  }
+
+  // Lookup: quoteId → campaignId (to attribute jobs to campaigns)
+  const quoteIdToCampaignId = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const l of allLeads) {
+      if (l.quoteId && l.campaignId) m[l.quoteId] = l.campaignId
+    }
+    return m
+  }, [allLeads])
+
+  // Lookup: quoteId → channelId (for unattributed jobs on referral/phone channels)
+  const quoteIdToChannelId = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const l of allLeads) {
+      if (l.quoteId) {
+        const chId = getLeadChannelId(l)
+        if (chId) m[l.quoteId] = chId
+      }
+    }
+    return m
+  }, [allLeads])
+
+  // Jobs done in the current period (for KPI bar)
+  const periodDoneJobs = useMemo(
+    () => allJobs.filter(j => isJobDone(j) && jobInRange(j, range)),
+    [allJobs, range, todayStr],
+  )
+  const prevDoneJobs = useMemo(
+    () => prevRange ? allJobs.filter(j => isJobDone(j) && jobInRange(j, prevRange)) : [],
+    [allJobs, prevRange, todayStr],
+  )
 
   const periodClosed = useMemo(() => periodLeads.filter(isClosed), [periodLeads])
   const prevClosed   = useMemo(() => prevLeads.filter(isClosed),   [prevLeads])
@@ -1728,8 +1875,9 @@ export default function Marketing() {
   const totalLeads      = periodLeads.length
   const prevTotalLeads  = prevRange ? prevLeads.length : null
 
-  const closedCount     = periodClosed.length
-  const prevClosedCount = prevRange ? prevClosed.length : null
+  // Closed Jobs KPI = actual service visits from calendar, not lead count
+  const closedCount     = periodDoneJobs.length
+  const prevClosedCount = prevRange ? prevDoneJobs.length : null
 
   const { total: revenue, hasEstimated: revenueIsEst } =
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1786,14 +1934,20 @@ export default function Marketing() {
       // Conversion rate: leads / views %
       const convRate = views > 0 ? (leadsCount / views) * 100 : null
 
-      // Closed jobs
+      // Closed jobs = actual calendar visits done in the period for this channel
       const closedLeads = leads.filter(isClosed)
-      const closedJobs = closedLeads.length
+      const closedJobs = periodDoneJobs.filter(j =>
+        j.quoteId
+          ? (quoteIdToCampaignId[j.quoteId]
+              ? campaignChannelMap[quoteIdToCampaignId[j.quoteId]] === ch.id
+              : quoteIdToChannelId[j.quoteId] === ch.id)
+          : false
+      ).length
 
-      // Close rate: closed / leads %
+      // Close rate: closed visits / leads
       const closeRate = leadsCount > 0 ? (closedJobs / leadsCount) * 100 : null
 
-      // Revenue — job-backed (real) or quote-estimated
+      // Revenue — lead-based (monthly billing, not per visit)
       const { total: chRevenue, hasEstimated: chRevenueEst } = revenueFor(closedLeads)
 
       // Cost metrics
@@ -1976,19 +2130,30 @@ export default function Marketing() {
 
     const leads = campLeads.length
     const closedLeads = campLeads.filter(isClosed)
-    const closed = closedLeads.length
 
     // Spend = channel spend during campaign's date range, with current-month pro-ration.
-    // Fall back to createdAt month when no explicit dates are set so campaigns
-    // without dates still show spend instead of always showing $0.
     let spend = 0
+    const startYM = cam.startDate ? cam.startDate.slice(0, 7) : cam.createdAt.slice(0, 7)
+    const endYM   = cam.endDate   ? cam.endDate.slice(0, 7)   : thisMonthStr()
     if (cam.channelId) {
-      const startYM = cam.startDate ? cam.startDate.slice(0, 7) : cam.createdAt.slice(0, 7)
-      const endYM   = cam.endDate   ? cam.endDate.slice(0, 7)   : thisMonthStr()
       spend = allSpend
         .filter(s => s.channelId === cam.channelId && s.month >= startYM && s.month <= endYM)
         .reduce((sum, s) => sum + effectiveSpend(s), 0)
     }
+
+    // Closed = actual calendar job visits in the campaign date range
+    // A recurring customer with 3 visits/month contributes 3, not 1.
+    const campRange: DateRange = { start: startYM, end: endYM }
+    const closed = allJobs.filter(j => {
+      if (!isJobDone(j) || !j.scheduledDate || !j.quoteId) return false
+      if (!jobInRange(j, campRange)) return false
+      // Attribute via quoteId → campaignId
+      if (quoteIdToCampaignId[j.quoteId] === cam.id) return true
+      // For phone/referral campaigns: attribute via quoteId → channelId
+      if ((cam.campaignType === 'phone' || cam.campaignType === 'referral') &&
+          quoteIdToChannelId[j.quoteId] === cam.channelId) return true
+      return false
+    }).length
 
     const { total: revenue, hasEstimated: revenueIsEst } = revenueFor(closedLeads)
     const cpl = leads  > 0 && spend > 0 ? spend / leads  : null
@@ -2038,7 +2203,7 @@ export default function Marketing() {
     const quoted = periodLeads.filter(l =>
       l.quoteId && allQuotes.some(q => q.id === l.quoteId && (q.status === 'sent' || q.status === 'accepted'))
     ).length
-    const closed = periodClosed.length
+    const closed = periodDoneJobs.length  // actual calendar visits, not lead count
 
     const counts  = [views, leads, quoted, closed]
     const maxCount = Math.max(...counts, 1)
@@ -2237,6 +2402,18 @@ export default function Marketing() {
           <Megaphone className="h-5 w-5 text-primary" />
           <h2 className="text-lg font-bold">Marketing</h2>
         </div>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs gap-1 px-2 text-muted-foreground"
+          onClick={() => generateReport({
+            range, selectedMonth, rangeMode,
+            totalSpend, totalLeads, closedCount, revenue, revenueIsEst, cpl, cpa, roi,
+            channels, channelRows: sortedChannelRows, allCampaigns, campaignMetrics,
+          })}
+        >
+          <Download className="h-3.5 w-3.5" /> Export PDF
+        </Button>
         <Button
           size="sm"
           variant="outline"
