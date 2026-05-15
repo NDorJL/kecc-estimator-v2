@@ -481,14 +481,13 @@ export function KnoxWidget() {
         className={`fixed bottom-6 right-4 sm:right-6 z-50 flex items-center justify-center transition-all duration-200 ${
           open
             ? 'h-11 w-11 rounded-full bg-card/80 border border-border/60 shadow-lg scale-90'
-            : 'hover:scale-110 active:scale-95 drop-shadow-lg'
+            : 'h-[52px] w-[52px] hover:scale-110 active:scale-95 drop-shadow-lg'
         }`}
-        style={open ? {} : { width: 128, height: 128 }}
         aria-label={open ? 'Close Knox' : 'Open Knox AI Assistant'}
       >
         {open
           ? <X className="h-4 w-4 text-muted-foreground" />
-          : <KnoxLogo size={128} />}
+          : <KnoxLogo size={52} />}
       </button>
     </>
   )
