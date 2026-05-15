@@ -34,7 +34,7 @@ export const handler: Handler = async (event) => {
         query = query.or(`name.ilike.%${search}%,company.ilike.%${search}%,specialty.ilike.%${search}%,email.ilike.%${search}%,phone.ilike.%${search}%`)
       }
       const { data, error } = await query
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToContractor)) }
     }
 
@@ -66,7 +66,7 @@ export const handler: Handler = async (event) => {
         })
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 201, headers: CORS, body: JSON.stringify(rowToContractor(data)) }
     }
 

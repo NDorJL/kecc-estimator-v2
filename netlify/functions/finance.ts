@@ -134,7 +134,7 @@ export const handler: Handler = async (event) => {
         if (type) q = q.eq('type', type)
         if (review === 'true') q = q.eq('review', true)
         const { data, error } = await q
-        if (error) throw error
+        if (error) throw new Error(error.message)
         return ok(data)
       } catch (e: unknown) { return err(e instanceof Error ? e.message : String(e)) }
     }
@@ -153,7 +153,7 @@ export const handler: Handler = async (event) => {
         // Support both single object and array
         const rows = Array.isArray(body) ? body : [body]
         const { data, error } = await supabase.from('transactions').insert(rows).select()
-        if (error) throw error
+        if (error) throw new Error(error.message)
         return ok(data, 201)
       } catch (e: unknown) { return err(e instanceof Error ? e.message : String(e)) }
     }
@@ -165,7 +165,7 @@ export const handler: Handler = async (event) => {
         if (!id) return err('id required', 400)
         const body = JSON.parse(event.body ?? '{}')
         const { data, error } = await supabase.from('transactions').update(body).eq('id', id).select().single()
-        if (error) throw error
+        if (error) throw new Error(error.message)
         return ok(data)
       } catch (e: unknown) { return err(e instanceof Error ? e.message : String(e)) }
     }
@@ -176,7 +176,7 @@ export const handler: Handler = async (event) => {
         const id = event.queryStringParameters?.id
         if (!id) return err('id required', 400)
         const { error } = await supabase.from('transactions').delete().eq('id', id)
-        if (error) throw error
+        if (error) throw new Error(error.message)
         return ok({ deleted: true })
       } catch (e: unknown) { return err(e instanceof Error ? e.message : String(e)) }
     }
@@ -191,7 +191,7 @@ export const handler: Handler = async (event) => {
         let q = supabase.from('balance_sheet_snapshots').select('*').order('year').order('month')
         if (year) q = q.eq('year', Number(year))
         const { data, error } = await q
-        if (error) throw error
+        if (error) throw new Error(error.message)
         return ok(data)
       } catch (e: unknown) { return err(e instanceof Error ? e.message : String(e)) }
     }
@@ -201,7 +201,7 @@ export const handler: Handler = async (event) => {
       try {
         const body = JSON.parse(event.body ?? '{}')
         const { data, error } = await supabase.from('balance_sheet_snapshots').upsert(body, { onConflict: 'month,year' }).select().single()
-        if (error) throw error
+        if (error) throw new Error(error.message)
         return ok(data, 201)
       } catch (e: unknown) { return err(e instanceof Error ? e.message : String(e)) }
     }

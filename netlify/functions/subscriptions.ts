@@ -27,7 +27,7 @@ export const handler: Handler = async (event) => {
     // LIST
     if (method === 'GET' && !id) {
       const { data, error } = await supabase.from('subscriptions').select('*').order('created_at', { ascending: false })
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToSubscription)) }
     }
 
@@ -62,7 +62,7 @@ export const handler: Handler = async (event) => {
         service_schedules: body.serviceSchedules ?? [],
       }
       const { data, error } = await supabase.from('subscriptions').insert(insert).select().single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       // If subscription is created as ACTIVE (e.g. converted from quote), move lead to Recurring
       if (data.status === 'ACTIVE' && data.contact_id) {
         await advanceLeadStage(supabase, {

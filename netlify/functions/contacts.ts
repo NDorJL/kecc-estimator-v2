@@ -41,7 +41,7 @@ export const handler: Handler = async (event) => {
       }
 
       const { data, error } = await query
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToContact)) }
     }
 
@@ -52,7 +52,7 @@ export const handler: Handler = async (event) => {
         .select('*')
         .eq('id', id)
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToContact(data)) }
     }
 
@@ -76,7 +76,7 @@ export const handler: Handler = async (event) => {
         })
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 201, headers: CORS, body: JSON.stringify(rowToContact(data)) }
     }
 
@@ -103,7 +103,7 @@ export const handler: Handler = async (event) => {
         .eq('id', id)
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
 
       // ── Propagate identity changes to all linked records ──────────────────
       // Quotes: customer_name, customer_email, customer_phone, business_name
@@ -149,7 +149,7 @@ export const handler: Handler = async (event) => {
     // DELETE contact
     if (method === 'DELETE' && id) {
       const { error } = await supabase.from('contacts').delete().eq('id', id)
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 204, headers: CORS, body: '' }
     }
 

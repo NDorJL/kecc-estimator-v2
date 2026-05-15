@@ -32,7 +32,7 @@ export const handler: Handler = async (event) => {
         .select('*')
         .eq('contact_id', contactId)
         .order('created_at', { ascending: true })
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToProperty)) }
     }
 
@@ -43,7 +43,7 @@ export const handler: Handler = async (event) => {
         .select('*')
         .eq('id', id)
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToProperty(data)) }
     }
 
@@ -65,7 +65,7 @@ export const handler: Handler = async (event) => {
         })
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 201, headers: CORS, body: JSON.stringify(rowToProperty(data)) }
     }
 
@@ -88,14 +88,14 @@ export const handler: Handler = async (event) => {
         .eq('id', id)
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToProperty(data)) }
     }
 
     // DELETE property
     if (method === 'DELETE' && id) {
       const { error } = await supabase.from('properties').delete().eq('id', id)
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 204, headers: CORS, body: '' }
     }
 

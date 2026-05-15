@@ -30,7 +30,7 @@ export const handler: Handler = async (event) => {
         .eq('contact_id', contactId)
         .order('created_at', { ascending: false })
         .limit(100)
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToActivity)) }
     }
 
@@ -47,7 +47,7 @@ export const handler: Handler = async (event) => {
         })
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 201, headers: CORS, body: JSON.stringify(rowToActivity(data)) }
     }
 

@@ -82,7 +82,7 @@ export const handler: Handler = async (event) => {
       if (!existing) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Settings not found' }) }
 
       const { data, error } = await supabase.from('company_settings').update(update).eq('id', existing.id).select().single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToSettings(data)) }
     }
 
@@ -106,7 +106,7 @@ export const handler: Handler = async (event) => {
       const { data: existing } = await supabase.from('company_settings').select('id').limit(1).single()
       if (!existing) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Settings not found' }) }
       const { data, error } = await supabase.from('company_settings').update({ logo_url: publicUrl }).eq('id', existing.id).select().single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify({ logoUrl: publicUrl, settings: rowToSettings(data) }) }
     }
 

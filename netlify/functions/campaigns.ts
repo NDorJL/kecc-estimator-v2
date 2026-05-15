@@ -37,7 +37,7 @@ export const handler: Handler = async (event) => {
       if (status)    query = query.eq('status', status)
 
       const { data, error } = await query
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToCampaign)) }
     }
 
@@ -48,7 +48,7 @@ export const handler: Handler = async (event) => {
         .select('*')
         .eq('id', id)
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToCampaign(data)) }
     }
 
@@ -76,7 +76,7 @@ export const handler: Handler = async (event) => {
         })
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 201, headers: CORS, body: JSON.stringify(rowToCampaign(data)) }
     }
 
@@ -102,14 +102,14 @@ export const handler: Handler = async (event) => {
         .eq('id', id)
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToCampaign(data)) }
     }
 
     // DELETE campaign
     if (method === 'DELETE' && id) {
       const { error } = await supabase.from('campaigns').delete().eq('id', id)
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 204, headers: CORS, body: '' }
     }
 

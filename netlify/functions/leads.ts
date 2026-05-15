@@ -64,7 +64,7 @@ export const handler: Handler = async (event) => {
       if (contactId) query = query.eq('contact_id', contactId)
 
       const { data, error } = await query
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToLead)) }
     }
 
@@ -75,7 +75,7 @@ export const handler: Handler = async (event) => {
         .select('*')
         .eq('id', id)
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToLead(data)) }
     }
 
@@ -156,7 +156,7 @@ export const handler: Handler = async (event) => {
         })
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
 
       // ── Knox: notify owner of new lead (fire-and-forget) ──────────────────
       ;(async () => {
@@ -192,7 +192,7 @@ export const handler: Handler = async (event) => {
         .eq('id', id)
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
 
       // ── Stamp sent_at on the linked quote when moved to 'quoted' ────────────
       // This starts the 3-day unsigned-quote countdown on the dashboard regardless
@@ -309,7 +309,7 @@ export const handler: Handler = async (event) => {
     // DELETE lead
     if (method === 'DELETE' && id) {
       const { error } = await supabase.from('leads').delete().eq('id', id)
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 204, headers: CORS, body: '' }
     }
 

@@ -85,7 +85,7 @@ export const handler: Handler = async (event) => {
       else query = query.is('trashed_at', null)
       if (leadId) query = query.eq('lead_id', leadId)
       const { data, error } = await query
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToQuote)) }
     }
 
@@ -125,7 +125,7 @@ export const handler: Handler = async (event) => {
         revised_from_id: body.revisedFromId ?? null,
       }
       const { data, error } = await supabase.from('quotes').insert(insert).select().single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       // Auto-place / advance a lead in "Quoted" whenever a quote is created
       await advanceLeadStage(supabase, {
         leadId:    data.lead_id ?? null,

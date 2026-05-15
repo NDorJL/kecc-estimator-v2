@@ -28,7 +28,7 @@ export const handler: Handler = async (event) => {
     // GET all attachments
     if (method === 'GET' && !id) {
       const { data, error } = await supabase.from('quote_attachments').select('*').order('sort_order')
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToAttachment)) }
     }
 
@@ -46,7 +46,7 @@ export const handler: Handler = async (event) => {
       const ext = fileName.split('.').pop() ?? 'pdf'
       const path = `pdfs/${randomUUID()}.${ext}`
       const { data, error } = await supabase.storage.from('attachments').createSignedUploadUrl(path)
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify({ signedUrl: data.signedUrl, path }) }
     }
 
@@ -69,7 +69,7 @@ export const handler: Handler = async (event) => {
         attach_to: attachTo ?? 'quote',
         sort_order: count ?? 0,
       }).select().single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 201, headers: CORS, body: JSON.stringify(rowToAttachment(data)) }
     }
 

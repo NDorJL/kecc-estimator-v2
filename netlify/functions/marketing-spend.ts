@@ -58,7 +58,7 @@ export const handler: Handler = async (event) => {
       if (channelId) query = query.eq('channel_id', channelId)
 
       const { data, error } = await query
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToMarketingSpend)) }
     }
 
@@ -69,7 +69,7 @@ export const handler: Handler = async (event) => {
         .select('*')
         .eq('id', id)
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToMarketingSpend(data)) }
     }
 
@@ -98,7 +98,7 @@ export const handler: Handler = async (event) => {
           .eq('id', existing.id)
           .select()
           .single()
-        if (error) throw error
+        if (error) throw new Error(error.message)
         result = data
       } else {
         const { data, error } = await supabase
@@ -106,7 +106,7 @@ export const handler: Handler = async (event) => {
           .insert({ channel_id: channelId, month, amount: Number(amount ?? 0), notes: notes ?? null, is_recurring: isRecurring ?? false })
           .select()
           .single()
-        if (error) throw error
+        if (error) throw new Error(error.message)
         result = data
       }
 
@@ -129,14 +129,14 @@ export const handler: Handler = async (event) => {
         .eq('id', id)
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToMarketingSpend(data)) }
     }
 
     // ── DELETE spend entry ──────────────────────────────────────────────────
     if (method === 'DELETE' && id) {
       const { error } = await supabase.from('marketing_spend').delete().eq('id', id)
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 204, headers: CORS, body: '' }
     }
 

@@ -46,7 +46,7 @@ export const handler: Handler = async (event) => {
         .eq('status', 'pending')
         .order('created_at', { ascending: false })
 
-      if (error) throw error
+      if (error) throw new Error(error.message)
 
       // Flatten contact name into top-level field for convenient consumption
       const rows = (data ?? []).map((r: any) => ({
@@ -81,7 +81,7 @@ export const handler: Handler = async (event) => {
         .select()
         .single()
 
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(data) }
     }
 

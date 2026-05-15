@@ -35,7 +35,7 @@ export const handler: Handler = async (event) => {
       if (contactId)      query = query.eq('contact_id', contactId)
       if (subscriptionId) query = query.eq('subscription_id', subscriptionId)
       const { data, error } = await query
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToServiceAgreement)) }
     }
 

@@ -632,7 +632,7 @@ export const handler: Handler = async (event) => {
         .from('subcontractor_agreements')
         .select('id, contractor_id, contractor_name, entity_type, effective_date, status, accept_token, signed_at, created_at')
         .order('created_at', { ascending: false })
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(data ?? []) }
     }
 
