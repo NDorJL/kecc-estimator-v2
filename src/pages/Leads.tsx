@@ -2728,7 +2728,10 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
     notes: '',
     propertyId: '',
   })
-  const [contactError, setContactError] = useState(false)   // ← inline validation state
+  const [contactError, setContactError] = useState(false)
+  // Per-lead ad cost — for pay-per-lead channels like LSA. When set and a campaign
+  // is pre-attributed, a spend entry is auto-created alongside the lead.
+  const [leadCost, setLeadCost] = useState('')
 
   // ── Campaign attribution tracking ────────────────────────────────────────
   // Read UTM params + kecc_campaign cookie once on mount. These are passed
@@ -2822,6 +2825,12 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
   }, [urlCampaignId, allCampaigns])
   // ── End promo code ────────────────────────────────────────────────────────
 
+  // The pre-attributed campaign (from "Log a Lead" button or promo match)
+  // Used to determine whether to show the per-lead cost field and to create
+  // the spend entry automatically on save.
+  const preCampaign = promoMatch ?? (urlCampaignId ? allCampaigns.find(c => c.id === urlCampaignId) : null) ?? null
+  const isPhoneCampaign = preCampaign?.campaignType === 'phone'
+
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const [, navigate] = useLocation()
@@ -2857,28 +2866,46 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
   }, [form.contactId, contacts])
 
   const createMutation = useMutation({
-    mutationFn: () => apiRequest('POST', '/leads', {
-      contactId: form.contactId || null,
-      propertyId: form.propertyId || null,
-      serviceInterest: form.serviceInterest || null,
-      estimatedValue: form.estimatedValue ? parseFloat(form.estimatedValue) : null,
-      source: form.source || null,
-      notes: form.notes || null,
-      stage: 'new',
-      // Promo/referral code match takes priority as explicit campaign attribution
-      campaignId:     promoMatch?.id ?? null,
-      // Attribution — backend resolves campaign_id from UTM/cookie when no manual match
-      utmSource:      promoMatch ? null : tracking.utmSource,
-      utmMedium:      promoMatch ? null : tracking.utmMedium,
-      utmCampaign:    promoMatch ? null : tracking.utmCampaign,
-      campaignCookie: promoMatch ? null : tracking.campaignCookie,
-    }),
+    mutationFn: async () => {
+      // Create the lead
+      await apiRequest('POST', '/leads', {
+        contactId: form.contactId || null,
+        propertyId: form.propertyId || null,
+        serviceInterest: form.serviceInterest || null,
+        estimatedValue: form.estimatedValue ? parseFloat(form.estimatedValue) : null,
+        source: form.source || null,
+        notes: form.notes || null,
+        stage: 'new',
+        campaignId:     promoMatch?.id ?? null,
+        utmSource:      promoMatch ? null : tracking.utmSource,
+        utmMedium:      promoMatch ? null : tracking.utmMedium,
+        utmCampaign:    promoMatch ? null : tracking.utmCampaign,
+        campaignCookie: promoMatch ? null : tracking.campaignCookie,
+      })
+
+      // Auto-create a spend entry when a per-lead cost is entered.
+      // Used for pay-per-lead channels like Google LSA where spend
+      // accrues per qualified lead rather than as a fixed monthly amount.
+      const cost = parseFloat(leadCost)
+      if (!isNaN(cost) && cost > 0 && preCampaign?.channelId) {
+        const currentMonth = new Date().toISOString().slice(0, 7)
+        const contact = contacts.find(c => c.id === form.contactId)
+        await apiRequest('POST', '/marketing-spend', {
+          channelId: preCampaign.channelId,
+          month: currentMonth,
+          amount: cost,
+          notes: `Per-lead cost — ${contact?.name ?? form.serviceInterest ?? 'LSA lead'} (auto-logged)`,
+        })
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      queryClient.invalidateQueries({ queryKey: ['/marketing-spend'] })
       toast({ title: 'Lead created' })
       setForm({ contactId: '', serviceInterest: '', estimatedValue: '', source: '', notes: '', propertyId: '' })
+      setLeadCost('')
       setPromoCode(''); setPromoMatch(null); setUrlCampaignId(null)
-      setContactError(false)   // ← NEW: reset on successful create
+      setContactError(false)
       onClose()
     },
     onError: (err: Error) => toast({ title: 'Error', description: err.message, variant: 'destructive' }),
@@ -2986,6 +3013,29 @@ function NewLeadSheet({ open, onClose }: { open: boolean; onClose: () => void })
               className="mt-1"
             />
           </div>
+
+          {/* Per-lead ad cost — shown for phone campaigns (LSA, etc.) where spend is pay-per-lead */}
+          {isPhoneCampaign && (
+            <div>
+              <Label className="text-xs">
+                Ad cost for this lead
+                <span className="ml-1 font-normal text-muted-foreground">(optional)</span>
+              </Label>
+              <Input
+                type="number"
+                placeholder="0.00"
+                min="0"
+                step="0.01"
+                value={leadCost}
+                onChange={e => setLeadCost(e.target.value)}
+                className="mt-1"
+              />
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                What Google LSA charged for this lead. Logged as spend on the marketing page automatically.
+              </p>
+            </div>
+          )}
+
           <div>
             <Label className="text-xs">
               How they found you

@@ -1563,6 +1563,7 @@ export default function Marketing() {
       // "Word of Mouth" is the canonical referral channel — catch every referral-flavoured source value
       'word of mouth':          ['word_of_mouth', 'wom', 'referral', 'word_of_mouth_referral'],
       'sponsorship':            ['sponsorship', 'sponsor', 'event'],
+      'google lsa':             ['google_lsa', 'lsa', 'local_services'],
     }
     for (const ch of channels) {
       const name = ch.name.toLowerCase()
