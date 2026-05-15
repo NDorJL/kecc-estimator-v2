@@ -37,7 +37,7 @@ export const handler: Handler = async (event) => {
       if (activeOnly) query = query.eq('is_active', true)
 
       const { data, error } = await query
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify((data ?? []).map(rowToMarketingChannel)) }
     }
 
@@ -48,7 +48,7 @@ export const handler: Handler = async (event) => {
         .select('*')
         .eq('id', id)
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToMarketingChannel(data)) }
     }
 
@@ -67,7 +67,7 @@ export const handler: Handler = async (event) => {
         })
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 201, headers: CORS, body: JSON.stringify(rowToMarketingChannel(data)) }
     }
 
@@ -85,14 +85,14 @@ export const handler: Handler = async (event) => {
         .eq('id', id)
         .select()
         .single()
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToMarketingChannel(data)) }
     }
 
     // DELETE channel
     if (method === 'DELETE' && id) {
       const { error } = await supabase.from('marketing_channels').delete().eq('id', id)
-      if (error) throw error
+      if (error) throw new Error(error.message)
       return { statusCode: 204, headers: CORS, body: '' }
     }
 
