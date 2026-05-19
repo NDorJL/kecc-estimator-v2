@@ -113,7 +113,8 @@ function buildScaPage(opts: {
     <div id="successCard" style="display:none;background:#f0fdf4;border:1px solid #86efac;border-radius:12px;padding:20px;margin-top:24px;text-align:center;">
       <div style="font-size:36px;margin-bottom:8px;">✅</div>
       <p style="margin:0 0 4px;font-weight:600;color:#166534;">Agreement Signed!</p>
-      <p style="margin:0;font-size:13px;color:#4b7a5a;">A PDF copy has been sent to you. Thank you!</p>
+      <p style="margin:0 0 16px;font-size:13px;color:#4b7a5a;">A PDF copy has been sent to you. You can also save a copy now.</p>
+      <button onclick="window.print()" style="padding:10px 20px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600;">Save / Print PDF</button>
     </div>`
 
   // Subcontractor signature section in the signature page
