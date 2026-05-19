@@ -627,6 +627,23 @@ export const handler: Handler = async (event) => {
   const SITE_URL = process.env.SITE_URL ?? process.env.URL ?? 'https://localhost:8888'
 
   try {
+    // ── GET ?action=test-email — quick smoke test for Resend config ───────
+    if (method === 'GET' && action === 'test-email') {
+      const to = qs.to
+      if (!to) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'Pass ?to=your@email.com' }) }
+      const apiKey = process.env.RESEND_API_KEY
+      const from   = process.env.RESEND_FROM ?? '(not set)'
+      if (!apiKey) {
+        return { statusCode: 200, headers: CORS, body: JSON.stringify({ ok: false, reason: 'RESEND_API_KEY not set in Netlify env' }) }
+      }
+      try {
+        await sendEmail({ to, subject: 'KECC Email Test', html: '<p>Resend is working ✅</p>' })
+        return { statusCode: 200, headers: CORS, body: JSON.stringify({ ok: true, from, to }) }
+      } catch (e) {
+        return { statusCode: 200, headers: CORS, body: JSON.stringify({ ok: false, from, to, error: String(e) }) }
+      }
+    }
+
     // ── GET ?action=list ──────────────────────────────────────────────────
     if (method === 'GET' && action === 'list') {
       const { data, error } = await supabase
