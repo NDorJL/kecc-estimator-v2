@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
 import { quoCallUrl } from '@/lib/utils'
-import { Contact, Contractor, ContractorDoc, SubcontractorAgreement } from '@/types'
+import { Contact, Contractor, ContractorDoc, SubcontractorAgreement, rowToSca } from '@/types'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -538,14 +538,14 @@ function ContractorDocsSection({ contractor }: { contractor: Contractor }) {
 function ContractorScaSection({ contractor, scas }: { contractor: Contractor; scas: SubcontractorAgreement[] }) {
   const queryClient = useQueryClient()
   const { toast } = useToast()
-  const [generating, setGenerating] = useState(false)
+  const [busy, setBusy] = useState(false)
 
   const sca = scas.find(s => s.contractorId === contractor.id && s.status !== 'void') ?? null
+  const signingUrl = sca ? `${window.location.origin}/.netlify/functions/subcontractor-agreements?token=${sca.acceptToken}` : null
 
-  const SITE_URL = window.location.origin
-
+  // Create a draft — does NOT send
   async function handleGenerate() {
-    setGenerating(true)
+    setBusy(true)
     try {
       const res = await fetch('/.netlify/functions/subcontractor-agreements?action=create', {
         method: 'POST',
@@ -555,20 +555,41 @@ function ContractorScaSection({ contractor, scas }: { contractor: Contractor; sc
       const data = await res.json()
       if (!res.ok) throw new Error(data.message ?? 'Failed to generate SCA')
       queryClient.invalidateQueries({ queryKey: ['/subcontractor-agreements'] })
-      const via = data.sentVia === 'email' ? 'email' : data.sentVia === 'sms' ? 'SMS' : '(no email or SMS — copy link manually)'
-      toast({ title: `Agreement sent via ${via}` })
+      toast({ title: 'Agreement generated', description: 'Preview it below, then send when ready.' })
     } catch (err) {
       toast({ title: 'Error', description: String(err), variant: 'destructive' })
     } finally {
-      setGenerating(false)
+      setBusy(false)
     }
   }
 
-  async function handleResend() {
+  // Send the signing link (email or SMS), moves status to pending_signature
+  async function handleSend() {
     if (!sca) return
-    setGenerating(true)
+    setBusy(true)
     try {
-      // Void the old one, create a new one
+      const res = await fetch(`/.netlify/functions/subcontractor-agreements?action=send&id=${sca.id}`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.message ?? 'Failed to send')
+      queryClient.invalidateQueries({ queryKey: ['/subcontractor-agreements'] })
+      const via = data.sentVia === 'email' ? 'email' : data.sentVia === 'sms' ? 'SMS' : null
+      if (via) {
+        toast({ title: `Agreement sent via ${via}` })
+      } else {
+        toast({ title: 'Agreement marked as sent', description: 'No email or SMS on file — share the link manually.' })
+      }
+    } catch (err) {
+      toast({ title: 'Error', description: String(err), variant: 'destructive' })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Void current SCA and generate a fresh draft
+  async function handleRegenerate() {
+    if (!sca) return
+    setBusy(true)
+    try {
       await fetch(`/.netlify/functions/subcontractor-agreements?action=void&id=${sca.id}`, { method: 'POST' })
       const res = await fetch('/.netlify/functions/subcontractor-agreements?action=create', {
         method: 'POST',
@@ -576,24 +597,28 @@ function ContractorScaSection({ contractor, scas }: { contractor: Contractor; sc
         body: JSON.stringify({ contractorId: contractor.id }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.message ?? 'Failed to resend')
+      if (!res.ok) throw new Error(data.message ?? 'Failed to regenerate')
       queryClient.invalidateQueries({ queryKey: ['/subcontractor-agreements'] })
-      toast({ title: 'Agreement resent' })
+      toast({ title: 'New agreement generated', description: 'Review and send when ready.' })
     } catch (err) {
       toast({ title: 'Error', description: String(err), variant: 'destructive' })
     } finally {
-      setGenerating(false)
+      setBusy(false)
     }
   }
 
   function handleCopyLink() {
-    if (!sca) return
-    const link = `${SITE_URL}/.netlify/functions/subcontractor-agreements?token=${sca.acceptToken}`
-    navigator.clipboard.writeText(link).then(() => {
-      toast({ title: 'Link copied to clipboard' })
+    if (!signingUrl) return
+    navigator.clipboard.writeText(signingUrl).then(() => {
+      toast({ title: 'Signing link copied to clipboard' })
     }).catch(() => {
-      toast({ title: 'Copy failed — link: ' + link })
+      toast({ title: 'Copy failed', description: signingUrl })
     })
+  }
+
+  function handlePreview() {
+    if (!signingUrl) return
+    window.open(signingUrl, '_blank')
   }
 
   function handleDownloadPdf() {
@@ -607,15 +632,40 @@ function ContractorScaSection({ contractor, scas }: { contractor: Contractor; sc
         <ClipboardList className="h-3.5 w-3.5" /> Subcontractor Agreement
       </p>
 
+      {/* No SCA yet */}
       {!sca && (
         <div className="space-y-2">
           <p className="text-xs text-muted-foreground">No SCA on file.</p>
-          <Button size="sm" className="w-full min-h-[40px]" disabled={generating} onClick={handleGenerate}>
-            {generating ? 'Generating…' : 'Generate & Send Agreement'}
+          <Button size="sm" className="w-full min-h-[40px]" disabled={busy} onClick={handleGenerate}>
+            {busy ? 'Generating…' : 'Generate Agreement'}
           </Button>
         </div>
       )}
 
+      {/* Draft — generated but not yet sent */}
+      {sca && sca.status === 'draft' && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-full px-2 py-0.5">
+              Ready to Send
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">Generated {new Date(sca.createdAt).toLocaleDateString()} — not yet sent.</p>
+          <Button size="sm" variant="outline" className="w-full min-h-[36px]" onClick={handlePreview}>
+            <ExternalLink className="h-3.5 w-3.5 mr-1" /> Preview Agreement
+          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="flex-1 min-h-[36px]" onClick={handleCopyLink}>
+              <Copy className="h-3.5 w-3.5 mr-1" /> Copy Link
+            </Button>
+            <Button size="sm" className="flex-1 min-h-[36px]" disabled={busy} onClick={handleSend}>
+              <Send className="h-3.5 w-3.5 mr-1" /> {busy ? 'Sending…' : 'Send to Contractor'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Sent — awaiting contractor signature */}
       {sca && sca.status === 'pending_signature' && (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -624,17 +674,24 @@ function ContractorScaSection({ contractor, scas }: { contractor: Contractor; sc
             </span>
           </div>
           <p className="text-xs text-muted-foreground">Sent {new Date(sca.createdAt).toLocaleDateString()}</p>
+          <Button size="sm" variant="outline" className="w-full min-h-[36px]" onClick={handlePreview}>
+            <ExternalLink className="h-3.5 w-3.5 mr-1" /> Preview Agreement
+          </Button>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" className="flex-1 min-h-[36px]" onClick={handleCopyLink}>
               <Copy className="h-3.5 w-3.5 mr-1" /> Copy Link
             </Button>
-            <Button size="sm" variant="outline" className="flex-1 min-h-[36px]" disabled={generating} onClick={handleResend}>
-              <Send className="h-3.5 w-3.5 mr-1" /> Resend
+            <Button size="sm" variant="outline" className="flex-1 min-h-[36px]" disabled={busy} onClick={handleSend}>
+              <Send className="h-3.5 w-3.5 mr-1" /> {busy ? 'Sending…' : 'Resend'}
             </Button>
           </div>
+          <Button size="sm" variant="ghost" className="w-full text-xs text-muted-foreground" disabled={busy} onClick={handleRegenerate}>
+            Regenerate Agreement
+          </Button>
         </div>
       )}
 
+      {/* Signed */}
       {sca && sca.status === 'signed' && (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -696,8 +753,7 @@ function GenerateScaDialog({
       if (!res.ok) throw new Error(data.message ?? 'Failed')
       queryClient.invalidateQueries({ queryKey: ['/subcontractor-agreements'] })
       const name = contractors.find(c => c.id === selectedId)?.name ?? 'contractor'
-      const via = data.sentVia === 'email' ? 'email' : data.sentVia === 'sms' ? 'SMS' : 'link (no email/SMS on file)'
-      toast({ title: `Agreement sent to ${name} via ${via}` })
+      toast({ title: `Agreement generated for ${name}`, description: 'Open their card to preview and send.' })
       onClose()
     } catch (err) {
       toast({ title: 'Error', description: String(err), variant: 'destructive' })
@@ -732,7 +788,7 @@ function GenerateScaDialog({
               </Select>
             </div>
             <p className="text-xs text-muted-foreground">
-              The agreement will be sent via email if the contractor has one, otherwise via SMS.
+              The agreement will be generated as a draft. You can preview and send it from the contractor's card.
             </p>
           </div>
         )}
@@ -740,7 +796,7 @@ function GenerateScaDialog({
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           {eligible.length > 0 && (
             <Button disabled={!selectedId || sending} onClick={handleGenerate}>
-              {sending ? 'Sending…' : 'Generate & Send'}
+              {sending ? 'Generating…' : 'Generate Agreement'}
             </Button>
           )}
         </DialogFooter>
@@ -767,7 +823,8 @@ function ContractorsList({ search }: { search: string }) {
 
   const { data: scas = [] } = useQuery<SubcontractorAgreement[]>({
     queryKey: ['/subcontractor-agreements'],
-    queryFn: () => apiGet('/subcontractor-agreements?action=list'),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    queryFn: () => apiGet<any[]>('/subcontractor-agreements?action=list').then(rows => rows.map(rowToSca)),
   })
 
   const deleteMutation = useMutation({

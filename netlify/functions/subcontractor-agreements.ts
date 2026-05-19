@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js'
 const PDFDocument = require('pdfkit')
 import { sendOpenPhoneSms } from './_smsHelper'
 import { sendEmail } from './_emailHelper'
+import { notifyOwner } from './_knoxNotify'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -716,7 +717,20 @@ export const handler: Handler = async (event) => {
       return { statusCode: 200, headers: HTML_HEADERS, body: html }
     }
 
+    // ── POST ?action=void&id=xxx ──────────────────────────────────────────
+    if (method === 'POST' && action === 'void') {
+      const id = qs.id
+      if (!id) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'Missing id' }) }
+      const { error } = await supabase
+        .from('subcontractor_agreements')
+        .update({ status: 'void' })
+        .eq('id', id)
+      if (error) throw new Error(error.message)
+      return { statusCode: 200, headers: CORS, body: JSON.stringify({ ok: true }) }
+    }
+
     // ── POST ?action=create ───────────────────────────────────────────────
+    // Creates the SCA as a draft only — does NOT send. Call ?action=send after reviewing.
     if (method === 'POST' && action === 'create') {
       const body = JSON.parse(event.body ?? '{}')
       const { contractorId } = body
@@ -745,14 +759,14 @@ export const handler: Handler = async (event) => {
       // Fetch company settings for owner signature
       const { data: settings } = await supabase
         .from('company_settings')
-        .select('owner_signature_data, quo_api_key, quo_from_number')
+        .select('owner_signature_data')
         .limit(1)
         .single()
 
       const effectiveDate = todayIso()
       const entityType = contractor.company || null
 
-      // Insert SCA
+      // Insert SCA as draft — no auto-send
       const { data: sca, error: insErr } = await supabase
         .from('subcontractor_agreements')
         .insert({
@@ -760,7 +774,7 @@ export const handler: Handler = async (event) => {
           contractor_name: contractor.name,
           entity_type: entityType,
           effective_date: effectiveDate,
-          status: 'pending_signature',
+          status: 'draft',
           kecc_sig_data: settings?.owner_signature_data ?? null,
         })
         .select()
@@ -768,11 +782,39 @@ export const handler: Handler = async (event) => {
       if (insErr) throw insErr
 
       const signingUrl = `${SITE_URL}/.netlify/functions/subcontractor-agreements?token=${sca.accept_token}`
+      return { statusCode: 201, headers: CORS, body: JSON.stringify({ id: sca.id, signingUrl }) }
+    }
 
-      // Send via email or SMS
+    // ── POST ?action=send&id=xxx ──────────────────────────────────────────
+    // Sends the signing link to the contractor (email or SMS) and marks as pending_signature.
+    if (method === 'POST' && action === 'send') {
+      const id = qs.id
+      if (!id) return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'Missing id' }) }
+
+      const { data: sca, error: scaErr } = await supabase
+        .from('subcontractor_agreements')
+        .select('*')
+        .eq('id', id)
+        .single()
+      if (scaErr || !sca) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'SCA not found' }) }
+      if (sca.status === 'signed') return { statusCode: 409, headers: CORS, body: JSON.stringify({ message: 'Agreement already signed' }) }
+
+      const { data: contractor } = await supabase
+        .from('contractors')
+        .select('*')
+        .eq('id', sca.contractor_id)
+        .single()
+
+      const { data: settings } = await supabase
+        .from('company_settings')
+        .select('quo_api_key, quo_from_number')
+        .limit(1)
+        .single()
+
+      const signingUrl = `${SITE_URL}/.netlify/functions/subcontractor-agreements?token=${sca.accept_token}`
       let sentVia: 'email' | 'sms' | 'none' = 'none'
 
-      if (contractor.email) {
+      if (contractor?.email) {
         try {
           await sendEmail({
             to: contractor.email,
@@ -790,7 +832,7 @@ export const handler: Handler = async (event) => {
         } catch (e) {
           console.error('SCA email send failed:', e)
         }
-      } else if (contractor.phone && settings?.quo_api_key && settings?.quo_from_number) {
+      } else if (contractor?.phone && settings?.quo_api_key && settings?.quo_from_number) {
         try {
           await sendOpenPhoneSms(
             settings.quo_api_key,
@@ -804,7 +846,13 @@ export const handler: Handler = async (event) => {
         }
       }
 
-      return { statusCode: 201, headers: CORS, body: JSON.stringify({ id: sca.id, signingUrl, sentVia }) }
+      // Mark as pending_signature regardless (even if send failed, link is valid for manual copy)
+      await supabase
+        .from('subcontractor_agreements')
+        .update({ status: 'pending_signature' })
+        .eq('id', id)
+
+      return { statusCode: 200, headers: CORS, body: JSON.stringify({ sentVia }) }
     }
 
     // ── POST ?token=xxx — receive signature ───────────────────────────────
@@ -846,9 +894,13 @@ export const handler: Handler = async (event) => {
         .eq('id', sca.contractor_id)
         .single()
 
-      // Note: contractors are not linked to contacts, so no activities row is written.
-      // The subcontractor_agreements record itself is the audit trail.
+      // Notify owner via SMS
       console.log(`[sca] Signed by ${printedName} (contractor ${sca.contractor_id}) at ${signedAt}`)
+      try {
+        await notifyOwner(supabase, `Knox: ${sca.contractor_name} signed their Subcontractor Agreement.`)
+      } catch (e) {
+        console.error('[sca] notifyOwner failed:', e)
+      }
 
       // Generate PDF and send to subcontractor
       try {

@@ -630,7 +630,7 @@ export function rowToJob(r: any): Job {
 }
 
 // ── Subcontractor Agreement Types ──────────────────────────────────────
-export type ScaStatus = 'pending_signature' | 'signed' | 'void';
+export type ScaStatus = 'draft' | 'pending_signature' | 'signed' | 'void';
 
 export interface SubcontractorAgreement {
   id: string;
