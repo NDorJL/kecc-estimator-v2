@@ -20,6 +20,7 @@ import {
 } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { snapCenterToCursor } from '@dnd-kit/modifiers'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -46,7 +47,6 @@ import { QuoteDetail } from '@/pages/Quotes'
 const STAGES: { id: LeadStage; label: string; color: string; headerColor?: string }[] = [
   { id: 'new',            label: 'New Lead',        color: 'bg-slate-100 dark:bg-slate-800' },
   { id: 'contacted',      label: 'Contacted',       color: 'bg-blue-50 dark:bg-blue-950/40' },
-  { id: 'follow_up',      label: 'Follow-Up',       color: 'bg-orange-50 dark:bg-orange-950/30',  headerColor: 'text-orange-700 dark:text-orange-400' },
   { id: 'quoted',         label: 'Quoted',          color: 'bg-yellow-50 dark:bg-yellow-950/30' },
   { id: 'scheduled',      label: 'Scheduled',       color: 'bg-violet-50 dark:bg-violet-950/30',  headerColor: 'text-violet-700 dark:text-violet-400' },
   { id: 'recurring',      label: 'Recurring ↻',     color: 'bg-indigo-50 dark:bg-indigo-950/30',  headerColor: 'text-indigo-700 dark:text-indigo-400' },
@@ -235,7 +235,7 @@ function PhotoStackCard({
   onViewPhoto: (url: string) => void
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(true)
   const [editingLabel, setEditingLabel] = useState(false)
   const [labelDraft, setLabelDraft] = useState(stack.label)
   const [descDraft, setDescDraft] = useState(stack.description)
@@ -469,7 +469,7 @@ function KanbanColumn({
     : leads
 
   return (
-    <div className={`flex flex-col rounded-xl border min-w-[180px] w-[180px] shrink-0 ${stage.color} ${isOver ? 'ring-2 ring-primary' : ''}`}>
+    <div className={`flex flex-col rounded-xl border min-w-[160px] w-[160px] shrink-0 ${stage.color} ${isOver ? 'ring-2 ring-primary' : ''}`}>
       <div className="flex items-center justify-between px-2.5 py-2 border-b bg-white/50 dark:bg-black/20 rounded-t-xl">
         <span className={`text-xs font-semibold ${stage.headerColor ?? ''}`}>{stage.label}</span>
         <Badge variant="secondary" className="text-xs h-5 px-1.5">{leads.length}</Badge>
@@ -1239,10 +1239,14 @@ function LeadDetailSheet({
       }, 0)
 
       // Save amendments to original quote.
-      // The quotes.ts PATCH handler now auto-generates/updates the revision quote
-      // server-side when amendments are present on a signed quote — no second
-      // API call needed here. (Duplicate revision creation removed — Flag #1.)
-      await apiRequest('PATCH', `/quotes/${effectiveQuote.id}`, { amendments: updatedAmendments, total: newTotal })
+      // Also stamp originalTotal if not already set — without this, computeAmendedTotal()
+      // falls back to quote.total (which is already the amended value after the first save)
+      // and double-applies the delta on every subsequent render.
+      await apiRequest('PATCH', `/quotes/${effectiveQuote.id}`, {
+        amendments: updatedAmendments,
+        total: newTotal,
+        ...(effectiveQuote.originalTotal == null ? { originalTotal: base } : {}),
+      })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/quotes'] })
@@ -1369,42 +1373,63 @@ function LeadDetailSheet({
 
         <div className="space-y-4">
 
-          {/* ── Call / Text buttons ────────────────────────────────────────── */}
-          {phone && (
+          {/* ── Contact info + action buttons ─────────────────────────────── */}
+          {(phone || effectiveQuote?.customerEmail || effectiveQuote?.customerAddress) && (
             <div className="space-y-2">
-              {/* Readable contact info — quick reference without tapping */}
-              <div className="flex flex-wrap gap-3 px-0.5">
-                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <PhoneCall className="h-3 w-3" />{phone}
-                </span>
-                {effectiveQuote?.customerEmail && (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground truncate">
-                    <MessageSquare className="h-3 w-3 shrink-0" />{effectiveQuote.customerEmail}
+              {/* Readable info chips */}
+              <div className="flex flex-col gap-1 px-0.5">
+                {phone && (
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <PhoneCall className="h-3 w-3 shrink-0" />{phone}
                   </span>
                 )}
+                {effectiveQuote?.customerEmail && (
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground truncate">
+                    <Mail className="h-3 w-3 shrink-0" />{effectiveQuote.customerEmail}
+                  </span>
+                )}
+                {effectiveQuote?.customerAddress && (
+                  <a
+                    href={`https://maps.apple.com/?q=${encodeURIComponent(effectiveQuote.customerAddress)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline truncate"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <MapPin className="h-3 w-3 shrink-0" />{effectiveQuote.customerAddress}
+                  </a>
+                )}
               </div>
-            <div className="flex gap-2">
-              <a
-                href={quoCallUrl(phone)}
-                className="flex-1"
-                onClick={e => e.stopPropagation()}
-              >
-                <Button variant="outline" className="w-full gap-2 text-blue-600 border-blue-200 hover:bg-blue-50">
-                  <PhoneCall className="h-4 w-4" />
-                  Call
-                </Button>
-              </a>
-              <a
-                href={quoTextUrl(phone)}
-                className="flex-1"
-                onClick={e => e.stopPropagation()}
-              >
-                <Button variant="outline" className="w-full gap-2 text-green-600 border-green-200 hover:bg-green-50">
-                  <MessageSquare className="h-4 w-4" />
-                  Text
-                </Button>
-              </a>
-            </div>
+              {/* Action buttons */}
+              <div className="flex gap-2">
+                {phone && (
+                  <a href={quoCallUrl(phone)} className="flex-1" onClick={e => e.stopPropagation()}>
+                    <Button variant="outline" className="w-full gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50 text-sm">
+                      <PhoneCall className="h-3.5 w-3.5" />Call
+                    </Button>
+                  </a>
+                )}
+                {phone && (
+                  <a href={quoTextUrl(phone)} className="flex-1" onClick={e => e.stopPropagation()}>
+                    <Button variant="outline" className="w-full gap-1.5 text-green-600 border-green-200 hover:bg-green-50 text-sm">
+                      <MessageSquare className="h-3.5 w-3.5" />Text
+                    </Button>
+                  </a>
+                )}
+                {effectiveQuote?.customerEmail && (
+                  <a
+                    href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(effectiveQuote.customerEmail)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1"
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <Button variant="outline" className="w-full gap-1.5 text-red-600 border-red-200 hover:bg-red-50 text-sm">
+                      <Mail className="h-3.5 w-3.5" />Email
+                    </Button>
+                  </a>
+                )}
+              </div>
             </div>
           )}
 
@@ -1705,7 +1730,7 @@ function LeadDetailSheet({
             <Textarea
               value={notes}
               onChange={e => setNotes(e.target.value)}
-              rows={3}
+              rows={6}
               className="mt-1"
               placeholder="Add notes about this lead…"
             />
@@ -2228,14 +2253,6 @@ function LeadDetailSheet({
               <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Quote Actions</p>
               {!confirmDeleteQuote ? (
                 <div className="flex gap-2">
-                  <Button
-                    variant="outline" size="sm" className="flex-1 text-amber-600 border-amber-300 hover:bg-amber-50"
-                    disabled={archiveQuoteMutation.isPending}
-                    onClick={() => archiveQuoteMutation.mutate()}
-                  >
-                    <Archive className="h-3.5 w-3.5 mr-1.5" />
-                    {archiveQuoteMutation.isPending ? 'Archiving…' : 'Archive Quote'}
-                  </Button>
                   <Button
                     variant="outline" size="sm" className="flex-1 text-destructive border-destructive/30 hover:bg-destructive/5"
                     onClick={() => setConfirmDeleteQuote(true)}
@@ -3454,7 +3471,7 @@ export default function Leads() {
               {loading ? (
                 <div className="flex gap-3 p-3 h-full">
                   {STAGES.map(s => (
-                    <div key={s.id} className="min-w-[180px] w-[180px]">
+                    <div key={s.id} className="min-w-[160px] w-[160px]">
                       <Skeleton className="h-8 w-full rounded-t-xl" />
                       <Skeleton className="h-24 w-full rounded-b-xl mt-px" />
                     </div>
@@ -3571,7 +3588,7 @@ export default function Leads() {
         </div>
 
         {/* Drag overlays */}
-        <DragOverlay>
+        <DragOverlay modifiers={[snapCenterToCursor]}>
           {activeLead && (
             <LeadCardGhost
               displayName={getDisplayName(activeLead)}

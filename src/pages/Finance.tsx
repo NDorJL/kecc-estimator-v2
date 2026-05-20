@@ -2021,7 +2021,7 @@ const RANGE_OPTIONS: Array<{ label: string; value: RangeDays }> = [
 ]
 
 const STAGE_LABEL: Record<string, string> = {
-  new: 'New', contacted: 'Contacted', follow_up: 'Follow-Up', quoted: 'Quoted',
+  new: 'New', contacted: 'Contacted', quoted: 'Quoted',
   scheduled: 'Scheduled', recurring: 'Recurring', finished_unpaid: 'Finished/Unpaid',
   finished_paid: 'Finished/Paid', lost: 'Lost',
 }
@@ -2235,7 +2235,7 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
   }, [openLeads]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Pipeline Intelligence ─────────────────────────────────────────────────
-  const ORDERED_STAGES = ['new','contacted','follow_up','quoted','scheduled','recurring','finished_unpaid','finished_paid']
+  const ORDERED_STAGES = ['new','contacted','quoted','scheduled','recurring','finished_unpaid','finished_paid']
   const stageFunnel = useMemo(() => ORDERED_STAGES.map(s => ({
     stage: STAGE_LABEL[s] || s,
     count: leads.filter(l => l.stage === s).length,

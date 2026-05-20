@@ -148,7 +148,7 @@ function NewJobSheet({ open, onClose }: { open: boolean; onClose: () => void }) 
 
   const STAGE_COLORS: Record<string, string> = {
     new: 'bg-slate-100 text-slate-700', contacted: 'bg-blue-100 text-blue-700',
-    follow_up: 'bg-orange-100 text-orange-700', quoted: 'bg-yellow-100 text-yellow-700',
+    quoted: 'bg-yellow-100 text-yellow-700',
     scheduled: 'bg-violet-100 text-violet-700', recurring: 'bg-indigo-100 text-indigo-700',
     finished_unpaid: 'bg-amber-100 text-amber-700', finished_paid: 'bg-emerald-100 text-emerald-700',
   }

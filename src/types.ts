@@ -295,7 +295,7 @@ export interface Property {
 }
 
 export type LeadStage =
-  | 'new' | 'contacted' | 'follow_up' | 'quoted' | 'scheduled'
+  | 'new' | 'contacted' | 'quoted' | 'scheduled'
   | 'recurring' | 'finished_unpaid' | 'finished_paid'
   // keep 'lost' in the type for DB compatibility with older rows; not shown in kanban
   | 'lost'

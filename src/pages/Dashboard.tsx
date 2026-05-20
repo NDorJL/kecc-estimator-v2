@@ -384,22 +384,7 @@ export default function Dashboard() {
       }
     }
 
-    // 5. Follow-up needed — lead in 'follow_up' for 5+ days
-    for (const l of ls) {
-      if (l.stage === 'follow_up') {
-        const followUpAge = (now - new Date(l.createdAt).getTime()) / DAY
-        if (followUpAge >= 5) {
-          result.push({
-            id: `followup-lead-${l.id}`,
-            emoji: '📬',
-            title: `Follow-up overdue`,
-            subtitle: `In Follow-Up for ${Math.floor(followUpAge)} days`,
-            colorClass: 'border-orange-500/30 bg-orange-500/10 text-orange-700 dark:text-orange-400',
-            path: '/leads',
-          })
-        }
-      }
-    }
+    // follow_up stage removed — leads stay in 'quoted' after follow-up SMS
 
     // 6. Awaiting invoice — lead in 'finished_unpaid' for 2+ days
     for (const l of ls) {

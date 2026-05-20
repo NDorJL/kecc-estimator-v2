@@ -183,7 +183,7 @@ const handler = schedule('0 14 * * *', async () => {
 
     // ── Quote follow-up sweep ────────────────────────────────────────────────
     // Leads in 'quoted' where the quote was sent 3+ days ago and is still unsigned.
-    // Send a follow-up SMS and advance to 'follow_up'.
+    // Sends a follow-up SMS but keeps the lead in 'quoted' (follow_up column removed).
     console.log('[send-reminders] Starting quote follow-up sweep')
 
     const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
@@ -227,12 +227,12 @@ const handler = schedule('0 14 * * *', async () => {
           const firstName = name ? name.split(' ')[0] : 'there'
           const now = new Date().toISOString()
 
-          // Always advance stage + stamp follow_up_sent_at
+          // Stamp follow_up_sent_at so we don't send again; keep stage as 'quoted'
           await supabase
             .from('leads')
-            .update({ stage: 'follow_up', follow_up_sent_at: now })
+            .update({ follow_up_sent_at: now })
             .eq('id', lead.id)
-            .catch(e => console.error(`[send-reminders] Stage update failed for lead ${lead.id}:`, (e as Error).message))
+            .catch(e => console.error(`[send-reminders] follow_up stamp failed for lead ${lead.id}:`, (e as Error).message))
 
           if (phone && apiKey && fromNumber) {
             const message =
@@ -255,7 +255,7 @@ const handler = schedule('0 14 * * *', async () => {
               console.error(`[send-reminders] ✗ Queue insert failed for lead ${lead.id}:`, err instanceof Error ? err.message : err)
             }
           } else {
-            console.log(`[send-reminders] Lead ${lead.id} moved to follow_up (no phone/SMS — no message sent)`)
+            console.log(`[send-reminders] Lead ${lead.id} follow-up stamped (no phone/SMS — no message sent)`)
           }
 
           if (lead.contact_id) {
