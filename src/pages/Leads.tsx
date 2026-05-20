@@ -469,7 +469,7 @@ function KanbanColumn({
     : leads
 
   return (
-    <div className={`flex flex-col rounded-xl border min-w-[160px] w-[160px] shrink-0 ${stage.color} ${isOver ? 'ring-2 ring-primary' : ''}`}>
+    <div className={`flex flex-col rounded-xl border min-w-[140px] flex-1 shrink-0 ${stage.color} ${isOver ? 'ring-2 ring-primary' : ''}`}>
       <div className="flex items-center justify-between px-2.5 py-2 border-b bg-white/50 dark:bg-black/20 rounded-t-xl">
         <span className={`text-xs font-semibold ${stage.headerColor ?? ''}`}>{stage.label}</span>
         <Badge variant="secondary" className="text-xs h-5 px-1.5">{leads.length}</Badge>
@@ -2376,8 +2376,8 @@ function LeadDetailSheet({
 
           {/* ── Generate QB Invoice (Finished/Unpaid only) ────────────────── */}
           {inFinishedUnpaid && effectiveQuote && (
-            <div className="rounded-xl border border-dashed border-amber-400/60 bg-amber-50/40 p-3 space-y-2">
-              <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">Billing</p>
+            <div className="rounded-xl border border-amber-400/50 bg-card p-3 space-y-2">
+              <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide">Billing</p>
               {hasInvoice ? (
                 <div className="flex items-center gap-2 text-xs text-amber-700">
                   <Receipt className="h-4 w-4 shrink-0" />
@@ -3606,7 +3606,7 @@ export default function Leads() {
                   ))}
                 </div>
               ) : (
-                <div className="flex gap-3 p-3 h-full" style={{ minWidth: 'max-content' }}>
+                <div className="flex gap-3 p-3 h-full w-full min-w-max">
                   {STAGES.map(stage => (
                     <KanbanColumn
                       key={stage.id}
@@ -3716,7 +3716,9 @@ export default function Leads() {
         </div>
 
         {/* Drag overlays */}
-        <DragOverlay modifiers={[snapCenterToCursor]}>
+        {/* snapCenterToCursor only for quote cards — lead cards use natural grab-point
+            so the sortable ghost stays in sync with where the card will drop */}
+        <DragOverlay modifiers={activeQuote ? [snapCenterToCursor] : []}>
           {activeLead && (
             <LeadCardGhost
               displayName={getDisplayName(activeLead)}
