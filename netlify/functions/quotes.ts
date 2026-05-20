@@ -181,8 +181,10 @@ export const handler: Handler = async (event) => {
       if (!data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Quote not found' }) }
 
       // ── Propagate customer identity changes back to the linked contact ────
-      // So editing a name on a quote keeps the contact record in sync.
-      if (data.contact_id) {
+      // Skipped when syncToContact: false (e.g. editing from the lead sheet
+      // where the point of contact may have changed but the saved contact
+      // record should remain the original person).
+      if (data.contact_id && body.syncToContact !== false) {
         const contactSync: Record<string, unknown> = {}
         if (body.customerName !== undefined)  contactSync.name          = body.customerName
         if (body.customerEmail !== undefined) contactSync.email         = body.customerEmail

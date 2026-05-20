@@ -860,6 +860,42 @@ function LeadDetailSheet({
   const [showSchedule, setShowSchedule] = useState(false)
   const [confirmCancelSub, setConfirmCancelSub] = useState(false)
 
+  // ── Editable customer info (updates quote only — never cascades to contact) ─
+  const [editingContact, setEditingContact] = useState(false)
+  const [editName, setEditName]       = useState('')
+  const [editPhone, setEditPhone]     = useState('')
+  const [editEmail, setEditEmail]     = useState('')
+  const [editAddress, setEditAddress] = useState('')
+
+  function openContactEdit() {
+    setEditName(effectiveQuote?.customerName ?? '')
+    setEditPhone(effectiveQuote?.customerPhone ?? '')
+    setEditEmail(effectiveQuote?.customerEmail ?? '')
+    setEditAddress(effectiveQuote?.customerAddress ?? '')
+    setEditingContact(true)
+  }
+
+  const saveContactMutation = useMutation({
+    mutationFn: () => {
+      if (!effectiveQuote) throw new Error('No quote')
+      // syncToContact: false — edits stay on the quote only, not the contact record
+      return apiRequest('PATCH', `/quotes/${effectiveQuote.id}`, {
+        customerName:    editName.trim()    || undefined,
+        customerPhone:   editPhone.trim()   || undefined,
+        customerEmail:   editEmail.trim()   || undefined,
+        customerAddress: editAddress.trim() || undefined,
+        syncToContact:   false,
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/quotes'] })
+      queryClient.invalidateQueries({ queryKey: ['/leads'] })
+      setEditingContact(false)
+      toast({ title: 'Customer info updated' })
+    },
+    onError: (err: Error) => toast({ title: 'Failed to save', description: err.message, variant: 'destructive' }),
+  })
+
   // ── Subscription linked to this recurring lead ────────────────────────────
   const { data: linkedSubs = [] } = useQuery<{ id: string; status: string; inSeasonMonthlyTotal: number; startDate: string; cancelledAt: string | null }[]>({
     queryKey: ['/subscriptions', lead?.quoteId],
@@ -1037,6 +1073,7 @@ function LeadDetailSheet({
     setLostReasonPreset('')
     setLostReasonCustom('')
     setShowSendConfirm(false)
+    setEditingContact(false)
   }, [lead?.id])
   const [confirmDeleteQuote, setConfirmDeleteQuote] = useState(false)
   const [confirmDeleteLead, setConfirmDeleteLead] = useState(false)
@@ -1373,65 +1410,93 @@ function LeadDetailSheet({
 
         <div className="space-y-4">
 
-          {/* ── Contact info + action buttons ─────────────────────────────── */}
-          {(phone || effectiveQuote?.customerEmail || effectiveQuote?.customerAddress) && (
-            <div className="space-y-2">
-              {/* Readable info chips */}
-              <div className="flex flex-col gap-1 px-0.5">
-                {phone && (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <PhoneCall className="h-3 w-3 shrink-0" />{phone}
-                  </span>
-                )}
-                {effectiveQuote?.customerEmail && (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground truncate">
-                    <Mail className="h-3 w-3 shrink-0" />{effectiveQuote.customerEmail}
-                  </span>
-                )}
-                {effectiveQuote?.customerAddress && (
-                  <a
-                    href={`https://maps.apple.com/?q=${encodeURIComponent(effectiveQuote.customerAddress)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline truncate"
-                    onClick={e => e.stopPropagation()}
-                  >
-                    <MapPin className="h-3 w-3 shrink-0" />{effectiveQuote.customerAddress}
-                  </a>
-                )}
+          {/* ── Customer info + action buttons ─────────────────────────────── */}
+          <div className="space-y-2">
+            {editingContact ? (
+              /* ── Edit mode ─────────────────────────────────────────────── */
+              <div className="rounded-xl border border-primary/30 p-3 space-y-2 bg-muted/10">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Edit Customer Info</p>
+                <p className="text-[10px] text-muted-foreground">Updates this lead only — contact record is unchanged.</p>
+                <div className="space-y-1.5">
+                  <Input value={editName}    onChange={e => setEditName(e.target.value)}    placeholder="Full name"       className="h-8 text-sm" />
+                  <Input value={editPhone}   onChange={e => setEditPhone(e.target.value)}   placeholder="Phone"           className="h-8 text-sm" type="tel" />
+                  <Input value={editEmail}   onChange={e => setEditEmail(e.target.value)}   placeholder="Email"           className="h-8 text-sm" type="email" />
+                  <Input value={editAddress} onChange={e => setEditAddress(e.target.value)} placeholder="Service address" className="h-8 text-sm" />
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => setEditingContact(false)}>Cancel</Button>
+                  <Button size="sm" className="flex-1" disabled={saveContactMutation.isPending} onClick={() => saveContactMutation.mutate()}>
+                    {saveContactMutation.isPending ? 'Saving…' : 'Save'}
+                  </Button>
+                </div>
               </div>
-              {/* Action buttons */}
-              <div className="flex gap-2">
-                {phone && (
-                  <a href={quoCallUrl(phone)} className="flex-1" onClick={e => e.stopPropagation()}>
-                    <Button variant="outline" className="w-full gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50 text-sm">
-                      <PhoneCall className="h-3.5 w-3.5" />Call
-                    </Button>
-                  </a>
-                )}
-                {phone && (
-                  <a href={quoTextUrl(phone)} className="flex-1" onClick={e => e.stopPropagation()}>
-                    <Button variant="outline" className="w-full gap-1.5 text-green-600 border-green-200 hover:bg-green-50 text-sm">
-                      <MessageSquare className="h-3.5 w-3.5" />Text
-                    </Button>
-                  </a>
-                )}
-                {effectiveQuote?.customerEmail && (
-                  <a
-                    href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(effectiveQuote.customerEmail)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1"
-                    onClick={e => e.stopPropagation()}
-                  >
-                    <Button variant="outline" className="w-full gap-1.5 text-red-600 border-red-200 hover:bg-red-50 text-sm">
-                      <Mail className="h-3.5 w-3.5" />Email
-                    </Button>
-                  </a>
-                )}
-              </div>
-            </div>
-          )}
+            ) : (
+              /* ── Read mode ─────────────────────────────────────────────── */
+              <>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex flex-col gap-1 px-0.5 min-w-0">
+                    {phone && (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <PhoneCall className="h-3 w-3 shrink-0" />{phone}
+                      </span>
+                    )}
+                    {effectiveQuote?.customerEmail && (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground truncate">
+                        <Mail className="h-3 w-3 shrink-0" />{effectiveQuote.customerEmail}
+                      </span>
+                    )}
+                    {effectiveQuote?.customerAddress && (
+                      <a
+                        href={`https://maps.apple.com/?q=${encodeURIComponent(effectiveQuote.customerAddress)}`}
+                        target="_blank" rel="noopener noreferrer"
+                        className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline truncate"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        <MapPin className="h-3 w-3 shrink-0" />{effectiveQuote.customerAddress}
+                      </a>
+                    )}
+                  </div>
+                  {effectiveQuote && (
+                    <button
+                      onClick={openContactEdit}
+                      className="text-[10px] text-muted-foreground hover:text-foreground underline shrink-0 mt-0.5"
+                    >
+                      Edit
+                    </button>
+                  )}
+                </div>
+                {/* Action buttons */}
+                <div className="flex gap-2">
+                  {phone && (
+                    <a href={quoCallUrl(phone)} className="flex-1" onClick={e => e.stopPropagation()}>
+                      <Button variant="outline" className="w-full gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50 text-sm">
+                        <PhoneCall className="h-3.5 w-3.5" />Call
+                      </Button>
+                    </a>
+                  )}
+                  {phone && (
+                    <a href={quoTextUrl(phone)} className="flex-1" onClick={e => e.stopPropagation()}>
+                      <Button variant="outline" className="w-full gap-1.5 text-green-600 border-green-200 hover:bg-green-50 text-sm">
+                        <MessageSquare className="h-3.5 w-3.5" />Text
+                      </Button>
+                    </a>
+                  )}
+                  {effectiveQuote?.customerEmail && (
+                    <a
+                      href={`https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(effectiveQuote.customerEmail)}`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="flex-1"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      <Button variant="outline" className="w-full gap-1.5 text-red-600 border-red-200 hover:bg-red-50 text-sm">
+                        <Mail className="h-3.5 w-3.5" />Email
+                      </Button>
+                    </a>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
 
           {/* ── Agreement signed badge ─────────────────────────────────────── */}
           {lead.agreementSignedAt && (
@@ -1459,10 +1524,11 @@ function LeadDetailSheet({
                     const p = new URLSearchParams()
                     if (lead?.id)        p.set('leadId',    lead.id)
                     if (lead?.contactId) p.set('contactId', lead.contactId)
-                    if (contactForPrefill?.name)         p.set('name',         contactForPrefill.name)
-                    if (contactForPrefill?.phone)        p.set('phone',        contactForPrefill.phone)
-                    if (contactForPrefill?.email)        p.set('email',        contactForPrefill.email)
-                    if (contactForPrefill?.businessName) p.set('businessName', contactForPrefill.businessName)
+                    if (contactForPrefill?.name)            p.set('name',         contactForPrefill.name)
+                    if (contactForPrefill?.phone)           p.set('phone',        contactForPrefill.phone)
+                    if (contactForPrefill?.email)           p.set('email',        contactForPrefill.email)
+                    if (contactForPrefill?.businessName)    p.set('businessName', contactForPrefill.businessName)
+                    if (effectiveQuote?.customerAddress)    p.set('address',      effectiveQuote.customerAddress)
                     const qs = p.toString()
                     navigate(qs ? `/calculator?${qs}` : '/calculator')
                     onClose()

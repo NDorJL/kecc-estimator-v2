@@ -1079,9 +1079,10 @@ export default function Calculator() {
 
   // Parse contact fields + leadId directly from URL params — synchronous, no async fetch needed.
   // Leads encodes name/phone/email/businessName/contactId/leadId into the URL when navigating here.
-  const { resolvedPrefillContact, prefillLeadId } = useMemo<{
+  const { resolvedPrefillContact, prefillLeadId, prefillAddress } = useMemo<{
     resolvedPrefillContact: Contact | null
     prefillLeadId: string | null
+    prefillAddress: string | null
   }>(() => {
     const hash = window.location.hash   // e.g. "#/calculator?leadId=abc&contactId=xyz&name=John"
     const qStart = hash.indexOf('?')
@@ -1092,7 +1093,8 @@ export default function Calculator() {
       const leadId = p.get('leadId')
       if (name || contactId) {
         return {
-          prefillLeadId: leadId,
+          prefillLeadId:   leadId,
+          prefillAddress:  p.get('address'),
           resolvedPrefillContact: {
             id:           contactId ?? '',
             name:         name ?? '',
@@ -1110,7 +1112,7 @@ export default function Calculator() {
       }
     }
     // Fall back to context (legacy path — direct navigation to /calculator without params)
-    return { resolvedPrefillContact: prefillContact, prefillLeadId: null }
+    return { resolvedPrefillContact: prefillContact, prefillLeadId: null, prefillAddress: null }
   }, [prefillContact]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [customerType, setCustomerType] = useState<CustomerType>('residential')
@@ -1136,7 +1138,7 @@ export default function Calculator() {
         customerName:    contact.name,
         customerPhone:   contact.phone   ?? null,
         customerEmail:   contact.email   ?? null,
-        customerAddress: null,
+        customerAddress: prefillAddress  ?? null,
         businessName:    contact.businessName ?? null,
         contactId:       contact.id,
         leadId:          prefillLeadId ?? null,
