@@ -1822,11 +1822,18 @@ export default function Marketing() {
 
     if (lead.stage === 'recurring') {
       const sub = lead.quoteId ? subByQuoteId[lead.quoteId] : undefined
-      const monthlyRate  = sub?.inSeasonMonthlyTotal ?? q?.total ?? lead.estimatedValue ?? 0
-      const isCancelled  = sub?.status?.toLowerCase() === 'cancelled'
 
-      // Determine the subscription's first billing month
-      const subStartYM = (sub?.startDate ?? q?.signedAt ?? lead.createdAt).slice(0, 7)
+      // Compute monthly rate from signed quote's subscription line items (source of truth).
+      // Falls back to sub.inSeasonMonthlyTotal → q.total → estimatedValue.
+      const subLineItems = (q?.lineItems ?? []).filter((li: any) => li.isSubscription)
+      const quoteMonthly = subLineItems.reduce((s: number, li: any) => s + (li.monthlyAmount ?? 0), 0)
+      const monthlyRate = quoteMonthly > 0
+        ? quoteMonthly
+        : (sub?.inSeasonMonthlyTotal ?? q?.total ?? lead.estimatedValue ?? 0)
+
+      // Start: when the quote was signed (or lead created as fallback)
+      const subStartYM = (q?.signedAt ?? sub?.startDate ?? lead.createdAt).slice(0, 7)
+      // Cancellation: from subscription record if exists, otherwise never cancelled
       const cancelledYM = sub?.cancelledAt ? sub.cancelledAt.slice(0, 7) : null
 
       const months = isSingleMonth
@@ -1835,7 +1842,8 @@ export default function Marketing() {
 
       return {
         amount: monthlyRate * months,
-        isEstimated: !sub || (isCancelled && !sub.cancelledAt),
+        // Only estimated if we couldn't find subscription line items on the quote
+        isEstimated: quoteMonthly === 0 && !sub,
       }
     }
 

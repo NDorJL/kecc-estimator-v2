@@ -60,6 +60,9 @@ interface AppNotification {
   subtitle: string
   colorClass: string
   path: string
+  // Optional inline action shown as a distinct button on the card
+  actionLabel?: string
+  actionPath?: string
 }
 
 // ── SMS Queue types (NEW) ────────────────────────────────────────────────────
@@ -315,7 +318,7 @@ export default function Dashboard() {
     const ss   = subs    ?? []
     const scaList = scas ?? []
 
-    // 1. Recently signed quotes (last 7 days)
+    // 1. Recently signed quotes (last 7 days) — show Schedule Job action
     const sevenDaysAgo = new Date(now - 7 * DAY)
     for (const q of qs) {
       if (q.signedAt && new Date(q.signedAt) >= sevenDaysAgo) {
@@ -325,7 +328,9 @@ export default function Dashboard() {
           title: `${q.customerName} signed their quote`,
           subtitle: `${fmt(q.total)} · ${new Date(q.signedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`,
           colorClass: 'border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-400',
-          path: '/quotes',
+          path: '/leads',
+          actionLabel: 'Schedule Job →',
+          actionPath: '/leads',
         })
       }
     }
@@ -657,21 +662,25 @@ export default function Dashboard() {
               ) : (
                 <div className="divide-y divide-border">
                   {visible.map(n => (
-                    <div key={n.id} className={`flex items-start gap-3 p-3 ${n.colorClass}`}>
+                    <div key={n.id} className={`flex items-start gap-2 p-3 ${n.colorClass}`}>
                       <button
                         onClick={() => navigate(n.path)}
-                        className="flex items-start gap-3 flex-1 min-w-0 text-left"
+                        className="flex items-start gap-2 flex-1 min-w-0 text-left"
                       >
                         <span className="text-base mt-0.5 shrink-0">{n.emoji}</span>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold truncate">{n.title}</p>
                           <p className="text-xs opacity-80 mt-0.5">{n.subtitle}</p>
+                          {n.actionLabel && (
+                            <span className="inline-block mt-1.5 text-xs font-semibold px-2 py-0.5 rounded-full bg-black/10 dark:bg-white/10">
+                              {n.actionLabel}
+                            </span>
+                          )}
                         </div>
-                        <PenLine className="h-3.5 w-3.5 opacity-50 mt-0.5 shrink-0" />
                       </button>
                       <button
                         onClick={() => dismiss(n.id)}
-                        className="shrink-0 ml-1 rounded-md p-1 opacity-60 hover:opacity-100 hover:bg-black/10 transition-all"
+                        className="shrink-0 rounded-md p-1 opacity-60 hover:opacity-100 hover:bg-black/10 transition-all"
                         aria-label="Dismiss"
                       >
                         <X className="h-3.5 w-3.5" />

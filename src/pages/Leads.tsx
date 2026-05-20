@@ -906,6 +906,20 @@ function LeadDetailSheet({
   })
   const linkedSub = linkedSubs[0] ?? null
 
+  // ── Service agreement for recurring leads (fetch by contactId) ─────────────
+  const { data: contactAgreements = [] } = useQuery<{ id: string; status: string; acceptToken: string; signedAt: string | null }[]>({
+    queryKey: ['/agreements', 'contact', lead?.contactId],
+    queryFn: () => apiGet(`/agreements?contactId=${lead!.contactId}`),
+    enabled: open && lead?.stage === 'recurring' && !!lead?.contactId,
+    select: (rows: any[]) => rows.map(r => ({
+      id: r.id,
+      status: r.status,
+      acceptToken: r.acceptToken ?? r.accept_token,
+      signedAt: r.signedAt ?? r.signed_at ?? null,
+    })),
+  })
+  const signedAgreement = contactAgreements.find(a => a.status === 'signed') ?? null
+
   const cancelSubMutation = useMutation({
     mutationFn: () => apiRequest('PATCH', `/subscriptions/${linkedSub!.id}`, { status: 'CANCELLED' }),
     onSuccess: () => {
@@ -1409,6 +1423,8 @@ function LeadDetailSheet({
         </SheetHeader>
 
         <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 items-start">
+          <div className="space-y-3">
 
           {/* ── Customer info + action buttons ─────────────────────────────── */}
           <div className="space-y-2">
@@ -1507,169 +1523,6 @@ function LeadDetailSheet({
                 <p className="text-[10px] text-green-600">
                   {new Date(lead.agreementSignedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
                 </p>
-              </div>
-            </div>
-          )}
-
-          {/* ── All quotes for this lead ───────────────────────────────── */}
-          {allLeadQuotes.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wide">
-                  Quotes ({allLeadQuotes.length})
-                </p>
-                <button
-                  className="text-xs text-primary hover:underline flex items-center gap-1"
-                  onClick={() => {
-                    const p = new URLSearchParams()
-                    if (lead?.id)        p.set('leadId',    lead.id)
-                    if (lead?.contactId) p.set('contactId', lead.contactId)
-                    if (contactForPrefill?.name)            p.set('name',         contactForPrefill.name)
-                    if (contactForPrefill?.phone)           p.set('phone',        contactForPrefill.phone)
-                    if (contactForPrefill?.email)           p.set('email',        contactForPrefill.email)
-                    if (contactForPrefill?.businessName)    p.set('businessName', contactForPrefill.businessName)
-                    if (effectiveQuote?.customerAddress)    p.set('address',      effectiveQuote.customerAddress)
-                    const qs = p.toString()
-                    navigate(qs ? `/calculator?${qs}` : '/calculator')
-                    onClose()
-                  }}
-                >
-                  <Plus className="h-3 w-3" />Add Quote
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                {allLeadQuotes
-                  .slice()
-                  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-                  .map(q => {
-                    const isPrimary = q.id === lead?.quoteId
-                    const isExpanded = expandedQuoteId === q.id
-                    const summary = servicesSummary(q.lineItems)
-                    const isRevision = !!q.revisedFromId
-                    const isCurrent = isRevision  // revisions are always the "current" version
-                    // ← NEW: flag the original when a revision exists in this lead's quotes
-                    const hasRevision = !isRevision && allLeadQuotes.some(other => other.revisedFromId === q.id)
-                    return (
-                      <div key={q.id} className={`rounded-xl border overflow-hidden ${isCurrent ? 'border-green-500/50' : isPrimary ? 'border-primary/40' : ''}`}>
-                        {/* Quote row header */}
-                        <div className="flex items-center gap-2 px-3 py-2 bg-muted/20">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              {isCurrent && (
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-green-600 text-white">
-                                  Current
-                                </span>
-                              )}
-                              {/* ← NEW: "Original" badge replaces "Primary" when a revision exists */}
-                              {hasRevision && (
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
-                                  Original
-                                </span>
-                              )}
-                              {isPrimary && !isCurrent && !hasRevision && (
-                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground">
-                                  Primary
-                                </span>
-                              )}
-                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${QUOTE_STATUS_COLORS[q.status] ?? 'bg-muted text-muted-foreground'}`}>
-                                {q.status}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className="text-sm font-bold text-primary">${q.total.toFixed(0)}</span>
-                              {summary && <span className="text-xs text-muted-foreground truncate">{summary}</span>}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <Button
-                              variant="ghost" size="sm"
-                              className="h-7 px-2 text-xs gap-1 text-primary"
-                              onClick={() => { setLocalQuote(q); setEditingQuote(true) }}
-                            >
-                              <FileSignature className="h-3 w-3" />Edit
-                            </Button>
-                            <button
-                              onClick={() => setExpandedQuoteId(isExpanded ? null : q.id)}
-                              className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-1"
-                            >
-                              {isExpanded ? '▲' : '▼'}
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Expanded detail */}
-                        {isExpanded && (
-                          <div className="border-t">
-                            <QuoteDetailPanel quote={q} />
-                            <div className="flex gap-2 px-3 pb-3">
-                              {!isPrimary && (
-                                <Button
-                                  variant="outline" size="sm"
-                                  className="flex-1 text-xs text-primary border-primary/30"
-                                  disabled={setPrimaryMutation.isPending}
-                                  onClick={() => setPrimaryMutation.mutate(q.id)}
-                                >
-                                  <CheckCircle2 className="h-3 w-3 mr-1" />
-                                  {setPrimaryMutation.isPending ? 'Setting…' : 'Set as Primary'}
-                                </Button>
-                              )}
-                              {/* ── Send / PDF / Email actions ─────── */}
-                              <div className="flex flex-col gap-1.5 flex-1">
-                                {/* SMS send row */}
-                                {q.customerPhone && (() => {
-                                  const qIsRecurring = isRecurringQuote(q)
-                                  return qIsRecurring ? (
-                                    <div className="flex gap-1">
-                                      <Button variant="outline" size="sm" className="flex-1 text-xs text-blue-700 border-blue-300 hover:bg-blue-50 px-1.5"
-                                        onClick={() => { setLocalQuote(q); setSendMode('quote'); setShowSendConfirm(true) }}>
-                                        <FileText className="h-3 w-3 mr-1 shrink-0" />Quote
-                                      </Button>
-                                      <Button variant="outline" size="sm" className="flex-1 text-xs text-violet-700 border-violet-300 hover:bg-violet-50 px-1.5"
-                                        onClick={() => { setLocalQuote(q); setSendMode('agreement'); setShowSendConfirm(true) }}>
-                                        <ScrollText className="h-3 w-3 mr-1 shrink-0" />Agreement
-                                      </Button>
-                                      <Button variant="outline" size="sm" className="flex-1 text-xs text-green-700 border-green-300 hover:bg-green-50 px-1.5"
-                                        onClick={() => { setLocalQuote(q); setSendMode('both'); setShowSendConfirm(true) }}>
-                                        <Send className="h-3 w-3 mr-1 shrink-0" />Both
-                                      </Button>
-                                    </div>
-                                  ) : (
-                                    <Button variant="outline" size="sm" className="w-full text-xs text-blue-700 border-blue-300 hover:bg-blue-50"
-                                      onClick={() => { setLocalQuote(q); setSendMode('quote'); setShowSendConfirm(true) }}>
-                                      <Send className="h-3 w-3 mr-1" />
-                                      {q.sentAt ? 'Resend via SMS' : 'Send via SMS'}
-                                    </Button>
-                                  )
-                                })()}
-
-                                {/* PDF + Email row */}
-                                <div className="flex gap-1.5">
-                                  <Button
-                                    variant="outline" size="sm"
-                                    className="flex-1 text-xs gap-1.5"
-                                    onClick={() => window.open(`/.netlify/functions/pdf-quote?quoteId=${q.id}`, '_blank')}
-                                  >
-                                    <FileText className="h-3 w-3 shrink-0" />Download PDF
-                                  </Button>
-                                  {/* ← CHANGED (FIX 1): real email send instead of mailto: */}
-                                  {q.customerEmail && (
-                                    <Button
-                                      variant="outline" size="sm"
-                                      className="flex-1 text-xs gap-1.5"
-                                      onClick={() => setEmailConfirmQuote(q)}
-                                    >
-                                      <Mail className="h-3 w-3 shrink-0" />Email
-                                    </Button>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
               </div>
             </div>
           )}
@@ -1801,6 +1654,187 @@ function LeadDetailSheet({
               placeholder="Add notes about this lead…"
             />
           </div>
+
+          </div>{/* END LEFT COLUMN */}
+          <div className="space-y-3">{/* START RIGHT COLUMN */}
+
+          {/* ── All quotes for this lead ───────────────────────────────── */}
+          {allLeadQuotes.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground uppercase font-semibold tracking-wide">
+                  Quotes ({allLeadQuotes.length})
+                </p>
+                <button
+                  className="text-xs text-primary hover:underline flex items-center gap-1"
+                  onClick={() => {
+                    const p = new URLSearchParams()
+                    if (lead?.id)        p.set('leadId',    lead.id)
+                    if (lead?.contactId) p.set('contactId', lead.contactId)
+                    if (contactForPrefill?.name)            p.set('name',         contactForPrefill.name)
+                    if (contactForPrefill?.phone)           p.set('phone',        contactForPrefill.phone)
+                    if (contactForPrefill?.email)           p.set('email',        contactForPrefill.email)
+                    if (contactForPrefill?.businessName)    p.set('businessName', contactForPrefill.businessName)
+                    if (effectiveQuote?.customerAddress)    p.set('address',      effectiveQuote.customerAddress)
+                    const qs = p.toString()
+                    navigate(qs ? `/calculator?${qs}` : '/calculator')
+                    onClose()
+                  }}
+                >
+                  <Plus className="h-3 w-3" />Add Quote
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {(() => {
+                  const sorted = allLeadQuotes
+                    .slice()
+                    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+                  // Build index of non-revision, non-primary additional quotes for numbering
+                  const additionalQuotes = sorted.filter(q =>
+                    q.id !== lead?.quoteId && !q.revisedFromId &&
+                    !allLeadQuotes.some(other => other.revisedFromId === q.id)
+                  )
+                  return sorted
+                    .slice()
+                    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                    .map(q => {
+                    const isPrimary = q.id === lead?.quoteId
+                    const isExpanded = expandedQuoteId === q.id
+                    const summary = servicesSummary(q.lineItems)
+                    const isRevision = !!q.revisedFromId
+                    const isCurrent = isRevision  // revisions are always the "current" version
+                    const hasRevision = !isRevision && allLeadQuotes.some(other => other.revisedFromId === q.id)
+                    const additionalIdx = additionalQuotes.findIndex(aq => aq.id === q.id)
+                    const isAdditional = !isPrimary && !isRevision && !hasRevision && additionalIdx >= 0
+                    return (
+                      <div key={q.id} className={`rounded-xl border overflow-hidden ${isCurrent ? 'border-green-500/50' : isPrimary ? 'border-primary/40' : ''}`}>
+                        {/* Quote row header */}
+                        <div className="flex items-center gap-2 px-3 py-2 bg-muted/20">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {isCurrent && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-green-600 text-white">
+                                  Current
+                                </span>
+                              )}
+                              {hasRevision && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border">
+                                  Original
+                                </span>
+                              )}
+                              {isPrimary && !isCurrent && !hasRevision && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground">
+                                  Primary
+                                </span>
+                              )}
+                              {isAdditional && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300 border border-orange-200 dark:border-orange-700">
+                                  Additional Quote #{additionalIdx + 1}
+                                </span>
+                              )}
+                              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${QUOTE_STATUS_COLORS[q.status] ?? 'bg-muted text-muted-foreground'}`}>
+                                {q.status}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-sm font-bold text-primary">${q.total.toFixed(0)}</span>
+                              {summary && <span className="text-xs text-muted-foreground truncate">{summary}</span>}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <Button
+                              variant="ghost" size="sm"
+                              className="h-7 px-2 text-xs gap-1 text-primary"
+                              onClick={() => { setLocalQuote(q); setEditingQuote(true) }}
+                            >
+                              <FileSignature className="h-3 w-3" />Edit
+                            </Button>
+                            <button
+                              onClick={() => setExpandedQuoteId(isExpanded ? null : q.id)}
+                              className="text-xs text-muted-foreground hover:text-foreground px-1.5 py-1"
+                            >
+                              {isExpanded ? '▲' : '▼'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Expanded detail */}
+                        {isExpanded && (
+                          <div className="border-t">
+                            <QuoteDetailPanel quote={q} />
+                            <div className="flex gap-2 px-3 pb-3">
+                              {!isPrimary && (
+                                <Button
+                                  variant="outline" size="sm"
+                                  className="flex-1 text-xs text-primary border-primary/30"
+                                  disabled={setPrimaryMutation.isPending}
+                                  onClick={() => setPrimaryMutation.mutate(q.id)}
+                                >
+                                  <CheckCircle2 className="h-3 w-3 mr-1" />
+                                  {setPrimaryMutation.isPending ? 'Setting…' : 'Set as Primary'}
+                                </Button>
+                              )}
+                              {/* ── Send / PDF / Email actions ─────── */}
+                              <div className="flex flex-col gap-1.5 flex-1">
+                                {/* SMS send row */}
+                                {q.customerPhone && (() => {
+                                  const qIsRecurring = isRecurringQuote(q)
+                                  return qIsRecurring ? (
+                                    <div className="flex gap-1">
+                                      <Button variant="outline" size="sm" className="flex-1 text-xs text-blue-700 border-blue-300 hover:bg-blue-50 px-1.5"
+                                        onClick={() => { setLocalQuote(q); setSendMode('quote'); setShowSendConfirm(true) }}>
+                                        <FileText className="h-3 w-3 mr-1 shrink-0" />Quote
+                                      </Button>
+                                      <Button variant="outline" size="sm" className="flex-1 text-xs text-violet-700 border-violet-300 hover:bg-violet-50 px-1.5"
+                                        onClick={() => { setLocalQuote(q); setSendMode('agreement'); setShowSendConfirm(true) }}>
+                                        <ScrollText className="h-3 w-3 mr-1 shrink-0" />Agreement
+                                      </Button>
+                                      <Button variant="outline" size="sm" className="flex-1 text-xs text-green-700 border-green-300 hover:bg-green-50 px-1.5"
+                                        onClick={() => { setLocalQuote(q); setSendMode('both'); setShowSendConfirm(true) }}>
+                                        <Send className="h-3 w-3 mr-1 shrink-0" />Both
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <Button variant="outline" size="sm" className="w-full text-xs text-blue-700 border-blue-300 hover:bg-blue-50"
+                                      onClick={() => { setLocalQuote(q); setSendMode('quote'); setShowSendConfirm(true) }}>
+                                      <Send className="h-3 w-3 mr-1" />
+                                      {q.sentAt ? 'Resend via SMS' : 'Send via SMS'}
+                                    </Button>
+                                  )
+                                })()}
+
+                                {/* PDF + Email row */}
+                                <div className="flex gap-1.5">
+                                  <Button
+                                    variant="outline" size="sm"
+                                    className="flex-1 text-xs gap-1.5"
+                                    onClick={() => window.open(`/.netlify/functions/pdf-quote?quoteId=${q.id}`, '_blank')}
+                                  >
+                                    <FileText className="h-3 w-3 shrink-0" />Download PDF
+                                  </Button>
+                                  {/* ← CHANGED (FIX 1): real email send instead of mailto: */}
+                                  {q.customerEmail && (
+                                    <Button
+                                      variant="outline" size="sm"
+                                      className="flex-1 text-xs gap-1.5"
+                                      onClick={() => setEmailConfirmQuote(q)}
+                                    >
+                                      <Mail className="h-3 w-3 shrink-0" />Email
+                                    </Button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                })()}
+              </div>
+            </div>
+          )}
 
           {/* ── Create Quote (only when zero quotes exist for this lead) ──── */}
           {allLeadQuotes.length === 0 && (
@@ -2194,18 +2228,78 @@ function LeadDetailSheet({
             )
           })()}
 
+          {/* ── Photo Stacks ─────────────────────────────────────────────── */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                <ImageIcon className="h-3.5 w-3.5" />
+                Photos
+                {stacks.length > 0 && (
+                  <span className="text-muted-foreground/60 font-normal">
+                    · {stacks.reduce((n, s) => n + s.photos.length, 0)} photos in {stacks.length} {stacks.length === 1 ? 'stack' : 'stacks'}
+                  </span>
+                )}
+              </p>
+              <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={addStack}>
+                <Plus className="h-3.5 w-3.5" />New Stack
+              </Button>
+            </div>
+
+            {stacks.length === 0 && (
+              <button
+                className="w-full rounded-xl border border-dashed border-border/60 py-6 flex flex-col items-center gap-2 text-muted-foreground hover:bg-muted/30 transition-colors"
+                onClick={addStack}
+              >
+                <ImageIcon className="h-6 w-6 opacity-40" />
+                <span className="text-xs">Create a stack to start adding photos</span>
+              </button>
+            )}
+
+            {stacks.map(stack => (
+              <PhotoStackCard
+                key={stack.id}
+                stack={stack}
+                allStacks={stacks}
+                uploadingThisStack={uploadingStackId === stack.id}
+                onUpload={uploadToStack}
+                onDelete={(url) => deletePhoto(stack.id, url)}
+                onMove={(url, toStackId) => movePhoto(url, stack.id, toStackId)}
+                onReorder={(from, to) => reorderPhotos(stack.id, from, to)}
+                onUpdateLabel={(label) => updateStack(stack.id, { label })}
+                onUpdateDescription={(description) => updateStack(stack.id, { description })}
+                onDeleteStack={() => deleteStack(stack.id)}
+                onViewPhoto={setViewPhoto}
+              />
+            ))}
+          </div>
+
           {/* ── Recurring subscription status ─────────────────────────────── */}
           {lead.stage === 'recurring' && (
             <div className="rounded-xl border border-dashed border-indigo-400/60 bg-indigo-50/30 dark:bg-indigo-950/20 p-3 space-y-2">
               <p className="text-xs font-semibold text-indigo-700 dark:text-indigo-400 uppercase tracking-wide">
-                Recurring Subscription
+                Recurring Plan
               </p>
-              {linkedSub ? (
-                <>
+
+              {/* Monthly rate derived from signed quote's subscription line items */}
+              {effectiveQuote && (() => {
+                const subItems = effectiveQuote.lineItems.filter(li => li.isSubscription)
+                const monthlyFromQuote = subItems.reduce((s, li) => s + (li.monthlyAmount ?? 0), 0)
+                const displayRate = monthlyFromQuote > 0
+                  ? monthlyFromQuote
+                  : (linkedSub?.inSeasonMonthlyTotal ?? effectiveQuote.total)
+                return (
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">Monthly rate</span>
-                    <span className="font-semibold">${linkedSub.inSeasonMonthlyTotal.toFixed(2)}/mo</span>
+                    <span className="font-semibold text-indigo-700 dark:text-indigo-400">
+                      ${displayRate.toFixed(2)}/mo
+                    </span>
                   </div>
+                )
+              })()}
+
+              {/* Subscription status if linked */}
+              {linkedSub && (
+                <>
                   <div className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">Started</span>
                     <span className="font-medium">{linkedSub.startDate}</span>
@@ -2227,8 +2321,7 @@ function LeadDetailSheet({
                   {linkedSub.status === 'ACTIVE' && (
                     !confirmCancelSub ? (
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="outline" size="sm"
                         className="w-full text-rose-600 border-rose-300 hover:bg-rose-50 mt-1"
                         onClick={() => setConfirmCancelSub(true)}
                       >
@@ -2237,15 +2330,13 @@ function LeadDetailSheet({
                     ) : (
                       <div className="space-y-2 pt-1">
                         <p className="text-xs text-rose-700 font-medium">
-                          This will freeze revenue on the marketing page. Cannot be undone.
+                          This will freeze revenue projections. Cannot be undone.
                         </p>
                         <div className="flex gap-2">
                           <Button variant="outline" size="sm" className="flex-1" onClick={() => setConfirmCancelSub(false)}>
                             Keep Active
                           </Button>
-                          <Button
-                            size="sm"
-                            className="flex-1 bg-rose-600 hover:bg-rose-700 text-white"
+                          <Button size="sm" className="flex-1 bg-rose-600 hover:bg-rose-700 text-white"
                             disabled={cancelSubMutation.isPending}
                             onClick={() => cancelSubMutation.mutate()}
                           >
@@ -2256,17 +2347,30 @@ function LeadDetailSheet({
                     )
                   )}
                 </>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  No linked subscription found. Revenue is estimated from the quote total.{' '}
-                  <button
-                    className="text-primary underline-offset-2 hover:underline"
-                    onClick={() => navigate('/subscriptions')}
-                  >
-                    View subscriptions
-                  </button>
-                </p>
               )}
+
+              {/* View quote + service agreement buttons */}
+              <div className="flex gap-2 pt-1">
+                {effectiveQuote && (
+                  <Button
+                    variant="outline" size="sm" className="flex-1 text-xs gap-1"
+                    onClick={() => { setLocalQuote(effectiveQuote); setEditingQuote(true) }}
+                  >
+                    <FileText className="h-3 w-3" />View Quote
+                  </Button>
+                )}
+                {signedAgreement && (
+                  <Button
+                    variant="outline" size="sm" className="flex-1 text-xs gap-1"
+                    onClick={() => window.open(`/.netlify/functions/esign?token=${signedAgreement.acceptToken}`, '_blank')}
+                  >
+                    <ScrollText className="h-3 w-3" />View Agreement
+                  </Button>
+                )}
+                {lead.agreementSignedAt && !signedAgreement && (
+                  <p className="text-[10px] text-muted-foreground">Agreement signed — loading…</p>
+                )}
+              </div>
             </div>
           )}
 
@@ -2436,50 +2540,8 @@ function LeadDetailSheet({
             </div>
           )}
 
-          {/* ── Photo Stacks ─────────────────────────────────────────────── */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
-                <ImageIcon className="h-3.5 w-3.5" />
-                Photos
-                {stacks.length > 0 && (
-                  <span className="text-muted-foreground/60 font-normal">
-                    · {stacks.reduce((n, s) => n + s.photos.length, 0)} photos in {stacks.length} {stacks.length === 1 ? 'stack' : 'stacks'}
-                  </span>
-                )}
-              </p>
-              <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5" onClick={addStack}>
-                <Plus className="h-3.5 w-3.5" />New Stack
-              </Button>
-            </div>
-
-            {stacks.length === 0 && (
-              <button
-                className="w-full rounded-xl border border-dashed border-border/60 py-6 flex flex-col items-center gap-2 text-muted-foreground hover:bg-muted/30 transition-colors"
-                onClick={addStack}
-              >
-                <ImageIcon className="h-6 w-6 opacity-40" />
-                <span className="text-xs">Create a stack to start adding photos</span>
-              </button>
-            )}
-
-            {stacks.map(stack => (
-              <PhotoStackCard
-                key={stack.id}
-                stack={stack}
-                allStacks={stacks}
-                uploadingThisStack={uploadingStackId === stack.id}
-                onUpload={uploadToStack}
-                onDelete={(url) => deletePhoto(stack.id, url)}
-                onMove={(url, toStackId) => movePhoto(url, stack.id, toStackId)}
-                onReorder={(from, to) => reorderPhotos(stack.id, from, to)}
-                onUpdateLabel={(label) => updateStack(stack.id, { label })}
-                onUpdateDescription={(description) => updateStack(stack.id, { description })}
-                onDeleteStack={() => deleteStack(stack.id)}
-                onViewPhoto={setViewPhoto}
-              />
-            ))}
-          </div>
+          </div>{/* END RIGHT COLUMN */}
+          </div>{/* END GRID */}
 
           {/* ── Lead actions (delete) ─────────────────────────────────────── */}
           <div className="rounded-xl border border-dashed border-destructive/40 p-3 space-y-2">
