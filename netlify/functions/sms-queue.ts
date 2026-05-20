@@ -35,6 +35,35 @@ export const handler: Handler = async (event) => {
   const method    = event.httpMethod
 
   try {
+    // ── POST /sms-queue — create a new queued message ───────────────────────
+    if (method === 'POST' && !id) {
+      const body = JSON.parse(event.body ?? '{}')
+      const { to_phone, message, type, lead_id, contact_id } = body as {
+        to_phone: string
+        message: string
+        type: string
+        lead_id?: string | null
+        contact_id?: string | null
+      }
+      if (!to_phone || !message) {
+        return { statusCode: 400, headers: CORS, body: JSON.stringify({ message: 'to_phone and message are required' }) }
+      }
+      const { data, error } = await supabase
+        .from('sms_queue')
+        .insert({
+          to_phone,
+          message,
+          type:       type ?? 'custom',
+          lead_id:    lead_id    ?? null,
+          contact_id: contact_id ?? null,
+          status:     'pending',
+        })
+        .select()
+        .single()
+      if (error) throw new Error(error.message)
+      return { statusCode: 201, headers: CORS, body: JSON.stringify(data) }
+    }
+
     // ── GET /sms-queue — list pending items ──────────────────────────────────
     if (method === 'GET' && !id) {
       const { data, error } = await supabase

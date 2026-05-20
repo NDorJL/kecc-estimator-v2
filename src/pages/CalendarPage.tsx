@@ -690,30 +690,43 @@ function NewQuoteVisitSheet({
         }).catch(() => {})
       }
 
-      // 3. Send SMS confirmation if enabled and phone provided
+      // 3. Queue SMS confirmation for Dashboard approval if enabled and phone provided
       if (sendSms && customerPhone) {
         try {
-          const smsRes = await fetch('/.netlify/functions/sms', {
+          // Build message client-side (mirrors formatQuoteVisitSms in sms.ts)
+          const [yr, mo, dy] = scheduledDate.split('-').map(Number)
+          const dateObj  = new Date(yr, mo - 1, dy)
+          const dayOfWeek = dateObj.toLocaleDateString('en-US', { weekday: 'long' })
+          const month     = dateObj.toLocaleDateString('en-US', { month: 'long' })
+          let timeStr = scheduledTime ?? ''
+          if (timeStr) {
+            const [hh, mm] = timeStr.split(':').map(Number)
+            const ampm = hh >= 12 ? 'PM' : 'AM'
+            const h12  = hh % 12 || 12
+            timeStr = `${h12}:${String(mm).padStart(2, '0')} ${ampm}`
+          }
+          const firstName = customerName.split(' ')[0]
+          const queueMsg =
+            `Hi ${firstName}! 👋 This is Knox Exterior Care Co. We're looking forward to meeting you!\n\n` +
+            `Your FREE estimate visit is confirmed for:\n` +
+            `📅 ${dayOfWeek}, ${month} ${dy}, ${yr}${timeStr ? ` at ${timeStr}` : ''}\n\n` +
+            `We'll come out to your property, take a look at what you need, and put together a custom quote — no pressure, no obligation.\n\n` +
+            `Questions? Just reply to this message.\n\n` +
+            `— Knox Exterior Care Co.\n\nThis is an automated message. Reply STOP to opt out.`
+
+          await fetch('/.netlify/functions/sms-queue', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              action: 'quote-visit-confirmation',
-              to: customerPhone,
-              customerName,
-              scheduledDate,
-              scheduledTime,
-              contactId: selectedContact?.id ?? null,
+              to_phone:   customerPhone,
+              message:    queueMsg,
+              type:       'service_reminder',
+              contact_id: selectedContact?.id ?? null,
             }),
           })
-          if (!smsRes.ok) {
-            const errData = await smsRes.json().catch(() => ({ message: `HTTP ${smsRes.status}` }))
-            const errMsg = errData?.message ?? `HTTP ${smsRes.status}`
-            toast({ title: 'Quote visit added — SMS failed', description: errMsg, variant: 'destructive' })
-          } else {
-            toast({ title: 'Quote visit added', description: `Confirmation text sent to ${customerPhone}` })
-          }
+          toast({ title: 'Quote visit added', description: 'Confirmation SMS queued — approve it from the Dashboard.' })
         } catch {
-          toast({ title: 'Quote visit added — SMS failed', description: 'Could not reach SMS function.', variant: 'destructive' })
+          toast({ title: 'Quote visit added', description: 'Could not queue confirmation SMS.', variant: 'destructive' })
         }
       } else {
         toast({ title: 'Quote visit added' })
@@ -882,7 +895,7 @@ function NewQuoteVisitSheet({
             <div className="flex items-center gap-3 rounded-md bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 px-3 py-2.5">
               <MessageSquare className="h-4 w-4 text-purple-600 shrink-0" />
               <div className="flex-1 text-xs text-purple-800 dark:text-purple-200">
-                Auto-send confirmation text to {customerPhone}
+                Queue confirmation text to {customerPhone} for approval
               </div>
               <button
                 type="button"

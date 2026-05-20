@@ -779,7 +779,7 @@ export default function Dashboard() {
         />
         <KpiCard
           title="Leads"
-          value={leadsLoading ? '—' : String((leads ?? []).filter(l => l.stage !== 'finished_paid').length)}
+          value={leadsLoading ? '—' : String((leads ?? []).filter(l => l.stage !== 'finished_paid' && l.stage !== 'lost').length)}
           sub="active pipeline"
           icon={Target}
           loading={leadsLoading}
