@@ -448,6 +448,10 @@ function PhotoStackCard({
 
 // ── Kanban Column ─────────────────────────────────────────────────────────────
 
+const MIN_COL_WIDTH = 100
+const MAX_COL_WIDTH = 400
+const DEFAULT_COL_WIDTH = 125
+
 function KanbanColumn({
   stage,
   leads,
@@ -458,6 +462,8 @@ function KanbanColumn({
   addresses,
   agreementBadgeIds,
   leadRecurring,
+  initialWidth,
+  onWidthChange,
   onCardClick,
 }: {
   stage: typeof STAGES[number]
@@ -469,12 +475,43 @@ function KanbanColumn({
   addresses: Record<string, string | null>
   agreementBadgeIds: Set<string>
   leadRecurring: Record<string, { isRecurring: boolean; monthlyRate: number }>
+  initialWidth: number
+  onWidthChange: (stageId: string, width: number) => void
   onCardClick: (lead: Lead) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id })
   const [search, setSearch] = useState('')
   const isRecurring = stage.id === 'recurring'
   const activeSearch = isRecurring ? search : ''
+
+  // Resize state — local during drag, committed to parent on pointer up
+  const [colWidth, setColWidth] = useState(initialWidth)
+  const resizing = useRef(false)
+  const startX   = useRef(0)
+  const startW   = useRef(0)
+
+  function onResizeDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.stopPropagation()
+    e.preventDefault()
+    resizing.current = true
+    startX.current   = e.clientX
+    startW.current   = colWidth
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  }
+
+  function onResizeMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!resizing.current) return
+    const newW = Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, startW.current + e.clientX - startX.current))
+    setColWidth(newW)
+  }
+
+  function onResizeUp(e: React.PointerEvent<HTMLDivElement>) {
+    if (!resizing.current) return
+    resizing.current = false
+    const newW = Math.max(MIN_COL_WIDTH, Math.min(MAX_COL_WIDTH, startW.current + e.clientX - startX.current))
+    setColWidth(newW)
+    onWidthChange(stage.id, newW)
+  }
 
   const filteredLeads = activeSearch
     ? leads.filter(l => {
@@ -486,7 +523,20 @@ function KanbanColumn({
     : leads
 
   return (
-    <div className={`flex flex-col rounded-xl border w-[125px] min-w-[110px] shrink-0 ${stage.color} ${isOver ? 'ring-2 ring-primary' : ''}`}>
+    <div
+      style={{ width: colWidth }}
+      className={`relative flex flex-col rounded-xl border shrink-0 ${stage.color} ${isOver ? 'ring-2 ring-primary' : ''}`}
+    >
+      {/* Drag handle on right edge */}
+      <div
+        className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize z-10 flex items-center justify-center group"
+        onPointerDown={onResizeDown}
+        onPointerMove={onResizeMove}
+        onPointerUp={onResizeUp}
+        onPointerCancel={onResizeUp}
+      >
+        <div className="w-0.5 h-8 rounded-full bg-border/50 group-hover:bg-primary/50 transition-colors" />
+      </div>
       <div className="flex items-center justify-between px-2.5 py-2 border-b bg-white/50 dark:bg-black/20 rounded-t-xl">
         <span className={`text-xs font-semibold ${stage.headerColor ?? ''}`}>{stage.label}</span>
         <Badge variant="secondary" className="text-xs h-5 px-1.5">{leads.length}</Badge>
@@ -3551,6 +3601,22 @@ export default function Leads() {
   // Mobile bottom quotes bar — open by default so quotes are discoverable
   const [quotesBarOpen, setQuotesBarOpen] = useState(true)
 
+  // ── Resizable column widths (persisted to localStorage) ───────────────────
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('kecc-kanban-col-widths')
+      return saved ? JSON.parse(saved) : {}
+    } catch { return {} }
+  })
+
+  const handleColWidthChange = useCallback((stageId: string, width: number) => {
+    setColumnWidths(prev => {
+      const next = { ...prev, [stageId]: width }
+      try { localStorage.setItem('kecc-kanban-col-widths', JSON.stringify(next)) } catch { /* noop */ }
+      return next
+    })
+  }, [])
+
   // Quotes for right panel: exclude any already in the pipeline, sort by priority
   const sortedQuotes = [...(quotes ?? [])]
     .filter(q => !quoteLeadMap[q.id])
@@ -3646,6 +3712,8 @@ export default function Leads() {
                       addresses={addresses}
                       agreementBadgeIds={agreementBadgeIds}
                       leadRecurring={leadRecurring}
+                      initialWidth={columnWidths[stage.id] ?? DEFAULT_COL_WIDTH}
+                      onWidthChange={handleColWidthChange}
                       onCardClick={l => setSelectedLead(l)}
                     />
                   ))}
