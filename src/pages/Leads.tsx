@@ -84,6 +84,8 @@ function LeadCard({
   address,
   onClick,
   showAgreementBadge,
+  isRecurring,
+  monthlyRate,
 }: {
   lead: Lead
   displayName: string
@@ -93,6 +95,8 @@ function LeadCard({
   address?: string | null
   onClick: () => void
   showAgreementBadge?: boolean
+  isRecurring?: boolean
+  monthlyRate?: number
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: lead.id })
 
@@ -103,13 +107,24 @@ function LeadCard({
       {...attributes}
       {...listeners}
       onClick={onClick}
-      className="rounded-lg border bg-card p-2.5 shadow-sm cursor-pointer hover:border-primary/50 transition-colors touch-none"
+      className={`rounded-lg border p-2.5 shadow-sm cursor-pointer transition-colors touch-none ${
+        isRecurring
+          ? 'bg-indigo-50/40 dark:bg-indigo-950/30 border-indigo-300/60 dark:border-indigo-700/60 hover:border-indigo-400'
+          : 'bg-card hover:border-primary/50'
+      }`}
     >
       <div className="flex items-start justify-between gap-1">
-        <p className="text-sm font-semibold leading-snug">{displayName}</p>
-        {showAgreementBadge && (
-          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0 mt-0.5" aria-label="Agreement signed" />
-        )}
+        <p className="text-sm font-semibold leading-snug truncate">{displayName}</p>
+        <div className="flex items-center gap-1 shrink-0">
+          {isRecurring && (
+            <span className="text-[9px] font-bold uppercase tracking-wide text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/50 rounded px-1 py-0.5 leading-none">
+              ↻
+            </span>
+          )}
+          {showAgreementBadge && (
+            <CheckCircle2 className="h-3.5 w-3.5 text-green-500" aria-label="Agreement signed" />
+          )}
+        </div>
       </div>
       {subline && (
         <p className="text-xs text-muted-foreground mt-0.5 truncate">{subline}</p>
@@ -124,13 +139,12 @@ function LeadCard({
           <Phone className="h-2.5 w-2.5 shrink-0" />{phone}
         </p>
       )}
-      {email && (
-        <p className="text-[10px] text-muted-foreground truncate flex items-center gap-0.5">
-          <Mail className="h-2.5 w-2.5 shrink-0" />{email}
-        </p>
-      )}
       <div className="flex items-center justify-between mt-1.5">
-        {lead.estimatedValue ? (
+        {isRecurring && monthlyRate && monthlyRate > 0 ? (
+          <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">
+            {fmtMoney(monthlyRate)}<span className="text-[10px] font-normal opacity-70">/mo</span>
+          </span>
+        ) : lead.estimatedValue ? (
           <span className="text-xs font-bold text-primary">{fmtMoney(lead.estimatedValue)}</span>
         ) : (
           <span />
@@ -415,15 +429,16 @@ function PhotoStackCard({
         )}
       </div>}
 
-      {/* Hidden file input */}
+      {/* Hidden file input — allows up to 5 photos/videos at once */}
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        accept="image/*,video/*"
+        multiple
         className="hidden"
         onChange={e => {
-          const file = e.target.files?.[0]
-          if (file) onUpload(stack.id, file)
+          const files = Array.from(e.target.files ?? []).slice(0, 5)
+          files.forEach(file => onUpload(stack.id, file))
           e.target.value = ''
         }}
       />
@@ -442,6 +457,7 @@ function KanbanColumn({
   emails,
   addresses,
   agreementBadgeIds,
+  leadRecurring,
   onCardClick,
 }: {
   stage: typeof STAGES[number]
@@ -452,6 +468,7 @@ function KanbanColumn({
   emails: Record<string, string | null>
   addresses: Record<string, string | null>
   agreementBadgeIds: Set<string>
+  leadRecurring: Record<string, { isRecurring: boolean; monthlyRate: number }>
   onCardClick: (lead: Lead) => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage.id })
@@ -469,7 +486,7 @@ function KanbanColumn({
     : leads
 
   return (
-    <div className={`flex flex-col rounded-xl border min-w-[140px] flex-1 shrink-0 ${stage.color} ${isOver ? 'ring-2 ring-primary' : ''}`}>
+    <div className={`flex flex-col rounded-xl border w-[125px] min-w-[110px] shrink-0 ${stage.color} ${isOver ? 'ring-2 ring-primary' : ''}`}>
       <div className="flex items-center justify-between px-2.5 py-2 border-b bg-white/50 dark:bg-black/20 rounded-t-xl">
         <span className={`text-xs font-semibold ${stage.headerColor ?? ''}`}>{stage.label}</span>
         <Badge variant="secondary" className="text-xs h-5 px-1.5">{leads.length}</Badge>
@@ -484,7 +501,7 @@ function KanbanColumn({
           />
         </div>
       )}
-      <div ref={setNodeRef} className="flex flex-col gap-2 p-2 min-h-[100px]">
+      <div ref={setNodeRef} className={`flex flex-col gap-2 p-2 min-h-[100px] ${isRecurring ? 'overflow-y-auto max-h-[calc(100vh-12rem)]' : ''}`}>
         <SortableContext items={filteredLeads.map(l => l.id)} strategy={verticalListSortingStrategy}>
           {filteredLeads.map(l => (
             <LeadCard
@@ -496,6 +513,8 @@ function KanbanColumn({
               email={emails[l.id]}
               address={addresses[l.id]}
               showAgreementBadge={agreementBadgeIds.has(l.id)}
+              isRecurring={leadRecurring[l.id]?.isRecurring ?? false}
+              monthlyRate={leadRecurring[l.id]?.monthlyRate ?? 0}
               onClick={() => onCardClick(l)}
             />
           ))}
@@ -1813,7 +1832,6 @@ function LeadDetailSheet({
                                   >
                                     <FileText className="h-3 w-3 shrink-0" />Download PDF
                                   </Button>
-                                  {/* ← CHANGED (FIX 1): real email send instead of mailto: */}
                                   {q.customerEmail && (
                                     <Button
                                       variant="outline" size="sm"
@@ -1824,6 +1842,14 @@ function LeadDetailSheet({
                                     </Button>
                                   )}
                                 </div>
+                                {/* Delete this specific quote — placed here instead of a separate Quote Actions box */}
+                                <Button
+                                  variant="ghost" size="sm"
+                                  className="w-full text-xs text-destructive/70 hover:text-destructive hover:bg-destructive/5 mt-0.5"
+                                  onClick={() => { setLocalQuote(q); setConfirmDeleteQuote(true) }}
+                                >
+                                  <Trash2 className="h-3 w-3 mr-1" />Delete Quote
+                                </Button>
                               </div>
                             </div>
                           </div>
@@ -2418,33 +2444,20 @@ function LeadDetailSheet({
           )}
 
           {/* ── Quote actions ─────────────────────────────────────────────── */}
-          {effectiveQuote && (
-            <div className="rounded-xl border border-dashed border-destructive/40 p-3 space-y-2">
-              <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide">Quote Actions</p>
-              {!confirmDeleteQuote ? (
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline" size="sm" className="flex-1 text-destructive border-destructive/30 hover:bg-destructive/5"
-                    onClick={() => setConfirmDeleteQuote(true)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />Delete Quote
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <p className="text-xs text-destructive font-medium">Permanently delete this quote? This cannot be undone.</p>
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" className="flex-1" onClick={() => setConfirmDeleteQuote(false)}>Cancel</Button>
-                    <Button
-                      variant="destructive" size="sm" className="flex-1"
-                      disabled={deleteQuoteMutation.isPending}
-                      onClick={() => deleteQuoteMutation.mutate()}
-                    >
-                      {deleteQuoteMutation.isPending ? 'Deleting…' : 'Yes, Delete'}
-                    </Button>
-                  </div>
-                </div>
-              )}
+          {/* Quote delete confirmation dialog — triggered from within each quote's expanded section */}
+          {confirmDeleteQuote && (
+            <div className="rounded-xl border border-destructive/40 p-3 space-y-2">
+              <p className="text-xs text-destructive font-medium">Permanently delete this quote? This cannot be undone.</p>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => setConfirmDeleteQuote(false)}>Cancel</Button>
+                <Button
+                  variant="destructive" size="sm" className="flex-1"
+                  disabled={deleteQuoteMutation.isPending}
+                  onClick={() => deleteQuoteMutation.mutate()}
+                >
+                  {deleteQuoteMutation.isPending ? 'Deleting…' : 'Yes, Delete'}
+                </Button>
+              </div>
             </div>
           )}
 
@@ -3379,6 +3392,17 @@ export default function Leads() {
     (leads ?? []).filter(l => !!l.agreementSignedAt).map(l => l.id)
   )
 
+  // Per-lead recurring metadata: whether the primary quote is recurring + monthly rate
+  const leadRecurring: Record<string, { isRecurring: boolean; monthlyRate: number }> = {}
+  for (const l of leads ?? []) {
+    const q = l.quoteId ? (quoteById[l.quoteId] ?? null) : null
+    const rec = isRecurringQuote(q)
+    const monthly = rec && q
+      ? q.lineItems.filter(li => li.isSubscription).reduce((s, li) => s + (li.monthlyAmount ?? 0), 0)
+      : 0
+    leadRecurring[l.id] = { isRecurring: rec, monthlyRate: monthly }
+  }
+
   // ── Mutations ─────────────────────────────────────────────────────────────
 
   const updateStageMutation = useMutation({
@@ -3519,7 +3543,10 @@ export default function Leads() {
   const loading = leadsLoading || contactsLoading
 
   const lostLeads   = (leads ?? []).filter(l => l.stage === 'lost')
-  const activeLeads = (leads ?? []).filter(l => l.stage !== 'lost')
+  // Remap legacy follow_up leads → quoted (follow_up column was removed)
+  const activeLeads = (leads ?? [])
+    .filter(l => l.stage !== 'lost')
+    .map(l => l.stage === ('follow_up' as string) ? { ...l, stage: 'quoted' as LeadStage } : l)
 
   // Mobile bottom quotes bar — open by default so quotes are discoverable
   const [quotesBarOpen, setQuotesBarOpen] = useState(true)
@@ -3599,14 +3626,14 @@ export default function Leads() {
               {loading ? (
                 <div className="flex gap-3 p-3 h-full">
                   {STAGES.map(s => (
-                    <div key={s.id} className="min-w-[160px] w-[160px]">
+                    <div key={s.id} className="w-[125px] min-w-[110px] shrink-0">
                       <Skeleton className="h-8 w-full rounded-t-xl" />
                       <Skeleton className="h-24 w-full rounded-b-xl mt-px" />
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="flex gap-3 p-3 h-full w-full min-w-max">
+                <div className="flex gap-3 p-3 h-full" style={{ minWidth: 'max-content' }}>
                   {STAGES.map(stage => (
                     <KanbanColumn
                       key={stage.id}
@@ -3618,6 +3645,7 @@ export default function Leads() {
                       emails={emails}
                       addresses={addresses}
                       agreementBadgeIds={agreementBadgeIds}
+                      leadRecurring={leadRecurring}
                       onCardClick={l => setSelectedLead(l)}
                     />
                   ))}
