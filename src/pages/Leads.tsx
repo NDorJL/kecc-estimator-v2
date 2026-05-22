@@ -226,11 +226,23 @@ function DraggableQuoteCard({
 }
 
 function QuoteCardGhost({ quote }: { quote: Quote }) {
+  const summary = servicesSummary(quote.lineItems)
+  // Mirrors the DraggableQuoteCard visual so what follows the cursor is
+  // immediately recognizable as the quote being dragged. Light card
+  // background and primary-colored price match the real card.
   return (
-    <div className="rounded-lg border bg-primary text-primary-foreground p-2 shadow-xl rotate-2 w-[148px]">
-      <p className="text-xs font-semibold truncate">{quote.customerName}</p>
-      <p className="text-sm font-bold">{fmtMoney(quote.total)}</p>
-      <p className="text-[10px] opacity-75 mt-0.5">Drop into stage →</p>
+    <div className="rounded-lg border bg-card p-2 shadow-2xl rotate-1 opacity-95 w-[148px] ring-2 ring-primary">
+      <div className="flex items-start gap-1">
+        <GripVertical className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold leading-snug truncate">{quote.customerName}</p>
+          {summary && (
+            <p className="text-[10px] text-muted-foreground mt-0.5 truncate leading-snug">{summary}</p>
+          )}
+          <p className="text-sm font-bold text-primary mt-0.5">{fmtMoney(quote.total)}</p>
+          <p className="text-[10px] text-muted-foreground mt-1 italic">Drop into a stage →</p>
+        </div>
+      </div>
     </div>
   )
 }
