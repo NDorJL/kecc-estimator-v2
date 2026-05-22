@@ -17,6 +17,7 @@ import {
   DragOverlay,
   useDroppable,
   useDraggable,
+  pointerWithin,
 } from '@dnd-kit/core'
 import { snapCenterToCursor } from '@dnd-kit/modifiers'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -98,15 +99,15 @@ function LeadCard({
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: lead.id })
 
-  // Original card stays anchored in its source slot (no transform applied) but
-  // dims to 0.4 opacity during drag — gives the user a "this is where I came
-  // from" reference. The DragOverlay ghost is what follows the cursor (centered
-  // via snapCenterToCursor on both DndContext and DragOverlay). The two
-  // visuals don't fight because the original doesn't move.
+  // During drag, hide the source card entirely (visibility:hidden preserves the
+  // layout slot but removes the visual). The DragOverlay ghost is the only
+  // visible representation, centered under the cursor — that ghost itself
+  // serves as the placement preview. The destination column also highlights
+  // via isOver. Two cleaner signals beat three competing ones.
   return (
     <div
       ref={setNodeRef}
-      style={{ opacity: isDragging ? 0.4 : 1 }}
+      style={{ visibility: isDragging ? 'hidden' : 'visible' }}
       {...attributes}
       {...listeners}
       onClick={onClick}
@@ -192,13 +193,12 @@ function DraggableQuoteCard({
 
   const summary = servicesSummary(quote.lineItems)
 
-  // Original stays anchored in the quotes panel slot, dims to 0.4 during drag.
-  // No translate3d on the original (which would get clipped by the panel's
-  // overflow:hidden). The DragOverlay ghost is what follows the cursor.
+  // Hide source slot during drag (same pattern as LeadCard) — the DragOverlay
+  // ghost is the only visible card during drag.
   return (
     <div
       ref={setNodeRef}
-      style={{ opacity: isDragging ? 0.4 : 1 }}
+      style={{ visibility: isDragging ? 'hidden' : 'visible' }}
       {...attributes}
       {...listeners}
       className="rounded-lg border bg-card p-2 shadow-sm cursor-grab active:cursor-grabbing touch-none select-none"
@@ -3682,7 +3682,7 @@ export default function Leads() {
       {/* Content */}
       <DndContext
         sensors={sensors}
-        modifiers={[snapCenterToCursor]}
+        collisionDetection={pointerWithin}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
         onDragOver={handleDragOver}
