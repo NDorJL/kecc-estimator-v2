@@ -316,40 +316,69 @@ function buildScaPage(opts: {
   <p>6.2 KECC reserves the right to inspect Work at any time. If Work does not meet KECC's quality standards, KECC may: Require Subcontractor to correct defects at no additional cost to KECC or the customer. Hire another contractor to correct defects and deduct the cost from Subcontractor's payment. Terminate this Agreement immediately for non-compliance.</p>
   <p>6.3 Subcontractor shall clean up all debris and restore the job site to its original condition at the end of each Work day.</p>
 
-  <h2>Section 7 — CUSTOMER RELATIONS AND CONFIDENTIALITY</h2>
-  <p>7.1 Subcontractor agrees to: Treat all customers professionally and courteously. Not directly solicit or contact KECC customers for independent work. Not disclose customer contact information, pricing, or details to third parties. Represent KECC positively and professionally at all times.</p>
-  <p>7.2 Subcontractor acknowledges that customer relationships and pricing information belong to KECC. Violation of this section may result in immediate termination and legal action.</p>
+  <h2>Section 7 — CUSTOMER RELATIONS</h2>
+  <p>7.1 Subcontractor agrees to: Treat all customers professionally and courteously. Represent KECC positively and professionally at all times. Communicate any customer concerns or complaints to KECC promptly. Refrain from any conduct that would damage KECC's reputation or customer relationships.</p>
 
-  <h2>Section 8 — TERMINATION</h2>
-  <p>8.1 At-Will Relationship: Either party may terminate this Agreement at any time, with or without cause, through verbal or written communication. Upon termination: Subcontractor shall immediately cease performing Work. Subcontractor shall return any KECC property or materials. KECC shall pay for Work already completed (minus any corrections required).</p>
-  <p>8.2 Immediate Termination for Cause: KECC may terminate this Agreement immediately if Subcontractor: Fails to maintain required insurance. Violates safety laws or OSHA standards. Misrepresents KECC or acts unprofessionally toward customers. Performs Work that does not meet quality standards. Violates any material term of this Agreement.</p>
+  <h2>Section 8 — CONFIDENTIALITY</h2>
+  <p>8.1 Subcontractor acknowledges that during the course of providing services to KECC, Subcontractor may receive or have access to confidential and proprietary information ("Confidential Information"), including but not limited to: customer lists and contact information, pricing structures, vendor relationships, operational procedures, software systems, customer relationship management tools, marketing materials, financial information, and business strategies.</p>
+  <p>8.2 Subcontractor agrees to: (a) use Confidential Information solely for the purpose of performing services for KECC; (b) not disclose Confidential Information to any third party without KECC's prior written consent; (c) return or destroy all Confidential Information upon termination of this Agreement.</p>
+  <p>8.3 The obligations under this Section 8 shall survive termination of this Agreement for a period of three (3) years.</p>
 
-  <h2>Section 9 — SAFETY AND COMPLIANCE</h2>
-  <p>9.1 Subcontractor shall: Follow all OSHA safety regulations. Use proper safety equipment and clothing as required by law. Report any job site hazards or accidents to KECC immediately. Not operate any equipment under the influence of drugs or alcohol. Comply with all customer property rules and restrictions.</p>
-  <p>9.2 Subcontractor is solely responsible for their own safety and the safety of any employees or sub-subcontractors they hire.</p>
+  <h2>Section 9 — NON-SOLICITATION OF CUSTOMERS</h2>
+  <p>9.1 During the term of this Agreement and for a period of one (1) year following its termination, Subcontractor agrees not to, directly or indirectly:</p>
+  <ul>
+    <li>Solicit, contact, or accept business from any customer of KECC that Subcontractor learned about, was introduced to, or provided services for during the engagement;</li>
+    <li>Encourage any customer of KECC to terminate, reduce, or alter its business with KECC.</li>
+  </ul>
+  <p>9.2 For purposes of this Section, "customer" means any individual or entity that has retained KECC for services within the twelve (12) months preceding the date of contact.</p>
 
-  <h2>Section 10 — TOOLS, EQUIPMENT, AND MATERIALS</h2>
-  <p>10.1 Unless otherwise agreed in writing, Subcontractor shall provide all tools, equipment, and materials necessary to complete the Work.</p>
-  <p>10.2 KECC may provide specified equipment or materials. In that case, Subcontractor shall: Use such equipment only for the specified job. Return all equipment in good condition (normal wear and tear excepted). Reimburse KECC for any loss, theft, or damage caused by Subcontractor's negligence.</p>
+  <h2>Section 10 — NON-SOLICITATION OF SUBCONTRACTORS AND EMPLOYEES</h2>
+  <p>10.1 For one (1) year following termination of this Agreement, Subcontractor agrees not to solicit, recruit, or hire any other subcontractor, employee, or service provider of KECC without KECC's prior written consent.</p>
 
-  <h2>Section 11 — INVOICING AND PAYMENT DISPUTES</h2>
-  <p>11.1 Subcontractor shall submit itemized invoices within [10] business days of job completion, including: Date and description of Work performed. Hours worked (if hourly) or scope (if fixed-price). Any materials or expenses claimed.</p>
-  <p>11.2 KECC will pay invoices within [15] business days unless there is a good-faith dispute regarding: Work quality or completeness. Hours or scope discrepancy. Unauthorized charges.</p>
-  <p>11.3 Disputed invoices will be handled through good-faith discussion. If unresolved, KECC may withhold payment pending resolution, but will not unreasonably delay payment.</p>
+  <h2>Section 11 — LIMITED NON-COMPETE</h2>
+  <p>11.1 For a period of one (1) year following termination of this Agreement, Subcontractor agrees not to provide exterior-care services — defined as pressure washing, soft washing, window cleaning, gutter cleaning, lawn care, pet waste cleanup, and exterior property maintenance — within a 25-mile radius of Knoxville, Tennessee, to any customer Subcontractor learned about, was introduced to, or serviced through KECC.</p>
+  <p>11.2 This restriction is narrow by design: it does not prevent Subcontractor from providing exterior-care services to entirely new customers Subcontractor sources independently. It is intended solely to prevent the diversion of KECC's customer base.</p>
 
-  <h2>Section 12 — NO THIRD-PARTY BENEFICIARIES</h2>
-  <p>12.1 This Agreement is between KECC and Subcontractor only. Customers, their families, and third parties have no rights under this Agreement.</p>
+  <h2>Section 12 — INTELLECTUAL PROPERTY ASSIGNMENT</h2>
+  <p>12.1 All work product, materials, deliverables, software contributions, process documentation, templates, training materials, marketing assets, and other intellectual property created by Subcontractor in the course of performing services for KECC are works made for hire, and ownership vests in KECC upon creation.</p>
+  <p>12.2 To the extent any such work product is not deemed a work made for hire by operation of law, Subcontractor hereby irrevocably assigns to KECC all right, title, and interest in such work product, including all intellectual property rights.</p>
+  <p>12.3 Subcontractor agrees to execute any further documents reasonably necessary to perfect KECC's ownership of the work product.</p>
 
-  <h2>Section 13 — ENTIRE AGREEMENT AND AMENDMENTS</h2>
-  <p>13.1 This Agreement constitutes the entire agreement between the parties and supersedes all prior discussions, emails, and verbal agreements.</p>
-  <p>13.2 No amendment or modification is valid unless made in writing and signed by both parties.</p>
+  <h2>Section 13 — REMEDIES AND ENFORCEMENT</h2>
+  <p>13.1 Subcontractor acknowledges that breach of Sections 8, 9, 10, 11, or 12 may cause irreparable harm to KECC for which monetary damages may not be sufficient. KECC shall be entitled to seek injunctive relief in addition to any other available remedies at law or in equity.</p>
+  <p>13.2 In any action to enforce the provisions of Sections 8 through 12, the prevailing party shall be entitled to recover reasonable attorneys' fees and costs.</p>
 
-  <h2>Section 14 — GOVERNING LAW</h2>
-  <p>14.1 This Agreement shall be governed by and construed in accordance with the laws of the State of Tennessee, without regard to its conflict-of-laws principles.</p>
-  <p>14.2 Any disputes shall be resolved in the state or federal courts located in Knox County, Tennessee.</p>
+  <h2>Section 14 — TERMINATION</h2>
+  <p>14.1 At-Will Relationship: Either party may terminate this Agreement at any time, with or without cause, through verbal or written communication. Upon termination: Subcontractor shall immediately cease performing Work. Subcontractor shall return any KECC property or materials. KECC shall pay for Work already completed (minus any corrections required).</p>
+  <p>14.2 Immediate Termination for Cause: KECC may terminate this Agreement immediately if Subcontractor: Fails to maintain required insurance. Violates safety laws or OSHA standards. Misrepresents KECC or acts unprofessionally toward customers. Performs Work that does not meet quality standards. Violates any material term of this Agreement.</p>
+  <p>14.3 Survival: The obligations under Sections 8 (Confidentiality), 9 (Non-Solicitation of Customers), 10 (Non-Solicitation of Subcontractors and Employees), 11 (Limited Non-Compete), 12 (Intellectual Property Assignment), and 13 (Remedies and Enforcement) shall survive termination of this Agreement.</p>
 
-  <h2>Section 15 — SEVERABILITY</h2>
-  <p>15.1 If any portion of this Agreement is found to be invalid or unenforceable, the remaining portions shall remain in full force and effect.</p>
+  <h2>Section 15 — SAFETY AND COMPLIANCE</h2>
+  <p>15.1 Subcontractor shall: Follow all OSHA safety regulations. Use proper safety equipment and clothing as required by law. Report any job site hazards or accidents to KECC immediately. Not operate any equipment under the influence of drugs or alcohol. Comply with all customer property rules and restrictions.</p>
+  <p>15.2 Subcontractor is solely responsible for their own safety and the safety of any employees or sub-subcontractors they hire.</p>
+
+  <h2>Section 16 — TOOLS, EQUIPMENT, AND MATERIALS</h2>
+  <p>16.1 Unless otherwise agreed in writing, Subcontractor shall provide all tools, equipment, and materials necessary to complete the Work.</p>
+  <p>16.2 KECC may provide specified equipment or materials. In that case, Subcontractor shall: Use such equipment only for the specified job. Return all equipment in good condition (normal wear and tear excepted). Reimburse KECC for any loss, theft, or damage caused by Subcontractor's negligence.</p>
+
+  <h2>Section 17 — INVOICING AND PAYMENT DISPUTES</h2>
+  <p>17.1 Subcontractor shall submit itemized invoices within [10] business days of job completion, including: Date and description of Work performed. Hours worked (if hourly) or scope (if fixed-price). Any materials or expenses claimed.</p>
+  <p>17.2 KECC will pay invoices within [15] business days unless there is a good-faith dispute regarding: Work quality or completeness. Hours or scope discrepancy. Unauthorized charges.</p>
+  <p>17.3 Disputed invoices will be handled through good-faith discussion. If unresolved, KECC may withhold payment pending resolution, but will not unreasonably delay payment.</p>
+
+  <h2>Section 18 — NO THIRD-PARTY BENEFICIARIES</h2>
+  <p>18.1 This Agreement is between KECC and Subcontractor only. Customers, their families, and third parties have no rights under this Agreement.</p>
+
+  <h2>Section 19 — ENTIRE AGREEMENT AND AMENDMENTS</h2>
+  <p>19.1 This Agreement constitutes the entire agreement between the parties and supersedes all prior discussions, emails, and verbal agreements.</p>
+  <p>19.2 No amendment or modification is valid unless made in writing and signed by both parties.</p>
+
+  <h2>Section 20 — GOVERNING LAW</h2>
+  <p>20.1 This Agreement shall be governed by and construed in accordance with the laws of the State of Tennessee, without regard to its conflict-of-laws principles.</p>
+  <p>20.2 Any disputes arising under or related to this Agreement shall be resolved in the state or federal courts located in Knox County, Tennessee.</p>
+
+  <h2>Section 21 — SEVERABILITY</h2>
+  <p>21.1 If any portion of this Agreement is found to be invalid or unenforceable, the remaining portions shall remain in full force and effect. A court may modify any unenforceable provision to the minimum extent necessary to make it enforceable.</p>
 
   <!-- Signatures -->
   <h2 style="margin-top:32px;">SIGNATURES</h2>
@@ -506,48 +535,83 @@ async function generateScaPdf(opts: {
     para('6.3 Subcontractor shall clean up all debris and restore the job site to its original condition at the end of each Work day.')
 
     // Section 7
-    sectionHeader('Section 7 — CUSTOMER RELATIONS AND CONFIDENTIALITY')
-    para('7.1 Subcontractor agrees to: Treat all customers professionally and courteously. Not directly solicit or contact KECC customers for independent work. Not disclose customer contact information, pricing, or details to third parties. Represent KECC positively and professionally at all times.')
-    para('7.2 Subcontractor acknowledges that customer relationships and pricing information belong to KECC. Violation of this section may result in immediate termination and legal action.')
+    sectionHeader('Section 7 — CUSTOMER RELATIONS')
+    para('7.1 Subcontractor agrees to: Treat all customers professionally and courteously. Represent KECC positively and professionally at all times. Communicate any customer concerns or complaints to KECC promptly. Refrain from any conduct that would damage KECC\'s reputation or customer relationships.')
 
     // Section 8
-    sectionHeader('Section 8 — TERMINATION')
-    para('8.1 At-Will Relationship: Either party may terminate this Agreement at any time, with or without cause, through verbal or written communication. Upon termination: Subcontractor shall immediately cease performing Work. Subcontractor shall return any KECC property or materials. KECC shall pay for Work already completed (minus any corrections required).')
-    para('8.2 Immediate Termination for Cause: KECC may terminate this Agreement immediately if Subcontractor: Fails to maintain required insurance. Violates safety laws or OSHA standards. Misrepresents KECC or acts unprofessionally toward customers. Performs Work that does not meet quality standards. Violates any material term of this Agreement.')
+    sectionHeader('Section 8 — CONFIDENTIALITY')
+    para('8.1 Subcontractor acknowledges that during the course of providing services to KECC, Subcontractor may receive or have access to confidential and proprietary information ("Confidential Information"), including but not limited to: customer lists and contact information, pricing structures, vendor relationships, operational procedures, software systems, customer relationship management tools, marketing materials, financial information, and business strategies.')
+    para('8.2 Subcontractor agrees to: (a) use Confidential Information solely for the purpose of performing services for KECC; (b) not disclose Confidential Information to any third party without KECC\'s prior written consent; (c) return or destroy all Confidential Information upon termination of this Agreement.')
+    para('8.3 The obligations under this Section 8 shall survive termination of this Agreement for a period of three (3) years.')
 
     // Section 9
-    sectionHeader('Section 9 — SAFETY AND COMPLIANCE')
-    para('9.1 Subcontractor shall: Follow all OSHA safety regulations. Use proper safety equipment and clothing as required by law. Report any job site hazards or accidents to KECC immediately. Not operate any equipment under the influence of drugs or alcohol. Comply with all customer property rules and restrictions.')
-    para('9.2 Subcontractor is solely responsible for their own safety and the safety of any employees or sub-subcontractors they hire.')
+    sectionHeader('Section 9 — NON-SOLICITATION OF CUSTOMERS')
+    para('9.1 During the term of this Agreement and for a period of one (1) year following its termination, Subcontractor agrees not to, directly or indirectly:')
+    bullet([
+      'Solicit, contact, or accept business from any customer of KECC that Subcontractor learned about, was introduced to, or provided services for during the engagement;',
+      'Encourage any customer of KECC to terminate, reduce, or alter its business with KECC.',
+    ])
+    para('9.2 For purposes of this Section, "customer" means any individual or entity that has retained KECC for services within the twelve (12) months preceding the date of contact.')
 
     // Section 10
-    sectionHeader('Section 10 — TOOLS, EQUIPMENT, AND MATERIALS')
-    para('10.1 Unless otherwise agreed in writing, Subcontractor shall provide all tools, equipment, and materials necessary to complete the Work.')
-    para('10.2 KECC may provide specified equipment or materials. In that case, Subcontractor shall: Use such equipment only for the specified job. Return all equipment in good condition (normal wear and tear excepted). Reimburse KECC for any loss, theft, or damage caused by Subcontractor\'s negligence.')
+    sectionHeader('Section 10 — NON-SOLICITATION OF SUBCONTRACTORS AND EMPLOYEES')
+    para('10.1 For one (1) year following termination of this Agreement, Subcontractor agrees not to solicit, recruit, or hire any other subcontractor, employee, or service provider of KECC without KECC\'s prior written consent.')
 
     // Section 11
-    sectionHeader('Section 11 — INVOICING AND PAYMENT DISPUTES')
-    para('11.1 Subcontractor shall submit itemized invoices within [10] business days of job completion, including: Date and description of Work performed. Hours worked (if hourly) or scope (if fixed-price). Any materials or expenses claimed.')
-    para('11.2 KECC will pay invoices within [15] business days unless there is a good-faith dispute regarding: Work quality or completeness. Hours or scope discrepancy. Unauthorized charges.')
-    para('11.3 Disputed invoices will be handled through good-faith discussion. If unresolved, KECC may withhold payment pending resolution, but will not unreasonably delay payment.')
+    sectionHeader('Section 11 — LIMITED NON-COMPETE')
+    para('11.1 For a period of one (1) year following termination of this Agreement, Subcontractor agrees not to provide exterior-care services — defined as pressure washing, soft washing, window cleaning, gutter cleaning, lawn care, pet waste cleanup, and exterior property maintenance — within a 25-mile radius of Knoxville, Tennessee, to any customer Subcontractor learned about, was introduced to, or serviced through KECC.')
+    para('11.2 This restriction is narrow by design: it does not prevent Subcontractor from providing exterior-care services to entirely new customers Subcontractor sources independently. It is intended solely to prevent the diversion of KECC\'s customer base.')
 
     // Section 12
-    sectionHeader('Section 12 — NO THIRD-PARTY BENEFICIARIES')
-    para('12.1 This Agreement is between KECC and Subcontractor only. Customers, their families, and third parties have no rights under this Agreement.')
+    sectionHeader('Section 12 — INTELLECTUAL PROPERTY ASSIGNMENT')
+    para('12.1 All work product, materials, deliverables, software contributions, process documentation, templates, training materials, marketing assets, and other intellectual property created by Subcontractor in the course of performing services for KECC are works made for hire, and ownership vests in KECC upon creation.')
+    para('12.2 To the extent any such work product is not deemed a work made for hire by operation of law, Subcontractor hereby irrevocably assigns to KECC all right, title, and interest in such work product, including all intellectual property rights.')
+    para('12.3 Subcontractor agrees to execute any further documents reasonably necessary to perfect KECC\'s ownership of the work product.')
 
     // Section 13
-    sectionHeader('Section 13 — ENTIRE AGREEMENT AND AMENDMENTS')
-    para('13.1 This Agreement constitutes the entire agreement between the parties and supersedes all prior discussions, emails, and verbal agreements.')
-    para('13.2 No amendment or modification is valid unless made in writing and signed by both parties.')
+    sectionHeader('Section 13 — REMEDIES AND ENFORCEMENT')
+    para('13.1 Subcontractor acknowledges that breach of Sections 8, 9, 10, 11, or 12 may cause irreparable harm to KECC for which monetary damages may not be sufficient. KECC shall be entitled to seek injunctive relief in addition to any other available remedies at law or in equity.')
+    para('13.2 In any action to enforce the provisions of Sections 8 through 12, the prevailing party shall be entitled to recover reasonable attorneys\' fees and costs.')
 
     // Section 14
-    sectionHeader('Section 14 — GOVERNING LAW')
-    para('14.1 This Agreement shall be governed by and construed in accordance with the laws of the State of Tennessee, without regard to its conflict-of-laws principles.')
-    para('14.2 Any disputes shall be resolved in the state or federal courts located in Knox County, Tennessee.')
+    sectionHeader('Section 14 — TERMINATION')
+    para('14.1 At-Will Relationship: Either party may terminate this Agreement at any time, with or without cause, through verbal or written communication. Upon termination: Subcontractor shall immediately cease performing Work. Subcontractor shall return any KECC property or materials. KECC shall pay for Work already completed (minus any corrections required).')
+    para('14.2 Immediate Termination for Cause: KECC may terminate this Agreement immediately if Subcontractor: Fails to maintain required insurance. Violates safety laws or OSHA standards. Misrepresents KECC or acts unprofessionally toward customers. Performs Work that does not meet quality standards. Violates any material term of this Agreement.')
+    para('14.3 Survival: The obligations under Sections 8 (Confidentiality), 9 (Non-Solicitation of Customers), 10 (Non-Solicitation of Subcontractors and Employees), 11 (Limited Non-Compete), 12 (Intellectual Property Assignment), and 13 (Remedies and Enforcement) shall survive termination of this Agreement.')
 
     // Section 15
-    sectionHeader('Section 15 — SEVERABILITY')
-    para('15.1 If any portion of this Agreement is found to be invalid or unenforceable, the remaining portions shall remain in full force and effect.')
+    sectionHeader('Section 15 — SAFETY AND COMPLIANCE')
+    para('15.1 Subcontractor shall: Follow all OSHA safety regulations. Use proper safety equipment and clothing as required by law. Report any job site hazards or accidents to KECC immediately. Not operate any equipment under the influence of drugs or alcohol. Comply with all customer property rules and restrictions.')
+    para('15.2 Subcontractor is solely responsible for their own safety and the safety of any employees or sub-subcontractors they hire.')
+
+    // Section 16
+    sectionHeader('Section 16 — TOOLS, EQUIPMENT, AND MATERIALS')
+    para('16.1 Unless otherwise agreed in writing, Subcontractor shall provide all tools, equipment, and materials necessary to complete the Work.')
+    para('16.2 KECC may provide specified equipment or materials. In that case, Subcontractor shall: Use such equipment only for the specified job. Return all equipment in good condition (normal wear and tear excepted). Reimburse KECC for any loss, theft, or damage caused by Subcontractor\'s negligence.')
+
+    // Section 17
+    sectionHeader('Section 17 — INVOICING AND PAYMENT DISPUTES')
+    para('17.1 Subcontractor shall submit itemized invoices within [10] business days of job completion, including: Date and description of Work performed. Hours worked (if hourly) or scope (if fixed-price). Any materials or expenses claimed.')
+    para('17.2 KECC will pay invoices within [15] business days unless there is a good-faith dispute regarding: Work quality or completeness. Hours or scope discrepancy. Unauthorized charges.')
+    para('17.3 Disputed invoices will be handled through good-faith discussion. If unresolved, KECC may withhold payment pending resolution, but will not unreasonably delay payment.')
+
+    // Section 18
+    sectionHeader('Section 18 — NO THIRD-PARTY BENEFICIARIES')
+    para('18.1 This Agreement is between KECC and Subcontractor only. Customers, their families, and third parties have no rights under this Agreement.')
+
+    // Section 19
+    sectionHeader('Section 19 — ENTIRE AGREEMENT AND AMENDMENTS')
+    para('19.1 This Agreement constitutes the entire agreement between the parties and supersedes all prior discussions, emails, and verbal agreements.')
+    para('19.2 No amendment or modification is valid unless made in writing and signed by both parties.')
+
+    // Section 20
+    sectionHeader('Section 20 — GOVERNING LAW')
+    para('20.1 This Agreement shall be governed by and construed in accordance with the laws of the State of Tennessee, without regard to its conflict-of-laws principles.')
+    para('20.2 Any disputes arising under or related to this Agreement shall be resolved in the state or federal courts located in Knox County, Tennessee.')
+
+    // Section 21
+    sectionHeader('Section 21 — SEVERABILITY')
+    para('21.1 If any portion of this Agreement is found to be invalid or unenforceable, the remaining portions shall remain in full force and effect. A court may modify any unenforceable provision to the minimum extent necessary to make it enforceable.')
 
     // Signatures
     doc.addPage()
