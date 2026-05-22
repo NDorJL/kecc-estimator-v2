@@ -18,8 +18,6 @@ import {
   useDroppable,
   useDraggable,
 } from '@dnd-kit/core'
-import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
 import { snapCenterToCursor } from '@dnd-kit/modifiers'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -98,12 +96,18 @@ function LeadCard({
   isRecurring?: boolean
   monthlyRate?: number
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: lead.id })
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: lead.id })
 
+  // Standard dnd-kit DragOverlay pattern: original card stays in place and is
+  // hidden during drag. The DragOverlay ghost is the only visible element while
+  // dragging, centered under the cursor via snapCenterToCursor. Do NOT apply
+  // useDraggable's transform to the original — that creates a second visual
+  // tethered to the cursor's grab-point offset, which fights with the centered
+  // ghost and confuses the eye.
   return (
     <div
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.4 : 1 }}
+      style={{ visibility: isDragging ? 'hidden' : 'visible' }}
       {...attributes}
       {...listeners}
       onClick={onClick}
@@ -183,19 +187,24 @@ function DraggableQuoteCard({
   quote: Quote
   linkedStageLabel: string | null
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `q-${quote.id}`,
   })
 
   const summary = servicesSummary(quote.lineItems)
 
+  // Same pattern as LeadCard: hide the original during drag, let the
+  // DragOverlay ghost (centered under the cursor) be the only visible card.
+  // Without this, the original card moves with translate3d into the quote
+  // panel's overflow:hidden parent and gets clipped — making it look like
+  // there's no ghost at all when really there were two visuals fighting.
   return (
     <div
       ref={setNodeRef}
-      style={transform ? { transform: `translate3d(${transform.x}px,${transform.y}px,0)` } : undefined}
+      style={{ visibility: isDragging ? 'hidden' : 'visible' }}
       {...attributes}
       {...listeners}
-      className={`rounded-lg border bg-card p-2 shadow-sm cursor-grab active:cursor-grabbing touch-none select-none transition-opacity ${isDragging ? 'opacity-40' : 'opacity-100'}`}
+      className="rounded-lg border bg-card p-2 shadow-sm cursor-grab active:cursor-grabbing touch-none select-none"
     >
       <div className="flex items-start gap-1">
         <GripVertical className="h-3.5 w-3.5 text-muted-foreground shrink-0 mt-0.5" />
@@ -552,23 +561,21 @@ function KanbanColumn({
         </div>
       )}
       <div ref={setNodeRef} className={`flex flex-col gap-2 p-2 min-h-[100px] ${isRecurring ? 'overflow-y-auto max-h-[calc(100vh-12rem)]' : ''}`}>
-        <SortableContext items={filteredLeads.map(l => l.id)} strategy={verticalListSortingStrategy}>
-          {filteredLeads.map(l => (
-            <LeadCard
-              key={l.id}
-              lead={l}
-              displayName={displayNames[l.id] ?? 'Unknown'}
-              subline={sublines[l.id] ?? ''}
-              phone={phones[l.id]}
-              email={emails[l.id]}
-              address={addresses[l.id]}
-              showAgreementBadge={agreementBadgeIds.has(l.id)}
-              isRecurring={leadRecurring[l.id]?.isRecurring ?? false}
-              monthlyRate={leadRecurring[l.id]?.monthlyRate ?? 0}
-              onClick={() => onCardClick(l)}
-            />
-          ))}
-        </SortableContext>
+        {filteredLeads.map(l => (
+          <LeadCard
+            key={l.id}
+            lead={l}
+            displayName={displayNames[l.id] ?? 'Unknown'}
+            subline={sublines[l.id] ?? ''}
+            phone={phones[l.id]}
+            email={emails[l.id]}
+            address={addresses[l.id]}
+            showAgreementBadge={agreementBadgeIds.has(l.id)}
+            isRecurring={leadRecurring[l.id]?.isRecurring ?? false}
+            monthlyRate={leadRecurring[l.id]?.monthlyRate ?? 0}
+            onClick={() => onCardClick(l)}
+          />
+        ))}
       </div>
     </div>
   )
@@ -3811,10 +3818,9 @@ export default function Leads() {
           </div>
         </div>
 
-        {/* Drag overlays */}
-        {/* snapCenterToCursor only for quote cards — lead cards use natural grab-point
-            so the sortable ghost stays in sync with where the card will drop */}
-        <DragOverlay modifiers={activeQuote ? [snapCenterToCursor] : []}>
+        {/* Drag overlays — snapCenterToCursor keeps the ghost centered under the
+            pointer for both lead and quote cards, so what you see is what drops. */}
+        <DragOverlay modifiers={[snapCenterToCursor]}>
           {activeLead && (
             <LeadCardGhost
               displayName={getDisplayName(activeLead)}
