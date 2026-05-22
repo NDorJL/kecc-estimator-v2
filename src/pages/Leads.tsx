@@ -530,6 +530,7 @@ function KanbanColumn({
 
   return (
     <div
+      ref={setNodeRef}
       style={{ width: colWidth }}
       className={`relative flex flex-col rounded-xl border shrink-0 ${stage.color} ${isOver ? 'ring-2 ring-primary' : ''}`}
     >
@@ -557,7 +558,11 @@ function KanbanColumn({
           />
         </div>
       )}
-      <div ref={setNodeRef} className={`flex flex-col gap-2 p-2 min-h-[100px] ${isRecurring ? 'overflow-y-auto max-h-[calc(100vh-12rem)]' : ''}`}>
+      {/* The whole column is the droppable (setNodeRef on the outer wrapper).
+          The inner div is just for layout / card spacing — using flex-1 so it
+          grows to fill any leftover column height, but pointerWithin collision
+          checks the outer rect, so a drop anywhere in the column registers. */}
+      <div className={`flex flex-col gap-2 p-2 flex-1 min-h-[100px] ${isRecurring ? 'overflow-y-auto max-h-[calc(100vh-12rem)]' : ''}`}>
         {filteredLeads.map(l => (
           <LeadCard
             key={l.id}
