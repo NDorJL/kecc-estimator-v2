@@ -24,7 +24,7 @@ import type { MarketingChannel, MarketingSpend, Campaign, CampaignEvent, Lead, Q
 import {
   TrendingUp, TrendingDown, Minus, DollarSign, Users, Briefcase,
   Target, ChevronUp, ChevronDown, Plus, Pencil, Trash2, Download, Megaphone,
-  Award, BarChart2, Pause, Play, Archive, Copy, QrCode,
+  Award, BarChart2, Pause, Play, Archive, Copy, QrCode, Eye,
   ExternalLink, Link2, CheckCircle2, AlertCircle, Loader2,
 } from 'lucide-react'
 
@@ -847,8 +847,14 @@ function CampaignCard({
     a.click()
   }
 
+  const totalClicks     = metrics.phoneClicks + metrics.emailClicks
   const convViewsLeads  = metrics.views > 0  ? `${(metrics.leads  / metrics.views  * 100).toFixed(0)}%` : null
+  const convClicksLeads = totalClicks  > 0  ? `${(metrics.leads  / totalClicks    * 100).toFixed(0)}%` : null
   const convLeadsClosed = metrics.leads > 0  ? `${(metrics.closed / metrics.leads  * 100).toFixed(0)}%` : null
+  // Phone (GBP, LSA) and Digital (Google Ads, Meta) campaigns track engagement
+  // via click events. Show those as the funnel entry point so 10 phone taps
+  // are visible as 10 clicks, not silently dropped or miscounted as leads.
+  const showClicksFunnel = (campaign.campaignType === 'phone' || campaign.campaignType === 'digital')
 
 
   function copyText(text: string) {
@@ -960,8 +966,9 @@ function CampaignCard({
         })()}
 
         {/* ── Funnel ───────────────────────────────────────────────── */}
-        {/* QR/Sponsorship track scans so show Views → Leads → Closed.  */}
-        {/* All other types have no view-level data — show Leads → Closed only. */}
+        {/* QR/Sponsorship: Scans → Leads → Closed (track via /track redirect).
+            Phone/Digital:  Clicks → Leads → Closed (phone_click / utm clicks).
+            Referral/other: Leads → Closed (no upstream tracking available). */}
         {(campaign.campaignType === 'qr' || campaign.campaignType === 'sponsorship') ? (
           <div className="grid grid-cols-5 items-center gap-1 text-center">
             <div className="col-span-1 bg-muted/40 rounded-lg py-2">
@@ -970,6 +977,27 @@ function CampaignCard({
             </div>
             <div className="col-span-1 text-[10px] text-muted-foreground font-medium">
               {convViewsLeads ?? '→'}
+            </div>
+            <div className="col-span-1 bg-muted/40 rounded-lg py-2">
+              <div className="text-sm font-bold">{metrics.leads}</div>
+              <div className="text-[10px] text-muted-foreground">Leads</div>
+            </div>
+            <div className="col-span-1 text-[10px] text-muted-foreground font-medium">
+              {convLeadsClosed ?? '→'}
+            </div>
+            <div className="col-span-1 bg-muted/40 rounded-lg py-2">
+              <div className="text-sm font-bold">{metrics.closed}</div>
+              <div className="text-[10px] text-muted-foreground">Closed</div>
+            </div>
+          </div>
+        ) : showClicksFunnel ? (
+          <div className="grid grid-cols-5 items-center gap-1 text-center">
+            <div className="col-span-1 bg-muted/40 rounded-lg py-2">
+              <div className="text-sm font-bold">{totalClicks}</div>
+              <div className="text-[10px] text-muted-foreground">Clicks</div>
+            </div>
+            <div className="col-span-1 text-[10px] text-muted-foreground font-medium">
+              {convClicksLeads ?? '→'}
             </div>
             <div className="col-span-1 bg-muted/40 rounded-lg py-2">
               <div className="text-sm font-bold">{metrics.leads}</div>
@@ -1883,6 +1911,19 @@ export default function Marketing() {
   const totalLeads      = periodLeads.length
   const prevTotalLeads  = prevRange ? prevLeads.length : null
 
+  // Organic / direct traffic = page_view events with no campaign_id during the
+  // current period. These are visits with no UTM signals and no kecc_campaign
+  // cookie — Google search, typed-in URLs, bookmarks, etc.
+  const organicClicks     = useMemo(
+    () => periodEvents.filter(e => e.eventType === 'page_view' && !e.campaignId).length,
+    [periodEvents],
+  )
+  const prevEvents        = useMemo(() => allEvents.filter(e => prevRange && inRange(e.createdAt, prevRange)), [allEvents, prevRange])
+  const prevOrganicClicks = useMemo(
+    () => prevRange ? prevEvents.filter(e => e.eventType === 'page_view' && !e.campaignId).length : null,
+    [prevEvents, prevRange],
+  )
+
   // Closed Jobs KPI = actual service visits from calendar, not lead count
   const closedCount     = periodDoneJobs.length
   const prevClosedCount = prevRange ? prevDoneJobs.length : null
@@ -2104,37 +2145,29 @@ export default function Marketing() {
     const phoneClicks = allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'phone_click').length
     const emailClicks = allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'email_click').length
 
-    // Lead attribution strategy depends on campaign type:
+    // Lead attribution strategy by campaign type:
     //
-    // digital / qr / sponsorship — strict: only leads explicitly attributed
-    //   to this campaign via UTM cookie or QR scan (campaignId === cam.id).
+    // qr / sponsorship / digital / phone — STRICT: only leads explicitly
+    //   attributed via campaignId. Tracked traffic (QR scans, UTM links, gclid
+    //   capture, phone clicks against contacts) stamps campaignId properly;
+    //   anything without that stamp is not this campaign's lead. This prevents
+    //   the old "loose match by source string" wire from vacuuming historical
+    //   leads with source="direct_mail" or "google_ads" into newer QR/phone
+    //   campaigns on the same channel.
     //
-    // phone / referral — also include leads manually logged in the pipeline
-    //   whose source maps to this campaign's channel, as long as they are NOT
-    //   already attributed to a different specific campaign (avoids double-counting).
-    //   This means a lead created with source="referral" or source="google_lsa"
-    //   automatically appears here without any extra step on the marketing page.
+    // referral — LOOSE: also include leads manually logged in the pipeline
+    //   whose source resolves to any referral-type channel (word_of_mouth, wom,
+    //   referral, etc.). Referral campaigns have no upstream tracking — they
+    //   are inherently source-driven, so this is the only meaningful signal.
     let campLeads: Lead[]
-    if (cam.campaignType === 'phone' || cam.campaignType === 'referral') {
-      // For referral campaigns: match any lead whose source resolves to a channel
-      // of type 'referral' — not just the exact channel ID. This means source="referral",
-      // "word_of_mouth", "wom" etc. all count toward any referral-type campaign
-      // without the user needing to pick a specific channel name.
-      //
-      // For phone campaigns: require exact channel match (GBP vs LSA are distinct channels).
-      const myChannel = channels.find(c => c.id === cam.channelId)
+    if (cam.campaignType === 'referral') {
       const referralChannelIds = new Set(channels.filter(c => c.type === 'referral').map(c => c.id))
-
       campLeads = allLeads.filter(l => {
         if (l.campaignId === cam.id) return true
-        if (l.campaignId) return false  // attributed to a different campaign — don't double-count
+        if (l.campaignId) return false
         const leadChId = getLeadChannelId(l)
-        if (leadChId === cam.channelId) return true  // exact match always works
-        if (cam.campaignType === 'referral' && myChannel?.type === 'referral') {
-          // Also match leads whose source resolves to any referral-type channel
-          return leadChId != null && referralChannelIds.has(leadChId)
-        }
-        return false
+        if (leadChId === cam.channelId) return true
+        return leadChId != null && referralChannelIds.has(leadChId)
       })
     } else {
       campLeads = allLeads.filter(l => l.campaignId === cam.id)
@@ -2159,10 +2192,12 @@ export default function Marketing() {
     const closed = allJobs.filter(j => {
       if (!isJobDone(j) || !j.scheduledDate || !j.quoteId) return false
       if (!jobInRange(j, campRange)) return false
-      // Attribute via quoteId → campaignId
+      // Attribute via quoteId → campaignId (strict, all campaign types)
       if (quoteIdToCampaignId[j.quoteId] === cam.id) return true
-      // For phone/referral campaigns: attribute via quoteId → channelId
-      if ((cam.campaignType === 'phone' || cam.campaignType === 'referral') &&
+      // Loose channel-based fallback only for referral campaigns. Phone-type
+      // campaigns now require explicit campaign attribution on the lead/quote
+      // to count a job as theirs.
+      if (cam.campaignType === 'referral' &&
           quoteIdToChannelId[j.quoteId] === cam.channelId) return true
       return false
     }).length
@@ -2528,6 +2563,13 @@ export default function Marketing() {
                 icon={<Users className="h-3.5 w-3.5" />}
                 value={totalLeads}
                 prev={prevTotalLeads}
+                kind="number"
+              />
+              <KpiCard
+                title="Organic Clicks"
+                icon={<Eye className="h-3.5 w-3.5" />}
+                value={organicClicks}
+                prev={prevOrganicClicks}
                 kind="number"
               />
               <KpiCard

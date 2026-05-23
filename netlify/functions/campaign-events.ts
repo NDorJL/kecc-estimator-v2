@@ -76,10 +76,14 @@ export const handler: Handler = async (event) => {
         .single()
       if (error) throw new Error(error.message)
 
-      // ── Auto-create a lead stub on phone_click ──────────────────────────
-      // When someone taps a phone number link, we know their number and
-      // campaign context. Create a minimal lead card so the user can fill
-      // in details during the call. Source is locked (cannot be changed).
+      // ── Auto-create a lead stub on phone_click — ONLY when the caller
+      // matches an existing contact. Anonymous taps (no contact match) are
+      // recorded as click events only. Otherwise every tap inflates the
+      // marketing "leads" count, since most website visitors don't have a
+      // pre-existing contact record. The click itself is still tracked on
+      // the campaign and displayed in the Clicks column on the Marketing
+      // page — we just don't promote it to a "lead" without evidence that
+      // a real person on the other end intends to do business.
       if (body.eventType === 'phone_click') {
         const phoneNumber = (body.metadata?.number as string | null) ?? null
         const page        = (body.metadata?.page   as string | null) ?? null
@@ -95,11 +99,12 @@ export const handler: Handler = async (event) => {
           contactId = contact?.id ?? null
         }
 
-        // Deduplicate: skip if a source-locked lead already exists for this
-        // contact (or phone number in notes) created in the last 4 hours
-        const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()
-        let skipCreate = false
+        // Only create a lead stub when we have a matched contact. No match =
+        // just an anonymous click; the event is enough.
         if (contactId) {
+          // Deduplicate: skip if a source-locked lead already exists for this
+          // contact created in the last 4 hours
+          const fourHoursAgo = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()
           const { data: recent } = await supabase
             .from('leads')
             .select('id')
@@ -107,29 +112,27 @@ export const handler: Handler = async (event) => {
             .eq('source_locked', true)
             .gte('created_at', fourHoursAgo)
             .maybeSingle()
-          if (recent) skipCreate = true
-        }
 
-        if (!skipCreate) {
-          const sourceLabel = 'website'
-          const noteLines = [
-            '📞 Auto-created from website phone number click.',
-            phoneNumber ? `Phone: ${phoneNumber}` : null,
-            page ? `Page: ${page}` : null,
-            'Fill in name and details during the call.',
-          ].filter(Boolean).join('\n')
+          if (!recent) {
+            const noteLines = [
+              '📞 Auto-created from website phone number click.',
+              phoneNumber ? `Phone: ${phoneNumber}` : null,
+              page ? `Page: ${page}` : null,
+              'Fill in name and details during the call.',
+            ].filter(Boolean).join('\n')
 
-          // Non-fatal: if lead stub creation fails, the event is still recorded
-          try {
-            await supabase.from('leads').insert({
-              contact_id:    contactId,
-              stage:         'new',
-              source:        sourceLabel,
-              source_locked: true,
-              campaign_id:   campaignId ?? null,
-              notes:         noteLines,
-            })
-          } catch { /* silent — event is more important than the stub */ }
+            // Non-fatal: if lead stub creation fails, the event is still recorded
+            try {
+              await supabase.from('leads').insert({
+                contact_id:    contactId,
+                stage:         'new',
+                source:        'website',
+                source_locked: true,
+                campaign_id:   campaignId ?? null,
+                notes:         noteLines,
+              })
+            } catch { /* silent — event is more important than the stub */ }
+          }
         }
       }
 
