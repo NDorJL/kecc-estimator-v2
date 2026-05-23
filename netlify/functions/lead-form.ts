@@ -79,6 +79,62 @@ const FORM_HTML = `<!DOCTYPE html>
   </div>
 </div>
 <script>
+// On page load: capture campaign attribution via UTM/gclid if present.
+// If the URL has no UTM signals AND no campaign cookie, log an organic
+// page-view event so the Marketing page can count direct/organic traffic.
+// sessionStorage de-dup so reloads in the same tab don't multiply the count.
+(function() {
+  try {
+    if (sessionStorage.getItem('kecc_pv_logged')) return;
+    sessionStorage.setItem('kecc_pv_logged', '1');
+
+    function readCookie(name) {
+      var prefix = name + '=';
+      var parts = (document.cookie || '').split(';');
+      for (var i = 0; i < parts.length; i++) {
+        var c = parts[i].trim();
+        if (c.indexOf(prefix) === 0) return decodeURIComponent(c.substring(prefix.length));
+      }
+      return null;
+    }
+
+    var qs = new URLSearchParams(window.location.search);
+    var utmSource   = qs.get('utm_source');
+    var utmMedium   = qs.get('utm_medium');
+    var utmCampaign = qs.get('utm_campaign');
+    var gclid       = qs.get('gclid');
+    var hasUtm      = !!(utmSource || utmCampaign || gclid);
+    var hasCookie   = !!readCookie('kecc_campaign');
+
+    if (hasUtm) {
+      fetch('/.netlify/functions/utm-capture', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          utmSource: utmSource, utmMedium: utmMedium,
+          utmCampaign: utmCampaign, gclid: gclid,
+          page: window.location.pathname,
+        }),
+      }).catch(function() {/* non-fatal */});
+    } else if (!hasCookie) {
+      // Truly organic: no UTM, no prior campaign attribution. Log a
+      // page_view event with no campaign_id — the Marketing page rolls
+      // these up as "Organic".
+      fetch('/.netlify/functions/campaign-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventType: 'page_view',
+          metadata: {
+            page: window.location.pathname,
+            referrer: document.referrer || null,
+          },
+        }),
+      }).catch(function() {/* non-fatal */});
+    }
+  } catch (_e) { /* non-fatal */ }
+})();
 document.getElementById('leadForm').addEventListener('submit', async function(e) {
   e.preventDefault();
   const btn = document.getElementById('submitBtn');
@@ -86,13 +142,33 @@ document.getElementById('leadForm').addEventListener('submit', async function(e)
   btn.textContent = 'Sending…';
   btn.disabled = true;
   errMsg.style.display = 'none';
-  const payload = {
+  // Read campaign cookie set by /track redirect (same-origin) so we can pass
+  // the campaign attribution along with the form submission. For cross-origin
+  // embeds the cookie may not be present; the server still has its own fallback.
+  function readCookie(name) {
+    var prefix = name + '=';
+    var parts = (document.cookie || '').split(';');
+    for (var i = 0; i < parts.length; i++) {
+      var c = parts[i].trim();
+      if (c.indexOf(prefix) === 0) return decodeURIComponent(c.substring(prefix.length));
+    }
+    return null;
+  }
+  // Also surface any UTM params from the landing URL — useful if the visitor
+  // arrived via Google Ads / Meta with a gclid and a UTM-tagged link.
+  var qs = new URLSearchParams(window.location.search);
+  var payload = {
     name: document.getElementById('name').value,
     phone: document.getElementById('phone').value,
     email: document.getElementById('email').value || null,
     address: document.getElementById('address').value || null,
     serviceInterest: document.getElementById('service').value || null,
     notes: document.getElementById('notes').value || null,
+    campaignId: readCookie('kecc_campaign') || null,
+    utmSource:   qs.get('utm_source')   || readCookie('kecc_utm_source') || null,
+    utmMedium:   qs.get('utm_medium')   || null,
+    utmCampaign: qs.get('utm_campaign') || null,
+    gclid:       qs.get('gclid')        || null,
   };
   try {
     const res = await fetch('/.netlify/functions/lead-form', {
@@ -139,6 +215,38 @@ export const handler: Handler = async (event) => {
         }
       }
 
+      // ── Resolve campaign attribution ──────────────────────────────────────
+      // Priority order:
+      //   1. campaignId in body (set by the embedded form's JS from the
+      //      kecc_campaign cookie or, on cross-origin embeds, however the
+      //      embedding page injected it)
+      //   2. kecc_campaign cookie sent with the request (same-origin)
+      //   3. utm_source / utm_campaign in body → look up matching campaign
+      //   4. null (unattributed)
+      let campaignId: string | null = body.campaignId ?? null
+
+      if (!campaignId) {
+        // Parse cookies from the request header (server-side fallback)
+        const cookieHeader = event.headers.cookie ?? event.headers.Cookie ?? ''
+        const cookies = Object.fromEntries(
+          cookieHeader.split(';').map(p => {
+            const idx = p.indexOf('=')
+            if (idx < 0) return ['', '']
+            return [p.slice(0, idx).trim(), decodeURIComponent(p.slice(idx + 1).trim())]
+          }).filter(([k]) => k)
+        )
+        if (cookies['kecc_campaign']) campaignId = cookies['kecc_campaign']
+      }
+
+      if (!campaignId && (body.utmSource || body.utmCampaign)) {
+        // Match active campaign by UTM source / campaign tag
+        let q = supabase.from('campaigns').select('id').eq('status', 'active').limit(1)
+        if (body.utmCampaign) q = q.eq('utm_campaign', body.utmCampaign)
+        else if (body.utmSource) q = q.eq('utm_source', body.utmSource)
+        const { data: match } = await q.maybeSingle()
+        if (match?.id) campaignId = match.id
+      }
+
       // Create contact
       const { data: contact, error: contactError } = await supabase
         .from('contacts')
@@ -163,14 +271,25 @@ export const handler: Handler = async (event) => {
         })
       }
 
-      // Create lead
+      // Create lead — now with campaign attribution wired through
       await supabase.from('leads').insert({
         contact_id: contact.id,
         stage: 'new',
         source: 'website',
+        campaign_id: campaignId,
         service_interest: serviceInterest ?? null,
         notes: notes ?? null,
       })
+
+      // Log a form_submit event on the campaign so the Marketing page can
+      // distinguish "form leads" from "phone-click leads"
+      if (campaignId) {
+        supabase.from('campaign_events').insert({
+          campaign_id: campaignId,
+          event_type: 'form_submit',
+          metadata: { utmSource: body.utmSource ?? null, gclid: body.gclid ?? null },
+        }).then(() => {/* fire-and-forget */}).catch(() => {/* non-fatal */})
+      }
 
       // Log activity
       await supabase.from('activities').insert({

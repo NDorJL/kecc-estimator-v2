@@ -664,7 +664,7 @@ export function rowToSca(r: any): SubcontractorAgreement {
 export type ChannelType = 'digital' | 'print' | 'social' | 'referral' | 'sponsorship' | 'phone' | 'other';
 export type CampaignStatus = 'active' | 'paused' | 'ended';
 export type CampaignType = 'digital' | 'qr' | 'referral' | 'phone' | 'sponsorship';
-export type CampaignEventType = 'view' | 'click' | 'scan' | 'phone_click' | 'email_click';
+export type CampaignEventType = 'view' | 'click' | 'scan' | 'phone_click' | 'email_click' | 'page_view' | 'form_submit';
 
 export interface MarketingChannel {
   id: string;
