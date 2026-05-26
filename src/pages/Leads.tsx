@@ -627,15 +627,37 @@ function buildRevisedLineItems(quote: Quote, amendments: QuoteAmendment[]): Line
   return result
 }
 
-// Compute total from original + all amendments
+// Compute the current one-time total of a quote after all amendments are
+// applied. Same convention as initial quote totals (Calculator.tsx /
+// Quotes.tsx): sum of one-time lineItems' lineTotal, minus discount.
+//
+// IMPORTANT: this builds the *revised* line-item list first, then sums it.
+// We deliberately do NOT use delta arithmetic on `originalTotal + Σ(amendment
+// deltas)` because that pattern has bitten us hard in two distinct ways:
+//
+//  1) When the same lineItemId has both an adjustment AND a removal (e.g.
+//     "reduce irrigation to $150" then later "remove irrigation entirely"),
+//     each amendment contributes a delta and the line item ends up subtracted
+//     twice. Joan Ewers' job hit this — the total read $250 low.
+//  2) When `originalTotal` isn't set yet (legacy quotes pre-dating that
+//     column), `quote.total` is used as the base. But `quote.total` is
+//     itself already the *amended* value after the first save, so every
+//     subsequent computation double-applies the deltas. Anything pre-fix
+//     could drift wildly.
+//
+// Computing from `buildRevisedLineItems()` is immune to both because it
+// reconstructs the final state of every line item — the Map dedup in
+// `buildRevisedLineItems` ensures only one amendment effect per lineItemId
+// (the most recent one wins), and the sum is independent of `originalTotal`.
 function computeAmendedTotal(quote: Quote): number {
-  const base = quote.originalTotal ?? quote.total
-  return base + quote.amendments.reduce((d, a) => {
-    if (a.type === 'addition')   return d + (a.addedAmount ?? 0)
-    if (a.type === 'adjustment') return d + (a.newAmount ?? 0) - (a.originalAmount ?? 0)
-    if (a.type === 'removal')    return d - (a.originalAmount ?? 0)
-    return d
-  }, 0)
+  if (!quote.amendments || quote.amendments.length === 0) {
+    return quote.total
+  }
+  const revisedItems = buildRevisedLineItems(quote, quote.amendments)
+  const onetime = revisedItems
+    .filter(li => !li.isSubscription)
+    .reduce((s, li) => s + (li.lineTotal ?? 0), 0)
+  return onetime - (quote.discount ?? 0)
 }
 
 function QuoteDetailPanel({ quote }: { quote: Quote }) {
@@ -1370,19 +1392,16 @@ function LeadDetailSheet({
       }
 
       const updatedAmendments = [...existingAmendments, newAmendment]
-      // Recompute amended total
-      const base = effectiveQuote.originalTotal ?? effectiveQuote.total
-      const newTotal = base + updatedAmendments.reduce((d, a) => {
-        if (a.type === 'addition')   return d + (a.addedAmount ?? 0)
-        if (a.type === 'adjustment') return d + (a.newAmount ?? 0) - (a.originalAmount ?? 0)
-        if (a.type === 'removal')    return d - (a.originalAmount ?? 0)
-        return d
-      }, 0)
 
-      // Save amendments to original quote.
-      // Also stamp originalTotal if not already set — without this, computeAmendedTotal()
-      // falls back to quote.total (which is already the amended value after the first save)
-      // and double-applies the delta on every subsequent render.
+      // Recompute the amended total using the same sum-from-items approach as
+      // computeAmendedTotal(). This is bulletproof against the delta-arithmetic
+      // bugs that previously caused double-subtraction on overlapping amendments.
+      const newTotal = computeAmendedTotal({ ...effectiveQuote, amendments: updatedAmendments })
+
+      // Stamp originalTotal if not already set, for historical reference and
+      // for the strike-through "was $X" UI on the lead sheet. The math no
+      // longer depends on it being correct — but the UI still surfaces it.
+      const base = effectiveQuote.originalTotal ?? effectiveQuote.total
       await apiRequest('PATCH', `/quotes/${effectiveQuote.id}`, {
         amendments: updatedAmendments,
         total: newTotal,
@@ -2277,27 +2296,63 @@ function LeadDetailSheet({
                           placeholder="0.00"
                           className="mt-1 h-9 text-sm"
                         />
-                        {amendMode === 'adjustment' && selectedItem && amendAmount && (
-                          <p className="text-[10px] text-muted-foreground mt-1">
-                            Change: {parseFloat(amendAmount) >= selectedItem.lineTotal ? '+' : ''}{fmtMoney(parseFloat(amendAmount) - selectedItem.lineTotal)}
-                            {' '}&rarr; new total: <strong>{fmtMoney(computeAmendedTotal({ ...effectiveQuote, amendments: [...(effectiveQuote.amendments ?? [])] }) + parseFloat(amendAmount) - selectedItem.lineTotal)}</strong>
-                          </p>
-                        )}
-                        {amendMode === 'addition' && parseFloat(amendAmount) > 0 && (
-                          <p className="text-[10px] text-muted-foreground mt-1">
-                            New total: <strong>{fmtMoney(computeAmendedTotal(effectiveQuote) + parseFloat(amendAmount))}</strong>
-                          </p>
-                        )}
+                        {amendMode === 'adjustment' && selectedItem && amendAmount && (() => {
+                          // Preview by appending a prospective amendment and recomputing.
+                          // Same code path as the save logic, so what you see is what you get
+                          // even when amending an already-amended line item.
+                          const prospective: QuoteAmendment = {
+                            id: 'preview', type: 'adjustment', label: '',
+                            lineItemId: selectedItem.serviceId, lineItemName: selectedItem.serviceName,
+                            originalAmount: selectedItem.lineTotal, newAmount: parseFloat(amendAmount),
+                            createdAt: '',
+                          }
+                          const previewTotal = computeAmendedTotal({
+                            ...effectiveQuote,
+                            amendments: [...(effectiveQuote.amendments ?? []), prospective],
+                          })
+                          return (
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                              Change: {parseFloat(amendAmount) >= selectedItem.lineTotal ? '+' : ''}{fmtMoney(parseFloat(amendAmount) - selectedItem.lineTotal)}
+                              {' '}&rarr; new total: <strong>{fmtMoney(previewTotal)}</strong>
+                            </p>
+                          )
+                        })()}
+                        {amendMode === 'addition' && parseFloat(amendAmount) > 0 && (() => {
+                          const prospective: QuoteAmendment = {
+                            id: 'preview', type: 'addition', label: '',
+                            addedAmount: parseFloat(amendAmount), createdAt: '',
+                          }
+                          const previewTotal = computeAmendedTotal({
+                            ...effectiveQuote,
+                            amendments: [...(effectiveQuote.amendments ?? []), prospective],
+                          })
+                          return (
+                            <p className="text-[10px] text-muted-foreground mt-1">
+                              New total: <strong>{fmtMoney(previewTotal)}</strong>
+                            </p>
+                          )
+                        })()}
                       </div>
                     )}
 
                     {/* Removal confirmation info */}
-                    {amendMode === 'removal' && selectedItem && (
-                      <p className="text-[10px] text-muted-foreground">
-                        This will remove <strong>{selectedItem.serviceName}</strong> ({fmtMoney(selectedItem.lineTotal)}) from the invoice total.{' '}
-                        New total: <strong>{fmtMoney(computeAmendedTotal(effectiveQuote) - selectedItem.lineTotal)}</strong>
-                      </p>
-                    )}
+                    {amendMode === 'removal' && selectedItem && (() => {
+                      const prospective: QuoteAmendment = {
+                        id: 'preview', type: 'removal', label: '',
+                        lineItemId: selectedItem.serviceId, lineItemName: selectedItem.serviceName,
+                        originalAmount: selectedItem.lineTotal, createdAt: '',
+                      }
+                      const previewTotal = computeAmendedTotal({
+                        ...effectiveQuote,
+                        amendments: [...(effectiveQuote.amendments ?? []), prospective],
+                      })
+                      return (
+                        <p className="text-[10px] text-muted-foreground">
+                          This will remove <strong>{selectedItem.serviceName}</strong> ({fmtMoney(selectedItem.lineTotal)}) from the invoice total.{' '}
+                          New total: <strong>{fmtMoney(previewTotal)}</strong>
+                        </p>
+                      )
+                    })()}
 
                     <div className="flex gap-2">
                       <Button variant="outline" size="sm" className="flex-1"
