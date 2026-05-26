@@ -809,7 +809,10 @@ interface CampaignMetrics {
   views: number; leads: number; closed: number
   spend: number; revenue: number; revenueIsEst: boolean
   cpl: number | null; cpa: number | null; roi: number | null
+  // Engagement event counters (immutable, survive lead deletion).
+  // The "Clicks" funnel column sums all of these.
   phoneClicks: number; emailClicks: number
+  formSubmits: number; adClicks: number
 }
 
 function CampaignCard({
@@ -847,13 +850,18 @@ function CampaignCard({
     a.click()
   }
 
-  const totalClicks     = metrics.phoneClicks + metrics.emailClicks
+  // Top-of-funnel engagement = ALL immutable interaction events for this
+  // campaign. Includes phone taps, email taps, form submissions (from the
+  // instant-quoter), and ad clicks (from gclid/UTM capture). These events
+  // persist forever — deleting a lead never removes its corresponding
+  // event, so this is a stable historical engagement count even after
+  // pipeline cleanup.
+  const totalClicks     = metrics.phoneClicks + metrics.emailClicks + metrics.formSubmits + metrics.adClicks
   const convViewsLeads  = metrics.views > 0  ? `${(metrics.leads  / metrics.views  * 100).toFixed(0)}%` : null
   const convClicksLeads = totalClicks  > 0  ? `${(metrics.leads  / totalClicks    * 100).toFixed(0)}%` : null
   const convLeadsClosed = metrics.leads > 0  ? `${(metrics.closed / metrics.leads  * 100).toFixed(0)}%` : null
-  // Phone (GBP, LSA) and Digital (Google Ads, Meta) campaigns track engagement
-  // via click events. Show those as the funnel entry point so 10 phone taps
-  // are visible as 10 clicks, not silently dropped or miscounted as leads.
+  // Phone (GBP, LSA) and Digital (Google Ads, Meta, Contact Form) campaigns
+  // all surface their engagement number as Clicks → Leads → Closed.
   const showClicksFunnel = (campaign.campaignType === 'phone' || campaign.campaignType === 'digital')
 
 
@@ -2142,8 +2150,14 @@ export default function Marketing() {
     const views = (cam.campaignType === 'qr' || cam.campaignType === 'sponsorship')
       ? allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'scan').length
       : 0
+    // Engagement events for the funnel "Clicks" column. These are immutable
+    // events stored in campaign_events — they survive lead deletion, so the
+    // top-of-funnel count is a true historical engagement number rather than
+    // a snapshot of currently-living lead rows.
     const phoneClicks = allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'phone_click').length
     const emailClicks = allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'email_click').length
+    const formSubmits = allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'form_submit').length
+    const adClicks    = allEvents.filter(e => e.campaignId === cam.id && e.eventType === 'click').length
 
     // Lead attribution strategy by campaign type:
     //
@@ -2206,7 +2220,7 @@ export default function Marketing() {
     const cpl = leads  > 0 && spend > 0 ? spend / leads  : null
     const cpa = closed > 0 && spend > 0 ? spend / closed : null
     const roi = spend  > 0              ? ((revenue - spend) / spend) * 100 : null
-    return { views, leads, closed, spend, revenue, revenueIsEst, cpl, cpa, roi, phoneClicks, emailClicks }
+    return { views, leads, closed, spend, revenue, revenueIsEst, cpl, cpa, roi, phoneClicks, emailClicks, formSubmits, adClicks }
   }
 
   // ── Filtered campaigns for section 4 ─────────────────────────────────────
