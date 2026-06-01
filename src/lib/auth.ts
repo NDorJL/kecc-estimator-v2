@@ -34,7 +34,7 @@ export function notifyUnauthorized(): void {
 /**
  * Install a global fetch interceptor so EVERY call to /.netlify/functions/* carries
  * the session token and triggers the login overlay on 401 — covers the many raw
- * fetch() call sites that bypass apiRequest (Settings, uploads, Knox SSE, etc.).
+ * fetch() call sites that bypass apiRequest (Settings, uploads, etc.).
  * Inert until a token exists; never touches non-function requests.
  */
 let interceptorInstalled = false
