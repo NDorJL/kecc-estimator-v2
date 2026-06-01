@@ -58,6 +58,14 @@ const EXPENSE_CATS = [
 ]
 const ALL_CATS = [...INCOME_CATS, ...EXPENSE_CATS]
 
+// Cash-basis revenue: only income categorized into a recognized Schedule C bucket counts
+// as real (collected) revenue. CRM auto-entries / accounts-receivable rows use non-Schedule-C
+// categories (e.g. 'Active Jobs') and are intentionally excluded here so revenue isn't
+// double-counted once the customer's payment lands in the imported bank feed. This matches
+// the P&L tab (calcPLRow), which already sums only INCOME_CATS.
+const isCashIncome = (t: { type: string; category: string }): boolean =>
+  t.type === 'Income' && INCOME_CATS.includes(t.category)
+
 // Cost of Services categories (direct costs, shown above Gross Profit line)
 const COGS_CATS = new Set(['Contract Labor', 'Supplies & Materials'])
 
@@ -1970,10 +1978,10 @@ function computeMetric(
   subs: Subscription[],
 ): number {
   switch (k) {
-    case 'revenue':   return txs.filter(t => t.type === 'Income'  && inBucket(t.date, b)).reduce((s, t) => s + Number(t.amount), 0)
+    case 'revenue':   return txs.filter(t => isCashIncome(t) && inBucket(t.date, b)).reduce((s, t) => s + Number(t.amount), 0)
     case 'expenses':  return txs.filter(t => t.type === 'Expense' && inBucket(t.date, b)).reduce((s, t) => s + Number(t.amount), 0)
     case 'net': {
-      const r = txs.filter(t => t.type === 'Income'  && inBucket(t.date, b)).reduce((s, t) => s + Number(t.amount), 0)
+      const r = txs.filter(t => isCashIncome(t) && inBucket(t.date, b)).reduce((s, t) => s + Number(t.amount), 0)
       const e = txs.filter(t => t.type === 'Expense' && inBucket(t.date, b)).reduce((s, t) => s + Number(t.amount), 0)
       return r - e
     }
@@ -2064,7 +2072,7 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
   // inWindow uses new Date(dateStr) which for 'YYYY-MM-DD' strings parses as UTC midnight;
   // getRangeWindow uses local midnight. For transactions this is safe because t.date is always
   // a plain date string (no time component), and the window is ≥1 day so off-by-hours is fine.
-  const grossRevenue  = useMemo(() => txsInRange.filter(t => t.type === 'Income').reduce((s, t) => s + Number(t.amount), 0), [txsInRange])
+  const grossRevenue  = useMemo(() => txsInRange.filter(isCashIncome).reduce((s, t) => s + Number(t.amount), 0), [txsInRange])
   const totalExpenses = useMemo(() => txsInRange.filter(t => t.type === 'Expense').reduce((s, t) => s + Number(t.amount), 0), [txsInRange])
   const netProfit     = grossRevenue - totalExpenses
 
@@ -2083,7 +2091,7 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
   const winRate  = winDenom > 0 ? (acceptedInRange.length / winDenom) * 100 : 0
 
   // Prior KPIs
-  const priorRevenue  = useMemo(() => txsPrior.filter(t => t.type === 'Income').reduce((s, t) => s + Number(t.amount), 0), [txsPrior])
+  const priorRevenue  = useMemo(() => txsPrior.filter(isCashIncome).reduce((s, t) => s + Number(t.amount), 0), [txsPrior])
   const priorExpenses = useMemo(() => txsPrior.filter(t => t.type === 'Expense').reduce((s, t) => s + Number(t.amount), 0), [txsPrior])
   const priorNet      = priorRevenue - priorExpenses
   const priorLeads    = useMemo(() => leads.filter(l => inWindow(l.createdAt, priorWin)).length, [leads, priorWin])
@@ -2112,7 +2120,7 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
   // ── Chart sub-data ────────────────────────────────────────────────────────
   const revByCat = useMemo(() => {
     const map: Record<string, number> = {}
-    txsInRange.filter(t => t.type === 'Income').forEach(t => { map[t.category] = (map[t.category] || 0) + Number(t.amount) })
+    txsInRange.filter(isCashIncome).forEach(t => { map[t.category] = (map[t.category] || 0) + Number(t.amount) })
     return Object.entries(map).map(([name, value]) => ({ name, value: Math.round(value), fill: CAT_COLORS[name] || '#52B788' })).sort((a, b) => b.value - a.value)
   }, [txsInRange])
 
@@ -2405,7 +2413,7 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
     lines.push('')
     lines.push('── REVENUE BY CATEGORY ──────────────────────────')
     const revByCat: Record<string, number> = {}
-    for (const t of txsInRange.filter(t => t.type === 'Income')) {
+    for (const t of txsInRange.filter(isCashIncome)) {
       revByCat[t.category] = (revByCat[t.category] ?? 0) + Number(t.amount)
     }
     for (const [cat, amt] of Object.entries(revByCat).sort((a, b) => b[1] - a[1])) {
