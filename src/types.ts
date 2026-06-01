@@ -165,8 +165,6 @@ export interface CompanySettings {
   quoApiKey: string | null;
   quoFromNumber: string | null;
   googleCalConnected: boolean;
-  themeConfig: Record<string, string>;
-  navConfig: { items?: Array<{ id: string; visible: boolean }> };
   googleCalId: string | null;
   googleCalExpiresAt: string | null;
   ownerSignatureData: string | null;
@@ -185,13 +183,6 @@ export interface QuoteAttachment {
   attachTo: 'quote' | 'agreement' | 'both';
   sortOrder: number;
   createdAt: string;
-}
-
-export interface PriceOverride {
-  id: string;
-  serviceId: string;
-  field: string;
-  value: number;
 }
 
 // ── Contractor Types ────────────────────────────────────────────────────
@@ -424,8 +415,6 @@ export function rowToSettings(r: any): CompanySettings {
     qbTokenExpiresAt: r.qb_token_expires_at ?? null,
     quoApiKey: r.quo_api_key ?? null,
     quoFromNumber: r.quo_from_number ?? null,
-    themeConfig: r.theme_config ?? {},
-    navConfig: r.nav_config ?? {},
     googleCalConnected: !!r.google_cal_refresh_token,
     googleCalId: r.google_cal_id ?? null,
     googleCalExpiresAt: r.google_cal_token_expires_at ?? null,

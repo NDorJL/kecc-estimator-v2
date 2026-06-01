@@ -15,25 +15,6 @@ import {
   MapPin, BarChart,
 } from 'lucide-react'
 import { useLocation } from 'wouter'
-import { ALL_NAV_ITEMS, mergeNavItems } from '@/lib/theme'
-
-// ── Icon map (mirrors App.tsx NAV_ICONS) ─────────────────────────────────────
-
-const NAV_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  dashboard:     BarChart,
-  contacts:      Users,
-  calendar:      Calendar,
-  jobs:          Briefcase,
-  calculator:    CalcIcon,
-  quotes:        FileText,
-  subscriptions: RefreshCw,
-  finance:       TrendingUp,
-  pricebook:     BookOpen,
-  leads:         Megaphone,
-  settings:      Settings,
-  marketing:     BarChart2,
-}
-
 // ── Notification store (localStorage-based dismiss) ──────────────────────────
 
 const DISMISSED_KEY = 'dashboard_dismissed_notifications'
@@ -286,25 +267,6 @@ export default function Dashboard() {
 
   const openQuotes = (quotes ?? []).filter(q => q.status === 'draft' || q.status === 'sent')
   const openQuotesValue = openQuotes.reduce((sum, q) => sum + q.total, 0)
-
-  // ── Dynamic quick nav ────────────────────────────────────────────────────────
-  // Show pages that are NOT visible in the nav bar (except dashboard itself)
-  const quickNavItems = useMemo(() => {
-    const navItems = mergeNavItems(settings?.navConfig?.items ?? [])
-    return navItems
-      .filter(item => !item.visible && item.id !== 'dashboard')
-      .map(item => {
-        const def = ALL_NAV_ITEMS.find(n => n.id === item.id)
-        if (!def) return null
-        return {
-          id:    item.id,
-          label: def.label,
-          path:  def.path,
-          icon:  NAV_ICONS[item.id] ?? FileText,
-        }
-      })
-      .filter(Boolean) as { id: string; label: string; path: string; icon: React.ComponentType<{ className?: string }> }[]
-  }, [settings])
 
   // ── Notifications ─────────────────────────────────────────────────────────────
   const now = Date.now()
@@ -786,25 +748,6 @@ export default function Dashboard() {
           onClick={() => navigate('/leads')}
         />
       </div>
-
-      {/* ── Dynamic Quick Nav — desktop only (mobile uses bottom quick-bar) ── */}
-      {quickNavItems.length > 0 && (
-        <div className="hidden md:block">
-          <h3 className="text-xs font-bold mb-2 text-muted-foreground uppercase tracking-wider">Navigate</h3>
-          <div className="grid grid-cols-4 gap-2">
-            {quickNavItems.map(({ id, label, path, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => navigate(path)}
-                className="flex flex-col items-center justify-center gap-1.5 rounded-xl border bg-card p-3 text-center hover:bg-muted/50 active:scale-95 transition-all"
-              >
-                <Icon className="h-5 w-5 text-primary" />
-                <span className="text-xs font-medium leading-tight">{label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ── Recent Open Quotes ────────────────────────────────────────────── */}
       {!quotesLoading && openQuotes.length > 0 && (

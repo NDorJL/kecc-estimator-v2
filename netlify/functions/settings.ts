@@ -76,8 +76,6 @@ export const handler: Handler = async (event) => {
       if (body.qbTokenExpiresAt !== undefined)         update.qb_token_expires_at = body.qbTokenExpiresAt
       if (body.quoApiKey !== undefined)                update.quo_api_key = body.quoApiKey
       if (body.quoFromNumber !== undefined)            update.quo_from_number = body.quoFromNumber
-      if (body.themeConfig !== undefined)              update.theme_config = body.themeConfig
-      if (body.navConfig !== undefined)                update.nav_config = body.navConfig
       if (body.ownerSignatureData !== undefined)       update.owner_signature_data = body.ownerSignatureData
       if (body.ownerEmail !== undefined)               update.owner_email = body.ownerEmail
       if (body.scratchpadContent !== undefined)        update.scratchpad_content = body.scratchpadContent  // ← NEW (FIX 2)
