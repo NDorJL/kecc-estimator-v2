@@ -1,4 +1,5 @@
 import { QueryClient } from '@tanstack/react-query'
+import { getToken, clearToken, notifyUnauthorized } from './auth'
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -17,11 +18,21 @@ export async function apiRequest(
   data?: unknown
 ): Promise<Response> {
   const url = `${API_BASE}${path}`
+  const headers: Record<string, string> = {}
+  if (data) headers['Content-Type'] = 'application/json'
+  const token = getToken()
+  if (token) headers['Authorization'] = `Bearer ${token}`
   const res = await fetch(url, {
     method,
-    headers: data ? { 'Content-Type': 'application/json' } : {},
+    headers,
     body: data ? JSON.stringify(data) : undefined,
   })
+  if (res.status === 401) {
+    // Session expired or gate just activated — drop the token and surface login.
+    clearToken()
+    notifyUnauthorized()
+    throw new Error('401: Unauthorized')
+  }
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText)
     throw new Error(`${res.status}: ${text}`)

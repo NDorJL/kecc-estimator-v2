@@ -28,6 +28,7 @@ import Marketing from '@/pages/Marketing'
 import ScratchPad from '@/pages/ScratchPad'
 import Contractors from '@/pages/Contractors'   // ← NEW (FIX 3)
 import { KnoxWidget } from '@/components/KnoxWidget'
+import { LoginGate } from '@/components/LoginGate'
 
 // ThemeApplicator removed — Phantom Dark is the fixed theme, managed via CSS variables
 
@@ -165,6 +166,7 @@ function App() {
             <ServicesProvider>
               <QuoteProvider>
                 <Toaster />
+                <LoginGate />
                 <Router hook={useHashLocation}>
                   <AppLayout />
                 </Router>
