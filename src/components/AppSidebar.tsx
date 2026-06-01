@@ -6,7 +6,7 @@ import {
 import {
   LayoutDashboard, Users, Calendar, Briefcase, Target,
   FileText, RefreshCw, TrendingUp, Megaphone,
-  Calculator, BookOpen, Settings, NotebookPen, HardHat,   // ← HardHat added (FIX 3)
+  Calculator, BookOpen, Settings, NotebookPen,
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { apiGet } from '@/lib/queryClient'
@@ -30,7 +30,6 @@ const NAV_GROUPS = [
       { id: 'subscriptions', label: 'Subscriptions', path: '/subscriptions', icon: RefreshCw },
       { id: 'finance',       label: 'Finance',       path: '/finance',       icon: TrendingUp },
       { id: 'marketing',     label: 'Marketing',     path: '/marketing',     icon: Megaphone },
-      { id: 'contractors',   label: 'Contractors',   path: '/contractors',   icon: HardHat },
     ],
   },
   {

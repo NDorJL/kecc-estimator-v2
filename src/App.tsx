@@ -26,7 +26,6 @@ import SettingsPage from '@/pages/Settings'
 import Finance from '@/pages/Finance'
 import Marketing from '@/pages/Marketing'
 import ScratchPad from '@/pages/ScratchPad'
-import Contractors from '@/pages/Contractors'   // ← NEW (FIX 3)
 import { LoginGate } from '@/components/LoginGate'
 
 // ThemeApplicator removed — Phantom Dark is the fixed theme, managed via CSS variables
@@ -47,7 +46,6 @@ const PAGE_LABELS: Record<string, string> = {
   '/pricebook':     'Price Book',
   '/settings':      'Settings',
   '/scratchpad':    'Scratch Pad',
-  '/contractors':   'Contractors',   // ← NEW (FIX 3)
 }
 
 function getPageLabel(location: string): string {
@@ -140,7 +138,6 @@ function AppLayout() {
               <Route path="/finance" component={Finance} />
               <Route path="/marketing" component={Marketing} />
               <Route path="/scratchpad" component={ScratchPad} />
-              <Route path="/contractors" component={Contractors} />   {/* ← NEW (FIX 3) */}
               <Route>
                 <div className="flex flex-col items-center justify-center h-full p-8 text-center">
                   <h2 className="text-2xl font-bold mb-2">Page Not Found</h2>
