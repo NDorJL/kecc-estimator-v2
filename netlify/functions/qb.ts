@@ -1,6 +1,7 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { randomUUID } from 'crypto'
+import { requireAuth } from './_auth'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -138,6 +139,13 @@ export const handler: Handler = async (event) => {
 
   const action = event.queryStringParameters?.action
   const method = event.httpMethod
+
+  // Admin actions require auth. Left open: connect/callback (browser-nav OAuth, no token
+  // possible) and webhook (Intuit POST, already HMAC-verified below).
+  if (action !== 'connect' && action !== 'callback' && action !== 'webhook') {
+    const unauthorized = requireAuth(event, CORS)
+    if (unauthorized) return unauthorized
+  }
 
   try {
     // ── GET /qb?action=connect — redirect to Intuit OAuth ──────────────

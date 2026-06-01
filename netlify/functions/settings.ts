@@ -1,4 +1,5 @@
 import type { Handler } from '@netlify/functions'
+import { requireAuth } from './_auth'
 import { createClient } from '@supabase/supabase-js'
 import { rowToSettings } from '../../src/types'
 import Busboy from 'busboy'
@@ -42,6 +43,10 @@ function parseMultipart(event: { headers: Record<string, string | undefined>; bo
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS, body: '' }
+
+  // Auth gate — owner-only endpoint (no-op until AUTH_SECRET/APP_PASSWORD are set)
+  const unauthorized = requireAuth(event, CORS)
+  if (unauthorized) return unauthorized
 
   const action = event.queryStringParameters?.action
   const method = event.httpMethod

@@ -1,6 +1,7 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { rowToCampaignEvent } from '../../src/types'
+import { requireAuth } from './_auth'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -24,6 +25,9 @@ export const handler: Handler = async (event) => {
     // Optional filters: ?campaignId=<uuid>  ?eventType=view|click|scan
     //                   ?since=<ISO>        ?until=<ISO>
     if (method === 'GET') {
+      // Admin-only (Marketing dashboard). POST below stays public — it's the tracking pixel.
+      const unauthorized = requireAuth(event, CORS)
+      if (unauthorized) return unauthorized
       const campaignId = event.queryStringParameters?.campaignId
       const eventType  = event.queryStringParameters?.eventType
       const since      = event.queryStringParameters?.since

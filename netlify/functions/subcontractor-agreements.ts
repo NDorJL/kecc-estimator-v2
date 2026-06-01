@@ -5,6 +5,7 @@ const PDFDocument = require('pdfkit')
 import { sendOpenPhoneSms } from './_smsHelper'
 import { sendEmail } from './_emailHelper'
 import { notifyOwner } from './_knoxNotify'
+import { requireAuth } from './_auth'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -688,6 +689,13 @@ export const handler: Handler = async (event) => {
   const qs = event.queryStringParameters ?? {}
   const action = qs.action
   const token  = qs.token
+
+  // Admin actions (list/pdf/create/send/void) require auth. The token-based signing
+  // page/submission (?token=, no action) stays public for the subcontractor.
+  if (action) {
+    const unauthorized = requireAuth(event, CORS)
+    if (unauthorized) return unauthorized
+  }
 
   const SITE_URL = process.env.SITE_URL ?? process.env.URL ?? 'https://localhost:8888'
 

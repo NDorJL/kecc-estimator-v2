@@ -18,6 +18,7 @@
 import type { Handler } from '@netlify/functions'   // ← CHANGED: was `schedule`
 import { createClient } from '@supabase/supabase-js'
 import { sendOpenPhoneSms } from './_smsHelper'
+import { requireAuth } from './_auth'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -149,13 +150,16 @@ export const handler: Handler = async (event) => {   // ← CHANGED: was schedul
     return { statusCode: 405, headers: CORS, body: JSON.stringify({ message: 'Method not allowed — use POST' }) }
   }
 
-  // Authorization: validate secret if MONTHLY_REPORT_SECRET env var is configured
-  const expectedSecret = process.env.MONTHLY_REPORT_SECRET
-  if (expectedSecret) {
+  // Authorization: allow EITHER a valid owner session token (SPA), OR the configured
+  // MONTHLY_REPORT_SECRET (external/scheduled trigger). requireAuth no-ops until the
+  // auth gate is configured, in which case the secret remains the only check.
+  const unauthorized = requireAuth(event, CORS)
+  if (unauthorized) {
+    const expectedSecret = process.env.MONTHLY_REPORT_SECRET
     let body: Record<string, unknown> = {}
     try { body = JSON.parse(event.body ?? '{}') } catch (_e) { /* ignore parse errors */ }
-    if (body.secret !== expectedSecret) {
-      return { statusCode: 401, headers: CORS, body: JSON.stringify({ message: 'Unauthorized' }) }
+    if (!expectedSecret || body.secret !== expectedSecret) {
+      return unauthorized
     }
   }
 

@@ -1,5 +1,6 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
+import { requireAuth } from './_auth'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -35,6 +36,10 @@ function toClient(r: any) {
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return ok({})
+
+  // Auth gate — owner-only endpoint (no-op until AUTH_SECRET/APP_PASSWORD are set)
+  const unauthorized = requireAuth(event, { ...CORS, 'Content-Type': 'application/json' })
+  if (unauthorized) return unauthorized
 
   const method = event.httpMethod
   // Extract id from path: /.netlify/functions/credit-accounts/:id

@@ -11,6 +11,7 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { syncJobToGoogle } from './_google'
+import { requireAuth } from './_auth'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -40,6 +41,12 @@ export const handler: Handler = async (event) => {
 
   const action = event.queryStringParameters?.action
   const method = event.httpMethod
+
+  // Admin actions require auth. Left open: connect/callback (browser-nav OAuth, no token possible).
+  if (action !== 'connect' && action !== 'callback') {
+    const unauthorized = requireAuth(event, CORS)
+    if (unauthorized) return unauthorized
+  }
 
   try {
     // ── GET status ──────────────────────────────────────────────────────────

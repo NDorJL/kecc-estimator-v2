@@ -8,6 +8,7 @@
  *   CLAUDE_MODEL      — optional model override (default: claude-sonnet-4-5)
  */
 import type { Handler } from '@netlify/functions'
+import { requireAuth } from './_auth'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { services as priceBookServices } from '../../src/lib/pricing'
@@ -1962,6 +1963,10 @@ export async function executeTool(name: string, args: Record<string, any>): Prom
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS, body: '' }
+
+  // Auth gate — owner-only endpoint (no-op until AUTH_SECRET/APP_PASSWORD are set)
+  const unauthorized = requireAuth(event, CORS)
+  if (unauthorized) return unauthorized
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers: CORS, body: JSON.stringify({ error: 'Method not allowed' }) }
 
   try {

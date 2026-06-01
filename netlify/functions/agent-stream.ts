@@ -13,6 +13,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { anthropicTools, executeTool, WRITE_TOOLS, buildSystemPrompt, toAnthropicMessages } from './agent'
+import { verifyToken, authConfigured } from './_auth'
 
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? 'claude-sonnet-4-5'
 
@@ -35,6 +36,14 @@ export default async function handler(req: Request): Promise<Response> {
   }
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), { status: 405, headers: CORS_HEADERS })
+  }
+
+  // Auth gate — Knox can read/write the whole DB, so owner-only (no-op until configured).
+  if (authConfigured()) {
+    const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim()
+    if (!verifyToken(token)) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: CORS_HEADERS })
+    }
   }
 
   const encoder = new TextEncoder()

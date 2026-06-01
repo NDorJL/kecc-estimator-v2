@@ -1,4 +1,5 @@
 import type { Handler } from '@netlify/functions'
+import { requireAuth } from './_auth'
 import { createClient } from '@supabase/supabase-js'
 import { rowToAttachment } from '../../src/types'
 import { randomUUID } from 'crypto'
@@ -17,6 +18,10 @@ const CORS = {
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS, body: '' }
+
+  // Auth gate — owner-only endpoint (no-op until AUTH_SECRET/APP_PASSWORD are set)
+  const unauthorized = requireAuth(event, CORS)
+  if (unauthorized) return unauthorized
 
   const rawPath = event.path.replace(/\/.netlify\/functions\/attachments\/?/, '')
   const parts = rawPath.split('/').filter(Boolean)

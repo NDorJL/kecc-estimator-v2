@@ -1,4 +1,5 @@
 import type { Handler } from '@netlify/functions'
+import { requireAuth } from './_auth'
 import { createClient } from '@supabase/supabase-js'
 import { services as baseServices, calculateSubscriptionPrice, rtcepLite, ctcepLite } from '../../src/lib/pricing'
 import type { ServiceDefinition } from '../../src/lib/pricing'
@@ -81,6 +82,10 @@ async function getMergedServices(): Promise<ServiceDefinition[]> {
 
 export const handler: Handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS, body: '' }
+
+  // Auth gate — owner-only endpoint (no-op until AUTH_SECRET/APP_PASSWORD are set)
+  const unauthorized = requireAuth(event, CORS)
+  if (unauthorized) return unauthorized
 
   const action = event.queryStringParameters?.action ?? 'merged'
   const method = event.httpMethod
