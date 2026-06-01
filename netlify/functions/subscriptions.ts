@@ -41,6 +41,24 @@ export const handler: Handler = async (event) => {
     // CREATE
     if (method === 'POST' && !id) {
       const body = JSON.parse(event.body ?? '{}')
+
+      // Dedup guard: one live subscription per contact. If the contact already has a
+      // non-retired (ACTIVE/PAUSED) subscription, return it instead of inserting a
+      // duplicate — duplicates double-count MRR. Mirrors the guard in leads.ts.
+      if (body.contactId) {
+        const { data: existingSub } = await supabase
+          .from('subscriptions')
+          .select('*')
+          .eq('contact_id', body.contactId)
+          .not('status', 'in', '("CANCELED","CANCELLED","ARCHIVED")')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (existingSub) {
+          return { statusCode: 200, headers: CORS, body: JSON.stringify(rowToSubscription(existingSub)) }
+        }
+      }
+
       const insert = {
         customer_name: body.customerName ?? '',
         customer_address: body.customerAddress ?? null,
