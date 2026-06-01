@@ -228,7 +228,9 @@ export const handler: Handler = async (event) => {
             .from('subscriptions')
             .select('id, status')
             .eq('contact_id', data.contact_id)
-            .not('status', 'eq', 'CANCELLED')
+            // Exclude retired subscriptions so a canceled/archived sub is never silently
+            // reactivated. Canonical spelling is 'CANCELED'; tolerate the legacy 'CANCELLED'.
+            .not('status', 'in', '("CANCELED","CANCELLED","ARCHIVED")')
             .limit(1)
             .maybeSingle()
 

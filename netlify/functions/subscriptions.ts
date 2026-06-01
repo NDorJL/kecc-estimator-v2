@@ -95,8 +95,9 @@ export const handler: Handler = async (event) => {
       if (body.agreementId !== undefined)         update.agreement_id = body.agreementId
       if (body.qbInvoiceId !== undefined)         update.qb_invoice_id = body.qbInvoiceId
       if (body.serviceSchedules !== undefined)    update.service_schedules = body.serviceSchedules
-      // Stamp cancelled_at when status changes to CANCELLED (so revenue stops accumulating)
-      if (body.status === 'CANCELLED' && !body.cancelledAt) update.cancelled_at = new Date().toISOString()
+      // Stamp cancelled_at when status changes to CANCELED (so revenue stops accumulating).
+      // Accept the legacy 'CANCELLED' spelling too, in case an old client still sends it.
+      if ((body.status === 'CANCELED' || body.status === 'CANCELLED') && !body.cancelledAt) update.cancelled_at = new Date().toISOString()
       if (body.cancelledAt !== undefined)         update.cancelled_at = body.cancelledAt
       const { data, error } = await supabase.from('subscriptions').update(update).eq('id', id).select().single()
       if (error || !data) return { statusCode: 404, headers: CORS, body: JSON.stringify({ message: 'Subscription not found' }) }

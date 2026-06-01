@@ -1033,7 +1033,7 @@ function LeadDetailSheet({
   const signedAgreement = contactAgreements.find(a => a.status === 'signed') ?? null
 
   const cancelSubMutation = useMutation({
-    mutationFn: () => apiRequest('PATCH', `/subscriptions/${linkedSub!.id}`, { status: 'CANCELLED' }),
+    mutationFn: () => apiRequest('PATCH', `/subscriptions/${linkedSub!.id}`, { status: 'CANCELED' }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/subscriptions'] })
       queryClient.invalidateQueries({ queryKey: ['/leads'] })
