@@ -31,6 +31,60 @@ async function logActivity(
 }
 
 /**
+ * Insert OR update the single CRM auto-entry ("accounts receivable") row for a lead.
+ *
+ * Cash-basis model (owner decision): these rows track work that's done but not yet
+ * collected in the bank. They use the non-Schedule-C category 'Active Jobs' on the
+ * 'CRM Auto-Entry' account, so the Finance P&L — which counts only recognized
+ * INCOME_CATS — never books them as cash. The real income is recognized when the
+ * customer's payment lands in the imported bank feed.
+ *
+ * We keep exactly ONE auto-entry per lead and reconcile it across the
+ * finished_unpaid → finished_paid transition (flip is_unpaid) instead of inserting a
+ * second row. The old code inserted a fresh row on every transition, which
+ * double/triple-counted the same job (e.g. one $300 job booked 3× = $900).
+ */
+async function upsertLeadReceivable(
+  supabase: SupabaseClient,
+  lead: { id: string; contact_id: string | null },
+  fields: { amount: number; description: string; isUnpaid: boolean },
+): Promise<void> {
+  const row = {
+    type:        'Income',
+    amount:      fields.amount,
+    category:    'Active Jobs',          // intentionally NOT an INCOME_CAT → excluded from cash P&L
+    source:      `lead:${lead.id}`,      // stable per-lead idempotency key
+    description: fields.description,
+    date:        new Date().toISOString().slice(0, 10),
+    account:     'CRM Auto-Entry',
+    notes:       fields.isUnpaid ? 'Auto-generated — invoice pending payment' : '',
+    review:      fields.isUnpaid,        // surfaces unpaid jobs in the Finance "review"/AR view
+    is_unpaid:   fields.isUnpaid,
+    lead_id:     lead.id,
+    contact_id:  lead.contact_id ?? null,
+  }
+  try {
+    // Find this lead's existing auto-entry (matches both the new source key and any
+    // legacy 'job_completed'-sourced row, via the CRM Auto-Entry account).
+    const { data: existing } = await supabase
+      .from('transactions')
+      .select('id')
+      .eq('lead_id', lead.id)
+      .eq('account', 'CRM Auto-Entry')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (existing) {
+      await supabase.from('transactions').update(row).eq('id', existing.id)
+    } else {
+      await supabase.from('transactions').insert(row)
+    }
+  } catch (e) {
+    console.error('[cascade] receivable upsert failed:', e instanceof Error ? e.message : e)
+  }
+}
+
+/**
  * Runs after every lead stage change.
  * Handles: finished_paid, finished_unpaid, recurring, and a universal
  * stage_change activity entry for all transitions.
@@ -81,24 +135,9 @@ export async function handleLeadStageChange(
         } catch (_e) { /* non-fatal — fall back to estimated_value */ }
       }
 
-      try {
-        await supabase.from('transactions').insert({
-          type:        'Income',
-          amount,
-          category:    'Active Jobs',
-          source:      'job_completed',
-          description,
-          date:        new Date().toISOString().slice(0, 10),
-          account:     'CRM Auto-Entry',
-          notes:       '',
-          review:      false,
-          is_unpaid:   false,
-          lead_id:     lead.id,
-          contact_id:  lead.contact_id ?? null,
-        })
-      } catch (e) {
-        console.error('[cascade] transactions insert (finished_paid) failed:', e instanceof Error ? e.message : e)
-      }
+      // Reconcile the lead's single auto-entry to PAID (does not insert a duplicate).
+      // Under cash basis the real income is the bank deposit; this row is the AR record.
+      await upsertLeadReceivable(supabase, { id: lead.id, contact_id: lead.contact_id }, { amount, description, isUnpaid: false })
 
       if (lead.contact_id) {
         await logActivity(supabase, lead.contact_id, 'payment_received',
@@ -157,24 +196,8 @@ export async function handleLeadStageChange(
         } catch (_e) { /* non-fatal */ }
       }
 
-      try {
-        await supabase.from('transactions').insert({
-          type:        'Income',
-          amount,
-          category:    'Active Jobs',
-          source:      'job_completed',
-          description,
-          date:        new Date().toISOString().slice(0, 10),
-          account:     'CRM Auto-Entry',
-          notes:       'Auto-generated — invoice pending payment',
-          review:      true,      // surfaces in Finance "needs review" view
-          is_unpaid:   true,      // flagged as not yet collected
-          lead_id:     lead.id,
-          contact_id:  lead.contact_id ?? null,
-        })
-      } catch (e) {
-        console.error('[cascade] transactions insert (finished_unpaid) failed:', e instanceof Error ? e.message : e)
-      }
+      // Reconcile the lead's single auto-entry to UNPAID (insert if first time, else update).
+      await upsertLeadReceivable(supabase, { id: lead.id, contact_id: lead.contact_id }, { amount, description, isUnpaid: true })
 
       if (lead.contact_id) {
         await logActivity(supabase, lead.contact_id, 'invoice_sent',
