@@ -2,6 +2,7 @@ import type { Handler } from '@netlify/functions'
 import { requireAuth } from './_auth'
 import { createClient } from '@supabase/supabase-js'
 import { rowToQuote } from '../../src/types'
+import { buildRevisedLineItems, computeAmendedTotal } from '../../src/lib/quoteMath'
 import { randomUUID } from 'crypto'
 import { advanceLeadStage } from './_leadSync'
 import { sendOpenPhoneSms, getAttachmentLinks } from './_smsHelper'
@@ -12,50 +13,9 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 )
 
-// ── Revision helper ───────────────────────────────────────────────────────────
-// Mirrors buildRevisedLineItems() in Leads.tsx. Bakes amendments into a clean
-// line-items array: adjustments replace originals, removals are excluded,
-// additions are appended. Used when auto-generating the revision quote.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function buildRevisedLineItems(originalItems: any[], amendments: any[]): any[] {
-  const amendByItemId = new Map(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    amendments.filter((a: any) => a.lineItemId).map((a: any) => [a.lineItemId, a])
-  )
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const result: any[] = originalItems
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .filter((li: any) => amendByItemId.get(li.serviceId)?.type !== 'removal')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .map((li: any) => {
-      const a = amendByItemId.get(li.serviceId)
-      if (a?.type === 'adjustment') {
-        const newAmt = a.newAmount ?? li.lineTotal
-        return {
-          ...li,
-          serviceName: a.newName ?? li.serviceName,
-          description: a.newDescription ?? li.description,
-          unitPrice:   newAmt,
-          lineTotal:   newAmt,
-        }
-      }
-      return li
-    })
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  amendments.filter((a: any) => a.type === 'addition').forEach((a: any) => {
-    result.push({
-      serviceId:      `amend_${a.id}`,
-      serviceName:    a.label,
-      category:       'Supplemental',
-      description:    a.addedDescription ?? undefined,
-      quantity:       1,
-      unitPrice:      a.addedAmount ?? 0,
-      lineTotal:      a.addedAmount ?? 0,
-      isSubscription: false,
-    })
-  })
-  return result
-}
+// Quote amendment math (buildRevisedLineItems / computeAmendedTotal) is imported from
+// the shared src/lib/quoteMath.ts — the single source of truth shared with Leads.tsx so
+// the saved revision total can never diverge from what the customer sees.
 
 const CORS = {
   'Content-Type': 'application/json',
@@ -216,17 +176,12 @@ export const handler: Handler = async (event) => {
         try {                                                                                               // ← NEW
           const amendments    = Array.isArray(body.amendments) ? body.amendments as any[] : []           // ← NEW
           const originalItems = Array.isArray(data.line_items) ? data.line_items as any[] : []           // ← NEW
-          const revisedItems  = buildRevisedLineItems(originalItems, amendments)                          // ← NEW
-                                                                                                           // ← NEW
-          // Compute amended total from original_total (frozen at signing) + amendment deltas            // ← NEW
-          const base     = Number(data.original_total ?? data.total)                                      // ← NEW
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any                                  // ← NEW
-          const newTotal = base + amendments.reduce((d: number, a: any) => {                              // ← NEW
-            if (a.type === 'addition')   return d + (a.addedAmount   ?? 0)                               // ← NEW
-            if (a.type === 'adjustment') return d + (a.newAmount ?? 0) - (a.originalAmount ?? 0)         // ← NEW
-            if (a.type === 'removal')    return d - (a.originalAmount ?? 0)                              // ← NEW
-            return d                                                                                        // ← NEW
-          }, 0)                                                                                             // ← NEW
+          const revisedItems  = buildRevisedLineItems(originalItems, amendments)
+          // Amended total = sum of the REVISED one-time line items − discount (shared
+          // quoteMath). Replaces the old delta-arithmetic (originalTotal + Σ deltas) that
+          // double-subtracted adjust-then-remove and double-applied stale totals — the
+          // bug that made the saved revision diverge from the displayed total.
+          const newTotal = computeAmendedTotal(originalItems, amendments, Number(data.discount ?? 0), Number(data.total ?? 0))
                                                                                                            // ← NEW
           // Check if a revision already exists for this quote                                            // ← NEW
           const { data: existingRevision } = await supabase                                               // ← NEW

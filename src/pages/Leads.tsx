@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useLocation } from 'wouter'
 import { apiGet, apiRequest } from '@/lib/queryClient'
+import { buildRevisedLineItems as sharedBuildRevisedLineItems, computeAmendedTotal as sharedComputeAmendedTotal } from '@/lib/quoteMath'
 import { quoCallUrl, quoTextUrl } from '@/lib/utils'
 import { useQuoteContext } from '@/lib/quote-context'
 import { Lead, Quote, Job, LeadStage, LineItem, Contact, Property, QuoteAttachment, LeadPhotoStack, QuoteAmendment, AmendmentType, QuoteOptionGroup, Campaign } from '@/types'
@@ -597,67 +598,16 @@ function KanbanColumn({
 
 // ── Quote Detail inside Lead Sheet ───────────────────────────────────────────
 
-// Apply all amendments to a quote's line items to produce a clean revised list
+// Quote amendment math now lives in src/lib/quoteMath.ts — the SINGLE source of truth
+// shared with the backend (quotes.ts) so the displayed total can never diverge from the
+// total saved to the revision quote. These thin wrappers keep this file's quote-shaped
+// call sites unchanged.
 function buildRevisedLineItems(quote: Quote, amendments: QuoteAmendment[]): LineItem[] {
-  const amendByItemId = new Map(
-    amendments.filter(a => a.lineItemId).map(a => [a.lineItemId!, a])
-  )
-  const result: LineItem[] = quote.lineItems
-    .filter(li => amendByItemId.get(li.serviceId)?.type !== 'removal')
-    .map(li => {
-      const a = amendByItemId.get(li.serviceId)
-      if (a?.type === 'adjustment') {
-        const newAmt = a.newAmount ?? li.lineTotal
-        return { ...li, serviceName: a.newName ?? li.serviceName, description: a.newDescription ?? li.description, unitPrice: newAmt, lineTotal: newAmt }
-      }
-      return li
-    })
-  amendments.filter(a => a.type === 'addition').forEach(a => {
-    result.push({
-      serviceId: `amend_${a.id}`,
-      serviceName: a.label,
-      category: 'Supplemental',
-      description: a.addedDescription,
-      quantity: 1,
-      unitPrice: a.addedAmount ?? 0,
-      lineTotal: a.addedAmount ?? 0,
-      isSubscription: false,
-    })
-  })
-  return result
+  return sharedBuildRevisedLineItems(quote.lineItems, amendments)
 }
 
-// Compute the current one-time total of a quote after all amendments are
-// applied. Same convention as initial quote totals (Calculator.tsx /
-// Quotes.tsx): sum of one-time lineItems' lineTotal, minus discount.
-//
-// IMPORTANT: this builds the *revised* line-item list first, then sums it.
-// We deliberately do NOT use delta arithmetic on `originalTotal + Σ(amendment
-// deltas)` because that pattern has bitten us hard in two distinct ways:
-//
-//  1) When the same lineItemId has both an adjustment AND a removal (e.g.
-//     "reduce irrigation to $150" then later "remove irrigation entirely"),
-//     each amendment contributes a delta and the line item ends up subtracted
-//     twice. Joan Ewers' job hit this — the total read $250 low.
-//  2) When `originalTotal` isn't set yet (legacy quotes pre-dating that
-//     column), `quote.total` is used as the base. But `quote.total` is
-//     itself already the *amended* value after the first save, so every
-//     subsequent computation double-applies the deltas. Anything pre-fix
-//     could drift wildly.
-//
-// Computing from `buildRevisedLineItems()` is immune to both because it
-// reconstructs the final state of every line item — the Map dedup in
-// `buildRevisedLineItems` ensures only one amendment effect per lineItemId
-// (the most recent one wins), and the sum is independent of `originalTotal`.
 function computeAmendedTotal(quote: Quote): number {
-  if (!quote.amendments || quote.amendments.length === 0) {
-    return quote.total
-  }
-  const revisedItems = buildRevisedLineItems(quote, quote.amendments)
-  const onetime = revisedItems
-    .filter(li => !li.isSubscription)
-    .reduce((s, li) => s + (li.lineTotal ?? 0), 0)
-  return onetime - (quote.discount ?? 0)
+  return sharedComputeAmendedTotal(quote.lineItems, quote.amendments, quote.discount ?? 0, quote.total)
 }
 
 function QuoteDetailPanel({ quote }: { quote: Quote }) {
