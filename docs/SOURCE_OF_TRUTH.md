@@ -97,7 +97,9 @@ Accounting basis: **CASH** (owner decision). P&L revenue = money actually receiv
 
 ### Lead stage counts (kanban) — ⬜ direct `leads.stage` group-by.
 ### Jobs completed — ⬜ `countJobsDone()` (leads finished_* + subscription occurrences). Subscription-occurrence math is duplicated between Finance + Calendar (drift risk).
-### Quote / amendment totals — ✅ frontend fixed (sums `buildRevisedLineItems`); ⚠️ backend `quotes.ts` still uses the old delta-arithmetic → revision rows can diverge. → unify into one shared module.
+### Quote / amendment totals — ✅ unified (2026-06-02, staged)
+- Both the displayed total (Leads.tsx) and the saved revision total (`quotes.ts`) now use the single shared `src/lib/quoteMath.ts` (`buildRevisedLineItems` + `computeAmendedTotal`). The backend's old delta-arithmetic (which made saved revisions diverge — Joan Ewers $250-low) is gone. They can't diverge again.
+- ⏳ DATA CHECK (MCP down): existing revision rows (`quotes.revised_from_id` not null) created before this fix may carry stale totals — query and reconcile when MCP recovers.
 
 ---
 
