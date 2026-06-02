@@ -15,9 +15,9 @@ React SPA ──apiGet/apiRequest──> Netlify Function ──service-role─�
 
 ## 2. THE cascade rule (most important — fixes "data doesn't sync everywhere")
 **There must be exactly ONE way to change `leads.stage`, and it must always run the cascade.**
-- `advanceLeadStage()` (`_leadSync.ts`) is the only sanctioned lead-stage mutator. It must call `handleLeadStageChange()` (`_cascade.ts`) whenever it actually changes the stage — so Finance/AR entries, activity logs, and review queuing fire on *every* path.
-- **⚠️ GAP (current):** `handleLeadStageChange` is called by **only `leads.ts`**. But `advanceLeadStage` is also called by `quotes.ts`, `jobs.ts`, `esign.ts`, `subscriptions.ts`, and `send-reminders.ts` + `qb.ts` mutate `leads.stage` with raw updates — none trigger the cascade. Result: customer signs online / QB pays / auto-sweep → no finance/AR entry, no review. **This is the #1 structural fix.**
-- Rule: no function may write `leads.stage` directly. Route everything through `advanceLeadStage`, and have it own the cascade call.
+- `advanceLeadStage()` (`_leadSync.ts`) is the only sanctioned lead-stage mutator. It calls `handleLeadStageChange()` (`_cascade.ts`) whenever it actually changes the stage — so Finance/AR entries, activity logs, and review queuing fire on *every* path.
+- **✅ RESOLVED (2026-06-02):** `advanceLeadStage` now runs the cascade on every advance, and the two raw-write paths (`send-reminders` finished_unpaid sweep, `qb` finished_paid webhook) now call the cascade too. QB-paid jobs finally create/reconcile their AR entry; online signings and auto-finished jobs log activity + queue reviews. The review queue was consolidated into one `maybeQueueReview` helper that dedups per-lead and bridges the two review systems (checks `jobs.review_sent_at`) so wider coverage can't double-text a customer.
+- Rule: prefer `advanceLeadStage` for automated transitions (it owns the cascade). The one allowed direct writer is `leads.ts` (the user's manual kanban drag, which can move backward / to `lost`) — and it already cascades. Invariant: **every stage change runs the cascade.**
 
 ## 3. Idempotency & dedup
 - **Every auto-generated `transactions` row uses a stable `source` key** so it can be reconciled, never duplicated. Convention: `lead:<id>` (cascade AR), `job:<id>`, `quote:<id>`. Insert-or-update on that key (see `upsertLeadReceivable`).

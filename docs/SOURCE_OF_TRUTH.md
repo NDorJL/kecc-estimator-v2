@@ -28,7 +28,7 @@ Accounting basis: **CASH** (owner decision). P&L revenue = money actually receiv
 
 ### Accounts Receivable / "unpaid jobs" — ⚠️ Verified 2026-06-02, minor cleanup gap
 - **Source:** `transactions` where `account='CRM Auto-Entry'`; `is_unpaid=true` = outstanding.
-- **Written by:** `_cascade.ts` → `upsertLeadReceivable()` (one row per lead, flips `is_unpaid` on unpaid→paid).
+- **Written by:** `_cascade.ts` → `upsertLeadReceivable()` (one row per lead, flips `is_unpaid` on unpaid→paid). As of 2026-06-02 the cascade fires on **all** stage paths (incl. QB webhook + reminder sweep), so QB-paid and auto-finished jobs now create/reconcile their AR entry (previously they didn't).
 - **Verified:** Currently **$0 outstanding** (`is_unpaid=true` → 0 rows). Joan Ewers' $6,739.92 correctly resolved to a single bank deposit (cash income), no double-count. ✅
 - ⚠️ **Finding:** 3 paid auto-entries linger ($875.86: Deb/Harrison/Marcia, `is_unpaid=false`, still `Active Jobs`). Harmless to P&L (excluded) but they should be cleared when the matching bank deposit is imported, or AR accumulates dead rows. → improvement: on finished_paid, delete the auto-entry (cash arrives via import) instead of just flipping the flag.
 
