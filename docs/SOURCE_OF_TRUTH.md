@@ -62,24 +62,33 @@ Accounting basis: **CASH** (owner decision). P&L revenue = money actually receiv
 
 ---
 
-## MARKETING (see `kecc_marketing_attribution` memory)
+## MARKETING (verified 2026-06-02 against live data; see `kecc_marketing_attribution` memory)
 
-### Spend per channel / Total Spend — ⚠️ inconsistent
-- **Source:** `marketing_spend.amount`. **Issue:** Channel table + "Best Channel" use raw `amount`; blended KPIs + campaign cards use `effectiveSpend` (prorated by elapsed days). So channel spend ≠ Total Spend for the current month. → use one basis.
+**Live data snapshot:** 27 leads (20 with campaign_id, 7 without), 22 campaign_events (form_submit 7, scan 7, email_click 4, phone_click 4), 17 campaigns, 6 spend rows. The metric *logic* is mostly correct; the *trust problem is the data underneath it* — attribution is largely manual/source-based, the tracked engagement events are sparse and partly orphaned, and several funnels don't reconcile.
 
-### Leads per campaign — ⬜ Not yet verified
-- **Rule:** strict `leads.campaign_id` match for all types EXCEPT `referral` (also loose-matches by `source`).
+### Leads per campaign — ✅ logic verified; ⚠️ attribution is mostly manual, not tracked
+- **Rule (confirmed in `campaignMetrics`):** strict `leads.campaign_id` match; `referral` campaigns also loose-match by source via `getLeadChannelId` (source attribution works ONLY for referral-type channels — correct).
+- **Verified:** GBP Website Link = **10 leads but 0 tracked events** → those leads were attributed manually / by source-tag, not by a tracked click. Word of Mouth = 7 (referral loose-match, correct). Direct Mail Instant Quote = 2. So the lead *counts* are right, but "tracking" for the biggest channel (GBP) is manual entry, not event-verified.
 
-### Clicks — ⬜ event-based (good design)
-- **Formula:** Σ immutable `campaign_events` of type `phone_click+email_click+form_submit+click` (survives lead deletion). Note `email_click`/`view` have no production writer.
+### Clicks — ⚠️ phone/email clicks are invisible per-campaign
+- **Formula (confirmed):** `campaignMetrics` sums `phone_click+email_click+form_submit+ad-click` filtered by `campaignId === cam.id`.
+- **Verified problem:** all **8 phone_click+email_click events have NULL campaign_id** → they count toward NO campaign card (anonymous website taps, no campaign context at tap time). Tracked but unused. → either roll them into a channel-level "Website" aggregate or stop logging them.
+- ⬜ **Contact Form card shows Clicks=7 (form_submit) but Leads=1** — a 7:1 gap. PENDING: confirm whether the 7 form_submit events are real submissions (6 didn't convert/attribute) or leftover test events whose leads were deleted (events are immutable, so deleted-test leads leave orphan events). *(Supabase MCP was down at check time — re-run.)*
 
-### Closed / Revenue per campaign — ⬜ Not yet verified
-- **Rule:** calendar job visits in range attributed via quote→campaign (strict) or quote→channel (referral). Revenue from closed leads' quote totals.
+### Views / Scans — ✅ verified; ⚠️ funnels don't reconcile
+- **Verified:** scan events Ice Bears = 6, Direct Mail "How KECC Works" = 1 — shown correctly as Views (qr/sponsorship only).
+- **Discrepancies:** Ice Bears = 6 scans, **0 leads** (no conversion). Direct Mail Instant Quote = **2 leads, 0 scans** (QR campaign whose leads arrived without a tracked scan). The scan→lead funnel is broken/manual for QR.
 
-### CPA / CPL / ROI — ⬜ derived from the above (inherits their issues).
+### Organic Clicks — ❌ captures nothing
+- **Source:** `campaign_events` type `page_view`. **Verified: there are ZERO `page_view` events** in the DB → the "Organic Clicks" KPI is always 0. The organic page_view writer (instant-estimator) isn't producing events (not firing, or no organic traffic). The previously-noted dedup/inflation risk is moot because nothing is logged. (Also 0 `view`/`click` events — those types are dead.)
 
-### Organic Clicks — ⚠️ inflated
-- **Source:** `campaign_events` type `page_view` with null campaign. **Issue:** the organic `page_view` writer has no dedup/bot filter (unlike scan/click) → reloads inflate it. → relabel "Organic Page Views" or add dedup.
+### Spend per channel / Total Spend — ⚠️ inconsistent (unverified totals)
+- **Source:** `marketing_spend` (6 rows). **Issue (code-confirmed):** Channel table + "Best Channel" use raw `amount`; campaign cards + blended KPIs use `effectiveSpend` (prorated). → use one basis. PENDING: verify the 6 spend rows + proration vs displayed totals. *(MCP down.)*
+
+### Closed / Revenue / CPA / CPL / ROI — ⬜ logic verified, totals pending
+- **Rule (confirmed):** Closed = calendar job visits in range attributed via quote→campaign (strict) / quote→channel (referral only). Revenue = `revenueFor(closedLeads)`. CPA/CPL/ROI derived. PENDING: verify closed-job counts + revenue vs jobs/quotes data. *(MCP down.)*
+
+**Bottom line on trust:** the marketing *math* is sound, but the *inputs* are thin and partly manual — GBP (your biggest source) is hand-attributed with no tracked events, QR scan→lead funnels don't connect, phone/email taps are logged but orphaned, and organic tracking logs nothing. So the marketing page is directionally OK for leads-per-channel but should NOT be trusted as a precise tracked funnel. Highest-value fixes: roll orphan phone/email clicks into a channel aggregate, fix/confirm the QR scan→lead linkage, and either fix or remove organic tracking + the dead event types.
 
 ---
 
@@ -100,5 +109,7 @@ Accounting basis: **CASH** (owner decision). P&L revenue = money actually receiv
 | Finance — fixed/variable | ⚠️ | heuristic, untrustworthy |
 | Finance — forecasts | ⬜ | suspected double-count |
 | MRR / ARR | ⬜ | |
-| Marketing — all metrics | ⬜/⚠️ | spend-basis + organic-dedup issues |
+| Marketing — leads/scans logic | ✅ | 2026-06-02; logic sound, attribution mostly manual |
+| Marketing — clicks/organic | ⚠️ | phone/email clicks orphaned (null campaign); 0 page_view events (organic logs nothing) |
+| Marketing — spend/closed/revenue totals | ⬜ | PENDING — Supabase MCP was down; re-run form_submit-reality + spend + closed checks |
 | Pipeline counts | ⬜ | |
