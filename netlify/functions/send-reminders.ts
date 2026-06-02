@@ -11,6 +11,7 @@
 
 import { schedule } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
+import { handleLeadStageChange } from './_cascade'
 // sendOpenPhoneSms import removed — all sends now go through the approval queue  // ← CHANGED
 
 const supabase = createClient(
@@ -315,11 +316,14 @@ const handler = schedule('0 14 * * *', async () => {
         for (const lead of toFinish) {
           const job = Array.isArray(lead.jobs) ? lead.jobs[0] : lead.jobs as any
 
-          await supabase
-            .from('leads')
-            .update({ stage: 'finished_unpaid' })
-            .eq('id', lead.id)
-            .catch(e => console.error(`[send-reminders] Stage update failed for lead ${lead.id}:`, (e as Error).message))
+          try {
+            await supabase.from('leads').update({ stage: 'finished_unpaid' }).eq('id', lead.id)
+            // Cascade: create the AR finance entry + activity log + review queue for this
+            // auto-finish (previously this sweep bypassed the cascade entirely).
+            await handleLeadStageChange(lead.id, 'finished_unpaid', supabase)
+          } catch (e) {
+            console.error(`[send-reminders] finished_unpaid cascade failed for lead ${lead.id}:`, (e as Error).message)
+          }
 
           // Mark the job as completed
           try {

@@ -85,6 +85,49 @@ async function upsertLeadReceivable(
 }
 
 /**
+ * Queue a one-time review request for a lead's contact, with guards so that
+ * centralizing the cascade onto more transitions can never double-text a customer:
+ *   - contact exists and hasn't already left a review
+ *   - no review already sent to this contact via the job-completion path
+ *     (jobs.review_sent_at) — bridges the review_requests and sms_queue systems
+ *   - under the 3-request cap (review_requests, type one_time)
+ */
+async function maybeQueueReview(
+  supabase: SupabaseClient,
+  lead: { id: string; contact_id: string | null },
+): Promise<void> {
+  if (!lead.contact_id) return
+  try {
+    // Already queued a review for THIS lead/job? (prevents a second request when the
+    // same lead transitions finished_unpaid → finished_paid, e.g. sweep then QB payment).
+    const { count: existingForLead } = await supabase
+      .from('review_requests').select('id', { count: 'exact', head: true })
+      .eq('lead_id', lead.id)
+    if ((existingForLead ?? 0) > 0) return
+
+    const { data: contactRow } = await supabase
+      .from('contacts').select('has_left_review').eq('id', lead.contact_id).single()
+    if (contactRow?.has_left_review) return
+
+    const { count: alreadySent } = await supabase
+      .from('jobs').select('id', { count: 'exact', head: true })
+      .eq('contact_id', lead.contact_id).not('review_sent_at', 'is', null)
+    if ((alreadySent ?? 0) > 0) return
+
+    const { count } = await supabase
+      .from('review_requests').select('id', { count: 'exact', head: true })
+      .eq('contact_id', lead.contact_id).eq('type', 'one_time')
+    if ((count ?? 0) >= 3) return
+
+    await supabase.from('review_requests').insert({
+      contact_id: lead.contact_id, lead_id: lead.id, type: 'one_time', status: 'pending_queue',
+    })
+  } catch (e) {
+    console.error('[cascade] maybeQueueReview failed:', e instanceof Error ? e.message : e)
+  }
+}
+
+/**
  * Runs after every lead stage change.
  * Handles: finished_paid, finished_unpaid, recurring, and a universal
  * stage_change activity entry for all transitions.
@@ -146,35 +189,7 @@ export async function handleLeadStageChange(
         )
       }
 
-      // ── Queue a review request for this one-time job ─────────────────────  // ← NEW
-      if (lead.contact_id) {                                                     // ← NEW
-        try {                                                                     // ← NEW
-          const { data: contactRow } = await supabase                            // ← NEW
-            .from('contacts')                                                    // ← NEW
-            .select('has_left_review')                                           // ← NEW
-            .eq('id', lead.contact_id)                                           // ← NEW
-            .single()                                                            // ← NEW
-          if (!contactRow?.has_left_review) {                                    // ← NEW
-            // Count existing review requests to enforce the 3-request max      // ← NEW
-            const { count } = await supabase                                     // ← NEW
-              .from('review_requests')                                           // ← NEW
-              .select('id', { count: 'exact', head: true })                     // ← NEW
-              .eq('contact_id', lead.contact_id)                                // ← NEW
-              .eq('type', 'one_time')                                            // ← NEW
-            if ((count ?? 0) < 3) {                                             // ← NEW
-              await supabase.from('review_requests').insert({                   // ← NEW
-                contact_id: lead.contact_id,                                    // ← NEW
-                lead_id:    lead.id,                                             // ← NEW
-                type:       'one_time',                                          // ← NEW
-                status:     'pending_queue',                                     // ← NEW
-              })                                                                 // ← NEW
-            }                                                                    // ← NEW
-          }                                                                      // ← NEW
-        } catch (e) {                                                            // ← NEW
-          console.error('[cascade] review_request insert (finished_paid) failed:', // ← NEW
-            e instanceof Error ? e.message : e)                                 // ← NEW
-        }                                                                        // ← NEW
-      }                                                                          // ← NEW
+      await maybeQueueReview(supabase, { id: lead.id, contact_id: lead.contact_id })
     }
 
     // ── finished_unpaid ──────────────────────────────────────────────────────
@@ -206,34 +221,7 @@ export async function handleLeadStageChange(
         )
       }
 
-      // ── Queue a review request for this one-time job ─────────────────────  // ← NEW
-      if (lead.contact_id) {                                                     // ← NEW
-        try {                                                                     // ← NEW
-          const { data: contactRow } = await supabase                            // ← NEW
-            .from('contacts')                                                    // ← NEW
-            .select('has_left_review')                                           // ← NEW
-            .eq('id', lead.contact_id)                                           // ← NEW
-            .single()                                                            // ← NEW
-          if (!contactRow?.has_left_review) {                                    // ← NEW
-            const { count } = await supabase                                     // ← NEW
-              .from('review_requests')                                           // ← NEW
-              .select('id', { count: 'exact', head: true })                     // ← NEW
-              .eq('contact_id', lead.contact_id)                                // ← NEW
-              .eq('type', 'one_time')                                            // ← NEW
-            if ((count ?? 0) < 3) {                                             // ← NEW
-              await supabase.from('review_requests').insert({                   // ← NEW
-                contact_id: lead.contact_id,                                    // ← NEW
-                lead_id:    lead.id,                                             // ← NEW
-                type:       'one_time',                                          // ← NEW
-                status:     'pending_queue',                                     // ← NEW
-              })                                                                 // ← NEW
-            }                                                                    // ← NEW
-          }                                                                      // ← NEW
-        } catch (e) {                                                            // ← NEW
-          console.error('[cascade] review_request insert (finished_unpaid) failed:', // ← NEW
-            e instanceof Error ? e.message : e)                                 // ← NEW
-        }                                                                        // ← NEW
-      }                                                                          // ← NEW
+      await maybeQueueReview(supabase, { id: lead.id, contact_id: lead.contact_id })
     }
 
     // ── recurring ────────────────────────────────────────────────────────────

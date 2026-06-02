@@ -12,6 +12,7 @@
  */
 
 import { SupabaseClient } from '@supabase/supabase-js'
+import { handleLeadStageChange } from './_cascade'
 
 // Must match the LeadStage type in src/types.ts — order matters
 // 'recurring' comes before 'finished_unpaid' so recurring leads advance correctly;
@@ -137,6 +138,13 @@ export async function advanceLeadStage(
 
     if (Object.keys(patch).length > 0) {
       await supabase.from('leads').update(patch).eq('id', lead.id)
+      // Centralized cascade: every automated stage advance runs the same side-effects
+      // (Finance/AR, activity log, review queue) as the user-driven path in leads.ts.
+      // Only fires when the stage actually advanced (patch.stage set), so re-running
+      // for an already-advanced lead is a no-op.
+      if (patch.stage) {
+        await handleLeadStageChange(lead.id, patch.stage as string, supabase)
+      }
     }
   } catch (err) {
     console.error('[leadSync] advanceLeadStage error:', err)

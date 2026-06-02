@@ -2,6 +2,7 @@ import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { randomUUID } from 'crypto'
 import { requireAuth } from './_auth'
+import { handleLeadStageChange } from './_cascade'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -434,14 +435,11 @@ export const handler: Handler = async (event) => {
 
                 if (lead && lead.stage !== 'finished_paid') {
                   await supabase.from('leads').update({ stage: 'finished_paid' }).eq('id', lead.id)
-                  if (quote.contact_id) {
-                    try { await supabase.from('activities').insert({
-                      contact_id: quote.contact_id,
-                      type:       'payment_received',
-                      summary:    `Payment received — QB Invoice #${qbInvoiceId} paid`,
-                      metadata:   { qbInvoiceId, quoteId: quote.id, leadId: lead.id },
-                    }) } catch (_e) { /* non-fatal */ }
-                  }
+                  // Cascade: reconcile the AR finance entry to paid + activity + review queue.
+                  // Previously the QB webhook bypassed the cascade, so QB-paid jobs created NO
+                  // finance entry. The cascade logs its own payment_received activity, so the
+                  // manual one here is removed to avoid a duplicate timeline entry.
+                  await handleLeadStageChange(lead.id, 'finished_paid', supabase)
                   console.log(`[qb webhook] Lead ${lead.id} → finished_paid (invoice ${qbInvoiceId})`)
                 }
               }
