@@ -66,6 +66,22 @@ const ALL_CATS = [...INCOME_CATS, ...EXPENSE_CATS]
 const isCashIncome = (t: { type: string; category: string }): boolean =>
   t.type === 'Income' && INCOME_CATS.includes(t.category)
 
+/**
+ * Outstanding balance for a credit account, DERIVED from imported bank transactions:
+ * charges (Expense) − payments (Income) on rows whose `account` matches the account's
+ * `accountKey`. Returns null when the account is unlinked or has no matching transactions
+ * (so the balance sheet can fall back to a manual figure). This is the "debt from bank
+ * activity" calc shared by the Credit Lines tab and the Balance Sheet.
+ */
+function computeCreditBalance(acc: CreditAccount, transactions: Transaction[]): number | null {
+  if (!acc.accountKey) return null
+  const relevant = transactions.filter(t => t.account === acc.accountKey)
+  if (relevant.length === 0) return null
+  const charges  = relevant.filter(t => t.type === 'Expense').reduce((s, t) => s + Number(t.amount), 0)
+  const payments = relevant.filter(t => t.type === 'Income').reduce((s, t) => s + Number(t.amount), 0)
+  return Math.max(0, charges - payments)
+}
+
 // Cost of Services categories (direct costs, shown above Gross Profit line)
 const COGS_CATS = new Set(['Contract Labor', 'Supplies & Materials'])
 
@@ -1034,13 +1050,31 @@ const BS_FIELDS: { key: SnapField; label: string; section: 'assets' | 'liabiliti
   { key: 'other_liab',   label: 'Other Liabilities',       section: 'liabilities' },
 ]
 
-function BalanceSheetTab({ snapshots, period, onRefresh }: { snapshots: Snapshot[]; period: Period; onRefresh: () => void }) {
+function BalanceSheetTab({ snapshots, period, onRefresh, transactions }: { snapshots: Snapshot[]; period: Period; onRefresh: () => void; transactions: Transaction[] }) {
   const selMonth = period.mode === 'month' ? period.month : new Date().getMonth() + 1
   const [editMonth, setEditMonth] = useState(selMonth)
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<Record<SnapField, number>>({} as Record<SnapField, number>)
   const [saving, setSaving] = useState(false)
   const { toast } = useToast()
+
+  // Live credit-card debt DERIVED from imported bank transactions (charges − payments), so
+  // debt auto-generates from bank activity instead of being hand-entered. Non-destructive:
+  // shown as guidance + one-click adopt; the manual snapshot still drives the saved totals
+  // until this derivation is verified against live data (see docs/SOURCE_OF_TRUTH.md).
+  const { data: creditAccounts = [] } = useQuery<CreditAccount[]>({
+    queryKey: ['/credit-accounts'],
+    queryFn: () => apiGet('/credit-accounts'),
+    staleTime: 60_000,
+  })
+  const derivedCreditDebt = useMemo(() => {
+    let total = 0; let anyLinked = false
+    creditAccounts.filter(a => a.active).forEach(a => {
+      const b = computeCreditBalance(a, transactions)
+      if (b !== null) { total += b; anyLinked = true }
+    })
+    return anyLinked ? total : null
+  }, [creditAccounts, transactions])
 
   const snap = snapshots.find(s => s.month === editMonth && s.year === period.year)
 
@@ -1113,6 +1147,20 @@ function BalanceSheetTab({ snapshots, period, onRefresh }: { snapshots: Snapshot
         <div className="rounded-xl border bg-card overflow-hidden">
           <div className="px-4 py-2.5 border-b bg-red-50 dark:bg-red-950/30 font-semibold text-sm text-destructive">Liabilities</div>
           {liabs.map(f => <BsRow key={f.key} f={f} />)}
+          {derivedCreditDebt !== null && (
+            <div className="flex items-center justify-between px-4 py-2 border-t bg-blue-50/60 dark:bg-blue-950/20">
+              <span className="text-xs text-blue-700 dark:text-blue-300">↳ Credit-card debt (auto, from imported transactions)</span>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">{fmt$d(derivedCreditDebt)}</span>
+                {editing && (
+                  <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]"
+                    onClick={() => setForm(p => ({ ...p, chase_ink: derivedCreditDebt }))}>
+                    Use for Chase Ink ↑
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between px-4 py-2.5 bg-muted/40 border-t font-bold text-sm">
             <span>Total Liabilities</span><span className="text-destructive">{fmt$d(totalLiabs)}</span>
           </div>
@@ -2892,15 +2940,8 @@ function CreditLinesTab({ transactions }: { transactions: Transaction[] }) {
     return [...s].sort()
   }, [transactions])
 
-  // Compute outstanding balance per credit account from transactions
-  function computeBalance(acc: CreditAccount): number | null {
-    if (!acc.accountKey) return null
-    const relevant = transactions.filter(t => t.account === acc.accountKey)
-    if (relevant.length === 0) return null
-    const charges  = relevant.filter(t => t.type === 'Expense').reduce((s, t) => s + Number(t.amount), 0)
-    const payments = relevant.filter(t => t.type === 'Income').reduce((s, t) => s + Number(t.amount), 0)
-    return Math.max(0, charges - payments)
-  }
+  // Compute outstanding balance per credit account from transactions (shared helper)
+  const computeBalance = (acc: CreditAccount): number | null => computeCreditBalance(acc, transactions)
 
   const activeAccounts = useMemo(() => accounts.filter(a => a.active), [accounts])
 
@@ -3361,7 +3402,7 @@ export default function Finance() {
 
         <TabsContent value="dashboard" className="mt-0"><DashboardTab transactions={transactions} snapshots={snapshots} period={period} /></TabsContent>
         <TabsContent value="pl" className="mt-0"><PLTab transactions={transactions} period={period} /></TabsContent>
-        <TabsContent value="balance" className="mt-0"><BalanceSheetTab snapshots={snapshots} period={period} onRefresh={refresh} /></TabsContent>
+        <TabsContent value="balance" className="mt-0"><BalanceSheetTab snapshots={snapshots} period={period} onRefresh={refresh} transactions={transactions} /></TabsContent>
         <TabsContent value="transactions" className="mt-0"><TransactionsTab transactions={transactions} period={period} onRefresh={refresh} /></TabsContent>
         <TabsContent value="import" className="mt-0"><CsvImportTab transactions={transactions} onRefresh={refresh} /></TabsContent>
         <TabsContent value="analytics" className="mt-0"><AnalyticsTab transactions={transactions} /></TabsContent>
