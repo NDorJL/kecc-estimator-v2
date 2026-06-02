@@ -37,14 +37,15 @@ Accounting basis: **CASH** (owner decision). P&L revenue = money actually receiv
 - **Formula:** an expense is "Fixed" if its normalized description appears in ≥2 distinct months. `normalizeDesc()` truncates to 32 chars + strips digits.
 - **Risk:** distinct vendors with similar prefixes merge; a genuinely-fixed cost appearing once is mislabeled. **Do not trust the donut.** → drive off an explicit per-vendor/category flag.
 
-### Balance Sheet — debt / liabilities — ❌ Does not auto-generate (owner's complaint)
-- **Source:** `balance_sheet_snapshots` — **manually hand-entered** (`chase_ink`, `auto_loan`, `biz_loan`, `other_liab`).
-- **Verified:** latest snapshot total liabilities = **$2,811.71** (manual). NOT derived from `transactions` or `credit_accounts`.
-- ❌ **This is the gap you flagged.** Debt totals don't update from bank activity because they're a static snapshot. → wire liabilities to derive from credit-account balances + loan-payment transactions, or at least surface the derived `credit_accounts` balance alongside.
+### Balance Sheet — debt / liabilities — ⚠️ now auto-derives credit debt (PENDING live verify)
+- **Source:** `balance_sheet_snapshots` (manual assets + loan liabilities) — `chase_ink`, `auto_loan`, `biz_loan`, `other_liab`.
+- **2026-06-02 change (staged on local main):** the Balance Sheet now shows a **live auto-derived credit-card debt** row (`computeCreditBalance` over imported `transactions`) with a one-click "Use for Chase Ink" adopt. NON-DESTRUCTIVE — the manual snapshot still drives saved totals until verified.
+- **⏳ PENDING (MCP was down):** verify the credit accounts are linked (`account_key` matches `transactions.account`) and the derived number equals reality. If correct, **promote it to the primary credit liability** (replace manual `chase_ink`). If `account_key` is unset, the derived row won't show (returns null) — confirm linkage.
+- Loans (`auto_loan`/`biz_loan`) stay manual — a loan balance can't be derived from transactions without principal/amortization. Latest manual snapshot total liab was $2,811.71.
 
-### Credit-account balance — ⚠️ derived, unreconciled with balance sheet
-- **Computed in:** `Finance.tsx` → `computeBalance()` = charges − payments from linked `transactions`, floored at 0.
-- **Risk:** only correct if every charge+payment was imported; partial imports → arbitrary-looking balance. And it's a **second, separate** debt number from `balance_sheet_snapshots.chase_ink`. → pick one source of truth.
+### Credit-account balance — ⚠️ derived (now shared); reconcile with balance sheet
+- **Computed in:** `Finance.tsx` → shared `computeCreditBalance(acc, transactions)` = charges − payments on `t.account === acc.accountKey`, floored at 0 (Credit Lines tab + Balance Sheet both use it now).
+- **Risk:** only correct if every charge+payment was imported; partial imports → arbitrary balance. ⏳ Verify the linkage + that this single derived number is now the one source of truth for credit debt.
 
 ### "Est. Annual Revenue" / forecast KPIs — ⬜ Not verified, suspected double-count
 - **Computed in:** `Finance.tsx` AnalyticsTab (~`subARR + closedYTD`, and an "optimistic" line adding `nextMonthForecast×12`).
