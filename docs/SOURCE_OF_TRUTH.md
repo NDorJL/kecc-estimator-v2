@@ -37,15 +37,15 @@ Accounting basis: **CASH** (owner decision). P&L revenue = money actually receiv
 - **Formula:** an expense is "Fixed" if its normalized description appears in ≥2 distinct months. `normalizeDesc()` truncates to 32 chars + strips digits.
 - **Risk:** distinct vendors with similar prefixes merge; a genuinely-fixed cost appearing once is mislabeled. **Do not trust the donut.** → drive off an explicit per-vendor/category flag.
 
-### Balance Sheet — debt / liabilities — ⚠️ now auto-derives credit debt (PENDING live verify)
-- **Source:** `balance_sheet_snapshots` (manual assets + loan liabilities) — `chase_ink`, `auto_loan`, `biz_loan`, `other_liab`.
-- **2026-06-02 change (staged on local main):** the Balance Sheet now shows a **live auto-derived credit-card debt** row (`computeCreditBalance` over imported `transactions`) with a one-click "Use for Chase Ink" adopt. NON-DESTRUCTIVE — the manual snapshot still drives saved totals until verified.
-- **⏳ PENDING (MCP was down):** verify the credit accounts are linked (`account_key` matches `transactions.account`) and the derived number equals reality. If correct, **promote it to the primary credit liability** (replace manual `chase_ink`). If `account_key` is unset, the derived row won't show (returns null) — confirm linkage.
-- Loans (`auto_loan`/`biz_loan`) stay manual — a loan balance can't be derived from transactions without principal/amortization. Latest manual snapshot total liab was $2,811.71.
+### Balance Sheet — debt / liabilities — ✅ Verified 2026-06-03; derived credit debt is now PRIMARY
+- **Source:** loans + assets are manual (`balance_sheet_snapshots`); credit-card debt now **derives from bank activity** and drives the saved Total Liabilities / Owner's Equity.
+- **2026-06-03 change (staged on main):** `derivedCreditDebt` is the PRIMARY credit liability (ARCHITECTURE §4). When any credit account is linked it feeds `totalLiabs`/equity and the manual `chase_ink` field becomes fallback-only (used solely when nothing is linked). The Chase Ink row renders read-only with an "auto · from imports" tag; the old guidance row + "Use for Chase Ink" adopt button were removed (no longer needed). `computeCreditBalance` now takes an optional `asOf` so the figure is point-in-time per the snapshot month (Credit Lines tab passes none → current running balance).
+- **Verified LIVE 2026-06-03:** Chase Ink links 80 tx (2026-02-16 → 2026-05-31), charges $3,295.73 − payments $40.00 = **$3,255.73**. May 2026 snapshot manual `chase_ink` was **$0.00** → the balance sheet understated debt by $3,255.73; now corrected. No tx after May 31, so May (latest) and June (current) both derive $3,255.73 (as-of scoping verified). Amex card still has `account_key = null` → derives nothing until linked.
+- Loans (`auto_loan`/`biz_loan`) stay manual — can't derive without principal/amortization. NOTE: viewing a *past* month now derives that month's point-in-time credit balance, overriding any older manual `chase_ink` guess (e.g. April's $2,811.71) — intended single-source-of-truth behavior.
 
-### Credit-account balance — ⚠️ derived (now shared); reconcile with balance sheet
-- **Computed in:** `Finance.tsx` → shared `computeCreditBalance(acc, transactions)` = charges − payments on `t.account === acc.accountKey`, floored at 0 (Credit Lines tab + Balance Sheet both use it now).
-- **Risk:** only correct if every charge+payment was imported; partial imports → arbitrary balance. ⏳ Verify the linkage + that this single derived number is now the one source of truth for credit debt.
+### Credit-account balance — ✅ Verified 2026-06-03; single shared source of truth
+- **Computed in:** `Finance.tsx` → shared `computeCreditBalance(acc, transactions, asOf?)` = charges − payments on `t.account === acc.accountKey`, floored at 0. Used by both the Credit Lines tab (current balance, no `asOf`) and the Balance Sheet (point-in-time via `asOf`). This is the ONE place credit debt is computed.
+- **Residual risk:** only correct if every charge+payment was imported; partial imports → understated balance. Chase Ink reconciles to $3,255.73 (verified). Amex unlinked.
 
 ### "Est. Annual Revenue" / forecast KPIs — ✅ Verified + fixed 2026-06-03
 - **Computed in:** `Finance.tsx` AnalyticsTab. `Est. Annual Rev.` KPI = `subARR + closedYTD` (no double-count — left as-is). The **Annual Revenue Projection** "Optimistic Annual Estimate" breakdown was the problem.
@@ -77,7 +77,7 @@ Accounting basis: **CASH** (owner decision). P&L revenue = money actually receiv
 ### Clicks — ⚠️ phone/email clicks are invisible per-campaign
 - **Formula (confirmed):** `campaignMetrics` sums `phone_click+email_click+form_submit+ad-click` filtered by `campaignId === cam.id`.
 - **Verified problem:** all **8 phone_click+email_click events have NULL campaign_id** → they count toward NO campaign card (anonymous website taps, no campaign context at tap time). Tracked but unused. → either roll them into a channel-level "Website" aggregate or stop logging them.
-- ⬜ **Contact Form card shows Clicks=7 (form_submit) but Leads=1** — a 7:1 gap. PENDING: confirm whether the 7 form_submit events are real submissions (6 didn't convert/attribute) or leftover test events whose leads were deleted (events are immutable, so deleted-test leads leave orphan events). *(Supabase MCP was down at check time — re-run.)*
+- ✅ **RESOLVED 2026-06-03:** the Contact Form 7:1 gap was leftover test events. Of 7 `form_submit` events, 6 referenced deleted test leads (orphans, incl. a 4-event burst at 2026-05-28 14:25:12) — deleted them. The 1 surviving event maps to a real lead (Ruby Webb, `b8490697…`). Contact Form Clicks now = 1, matching Leads = 1.
 
 ### Views / Scans — ✅ verified; ⚠️ funnels don't reconcile
 - **Verified:** scan events Ice Bears = 6, Direct Mail "How KECC Works" = 1 — shown correctly as Views (qr/sponsorship only).
@@ -111,14 +111,14 @@ Accounting basis: **CASH** (owner decision). P&L revenue = money actually receiv
 |---|---|---|
 | Finance — cash P&L revenue/expenses/net | ✅ | 2026-06-02, numbers reconcile |
 | Finance — AR | ✅ | $0 outstanding; lingering-paid-rows finding |
-| Finance — balance sheet debt | ❌ | manual, doesn't auto-derive |
+| Finance — balance sheet debt | ✅ | 2026-06-03: credit debt now derives from bank activity as PRIMARY liability ($3,255.73); manual field = fallback |
 | Finance — fixed/variable | ⚠️ | heuristic, untrustworthy |
 | Finance — forecasts | ✅ | 2026-06-03: confirmed + fixed the optimistic-estimate MRR double-count ($11,787.12 overstatement) |
 | MRR / ARR | ✅ | 2026-06-02: $982.26 in-season MRR (5 active subs) → ~$11.8k ARR; $332.86 off-season; 0 active subs with $0 in-season |
 | Marketing — leads/scans logic | ✅ | 2026-06-02; logic sound, attribution mostly manual |
 | Marketing — clicks/organic | ⚠️ | phone/email clicks orphaned (null campaign); 0 page_view events (organic logs nothing) |
-| Marketing — form-submit reality | ⚠️ | 2026-06-02: 7 form_submit events but only **1 of 7 leads survives** → Contact Form "7 clicks" inflated by 6 orphaned test events (deleted test leads). → clean the 6 events |
+| Marketing — form-submit reality | ✅ | 2026-06-03: confirmed 6 of 7 `form_submit` events were orphans (deleted test leads) and **DELETED** them; only Ruby Webb's real event remains. Contact Form Clicks 7 → 1, matching Leads = 1 |
 | Marketing — spend | ✅ | 2026-06-02: $1,194 May / $590 June, tracked correctly; only the raw-vs-prorated DISPLAY inconsistency remains |
-| Balance sheet — credit debt derived | ✅ | 2026-06-02: Chase Ink links 80 tx → derives **$3,255.73**, but manual snapshot chase_ink = **$0** (balance sheet understated debt by ~$3.3k). Feature works. Amex card has no account_key (derives nothing) → link it. → safe to PROMOTE derived to primary |
+| Balance sheet — credit debt derived | ✅ | 2026-06-02 verified; **2026-06-03 PROMOTED to primary** liability (drives totals/equity; point-in-time via `asOf`). Amex still needs `account_key` |
 | Pipeline counts | ✅ | 2026-06-02: lost 12 / finished_paid 5 / recurring 5 / quoted 3 / contacted 3 — sensible |
 | Finance forecasts | ✅ | 2026-06-03: optimistic-estimate double-count fixed (3 components now mutually exclusive) |

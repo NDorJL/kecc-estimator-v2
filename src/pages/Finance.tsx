@@ -74,9 +74,13 @@ const isCashIncome = (t: { type: string; category: string }): boolean =>
  * (so the balance sheet can fall back to a manual figure). This is the "debt from bank
  * activity" calc shared by the Credit Lines tab and the Balance Sheet.
  */
-function computeCreditBalance(acc: CreditAccount, transactions: Transaction[]): number | null {
+function computeCreditBalance(acc: CreditAccount, transactions: Transaction[], asOf?: Date): number | null {
   if (!acc.accountKey) return null
-  const relevant = transactions.filter(t => t.account === acc.accountKey)
+  let relevant = transactions.filter(t => t.account === acc.accountKey)
+  // Point-in-time scope: a balance-sheet snapshot for a given month should only count
+  // activity on/before that month-end, so a *past* month doesn't show today's running
+  // balance. Omit asOf (e.g. the Credit Lines tab) to get the current running balance.
+  if (asOf) relevant = relevant.filter(t => t.date && new Date(t.date) <= asOf)
   if (relevant.length === 0) return null
   const charges  = relevant.filter(t => t.type === 'Expense').reduce((s, t) => s + Number(t.amount), 0)
   const payments = relevant.filter(t => t.type === 'Income').reduce((s, t) => s + Number(t.amount), 0)
@@ -1059,23 +1063,25 @@ function BalanceSheetTab({ snapshots, period, onRefresh, transactions }: { snaps
   const [saving, setSaving] = useState(false)
   const { toast } = useToast()
 
-  // Live credit-card debt DERIVED from imported bank transactions (charges − payments), so
-  // debt auto-generates from bank activity instead of being hand-entered. Non-destructive:
-  // shown as guidance + one-click adopt; the manual snapshot still drives the saved totals
-  // until this derivation is verified against live data (see docs/SOURCE_OF_TRUTH.md).
+  // Live credit-card debt DERIVED from imported bank transactions (charges − payments).
+  // This is the PRIMARY credit liability (single source of truth, ARCHITECTURE §4): when any
+  // credit account is linked, it drives the Total Liabilities / Owner's Equity numbers and the
+  // manual `chase_ink` field is fallback-only. Verified vs live data 2026-06-03.
   const { data: creditAccounts = [] } = useQuery<CreditAccount[]>({
     queryKey: ['/credit-accounts'],
     queryFn: () => apiGet('/credit-accounts'),
     staleTime: 60_000,
   })
+  // Snapshot month-end, so the derived balance is point-in-time for the month being viewed.
+  const asOf = useMemo(() => new Date(period.year, editMonth, 0, 23, 59, 59), [period.year, editMonth])
   const derivedCreditDebt = useMemo(() => {
     let total = 0; let anyLinked = false
     creditAccounts.filter(a => a.active).forEach(a => {
-      const b = computeCreditBalance(a, transactions)
+      const b = computeCreditBalance(a, transactions, asOf)
       if (b !== null) { total += b; anyLinked = true }
     })
     return anyLinked ? total : null
-  }, [creditAccounts, transactions])
+  }, [creditAccounts, transactions, asOf])
 
   const snap = snapshots.find(s => s.month === editMonth && s.year === period.year)
 
@@ -1088,8 +1094,11 @@ function BalanceSheetTab({ snapshots, period, onRefresh, transactions }: { snaps
   const assets = BS_FIELDS.filter(f => f.section === 'assets')
   const liabs = BS_FIELDS.filter(f => f.section === 'liabilities')
   const val = (f: SnapField) => editing ? (form[f] || 0) : Number(snap?.[f] || 0)
+  // Credit-card liability prefers the derived figure (primary); manual chase_ink is fallback
+  // only when no card is linked (derivedCreditDebt === null).
+  const liabVal = (f: SnapField) => f === 'chase_ink' && derivedCreditDebt !== null ? derivedCreditDebt : val(f)
   const totalAssets = assets.reduce((s, f) => s + val(f.key), 0)
-  const totalLiabs = liabs.reduce((s, f) => s + val(f.key), 0)
+  const totalLiabs = liabs.reduce((s, f) => s + liabVal(f.key), 0)
   const equity = totalAssets - totalLiabs
 
   async function handleSave() {
@@ -1103,15 +1112,23 @@ function BalanceSheetTab({ snapshots, period, onRefresh, transactions }: { snaps
     } finally { setSaving(false) }
   }
 
-  const BsRow = ({ f }: { f: typeof BS_FIELDS[0] }) => (
-    <div className="flex items-center justify-between px-4 py-2.5 border-b last:border-0">
-      <span className="text-sm text-muted-foreground">{f.label}</span>
-      {editing
-        ? <Input type="number" className="h-7 w-28 text-right text-sm" value={form[f.key] || ''}
-            onChange={e => setForm(p => ({ ...p, [f.key]: parseFloat(e.target.value) || 0 }))} />
-        : <span className="text-sm font-medium">{fmt$d(Number(snap?.[f.key] || 0))}</span>}
-    </div>
-  )
+  const BsRow = ({ f }: { f: typeof BS_FIELDS[0] }) => {
+    // When a credit account is linked, the credit-card row shows the derived balance and is
+    // read-only (single source of truth) — hand-editing a derived number is disabled.
+    const autoCredit = f.key === 'chase_ink' && derivedCreditDebt !== null
+    return (
+      <div className="flex items-center justify-between px-4 py-2.5 border-b last:border-0">
+        <span className="text-sm text-muted-foreground">
+          {f.label}
+          {autoCredit && <span className="ml-1.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">auto · from imports</span>}
+        </span>
+        {editing && !autoCredit
+          ? <Input type="number" className="h-7 w-28 text-right text-sm" value={form[f.key] || ''}
+              onChange={e => setForm(p => ({ ...p, [f.key]: parseFloat(e.target.value) || 0 }))} />
+          : <span className="text-sm font-medium">{fmt$d(autoCredit ? derivedCreditDebt : Number(snap?.[f.key] || 0))}</span>}
+      </div>
+    )
+  }
 
   return (
     <div className="p-4 space-y-4">
@@ -1148,20 +1165,6 @@ function BalanceSheetTab({ snapshots, period, onRefresh, transactions }: { snaps
         <div className="rounded-xl border bg-card overflow-hidden">
           <div className="px-4 py-2.5 border-b bg-red-50 dark:bg-red-950/30 font-semibold text-sm text-destructive">Liabilities</div>
           {liabs.map(f => <BsRow key={f.key} f={f} />)}
-          {derivedCreditDebt !== null && (
-            <div className="flex items-center justify-between px-4 py-2 border-t bg-blue-50/60 dark:bg-blue-950/20">
-              <span className="text-xs text-blue-700 dark:text-blue-300">↳ Credit-card debt (auto, from imported transactions)</span>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-semibold text-blue-700 dark:text-blue-300">{fmt$d(derivedCreditDebt)}</span>
-                {editing && (
-                  <Button size="sm" variant="outline" className="h-6 px-2 text-[11px]"
-                    onClick={() => setForm(p => ({ ...p, chase_ink: derivedCreditDebt }))}>
-                    Use for Chase Ink ↑
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
           <div className="flex items-center justify-between px-4 py-2.5 bg-muted/40 border-t font-bold text-sm">
             <span>Total Liabilities</span><span className="text-destructive">{fmt$d(totalLiabs)}</span>
           </div>
