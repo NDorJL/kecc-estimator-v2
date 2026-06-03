@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/hooks/use-toast'
 import { apiGet, apiRequest } from '@/lib/queryClient'
+import { scheduleFiresOn } from '@/lib/subSchedule'
 import type { Quote, Subscription, Lead, Job, Contact } from '@/types'
 import {
   Lock, AlertTriangle, Upload, Plus, Pencil, Trash2,
@@ -1934,54 +1935,20 @@ function countSubOccurrencesInBucket(subs: Subscription[], b: Bucket): number {
       freq: string,
       dayOfWeekTarget: number | null, // null = use startDate DOW (fallback path)
     ) => {
+      // Recurrence decision lives in the shared src/lib/subSchedule.ts so this count and
+      // the calendar's event generation can never disagree about how often a sub is serviced.
       const schStart = new Date(sy, sm - 1, sd, 12, 0, 0, 0)
-      const isDateBased = freq.includes('quarter') || freq.includes('annual')
       const effectiveStart = schStart > b.start ? schStart : new Date(b.start)
       effectiveStart.setHours(12, 0, 0, 0)
       const endCap = new Date(windowEnd)
       endCap.setHours(12, 0, 0, 0)
 
-      const dow = dayOfWeekTarget ?? new Date(sy, sm - 1, sd).getDay()
-
       const cursor = new Date(effectiveStart)
       while (cursor <= endCap) {
-        const year  = cursor.getFullYear()
-        const month = cursor.getMonth()
-        const day   = cursor.getDate()
-        const daysInMonth = new Date(year, month + 1, 0).getDate()
-
-        if (isDateBased) {
-          const totalMonths = (year - sy) * 12 + ((month + 1) - sm)
-          const interval = freq.includes('quarter') ? 3 : 12
-          if (totalMonths % interval === 0 && day === sd) count++
-        } else {
-          if (cursor.getDay() === dow) {
-            if (freq.includes('bi') && freq.includes('week')) {
-              const startSunday = new Date(sy, sm - 1, sd - new Date(sy, sm - 1, sd).getDay())
-              const thisSunday  = new Date(year, month, day - cursor.getDay())
-              const weekDiff = Math.round((thisSunday.getTime() - startSunday.getTime()) / (7 * 86400000))
-              if (weekDiff % 2 === 0) count++
-            } else if (freq.includes('month')) {
-              // Monthly: only the weekday occurrence closest to the original day-of-month
-              const occs: number[] = []
-              for (let d2 = 1; d2 <= daysInMonth; d2++) {
-                if (new Date(year, month, d2).getDay() === dow) occs.push(d2)
-              }
-              const best = occs.reduce((a, b2) => Math.abs(a - sd) <= Math.abs(b2 - sd) ? a : b2)
-              if (day === best) {
-                if (freq.includes('bi')) {
-                  const totalMonths = (year - sy) * 12 + ((month + 1) - sm)
-                  if (totalMonths % 2 === 0) count++
-                } else {
-                  count++
-                }
-              }
-            } else {
-              // Weekly (every matching weekday)
-              count++
-            }
-          }
-        }
+        if (scheduleFiresOn(
+          { y: sy, m: sm, d: sd }, freq, dayOfWeekTarget,
+          { y: cursor.getFullYear(), m: cursor.getMonth() + 1, d: cursor.getDate() },
+        )) count++
         cursor.setDate(cursor.getDate() + 1)
       }
     }

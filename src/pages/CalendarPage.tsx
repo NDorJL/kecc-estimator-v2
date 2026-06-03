@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiGet, apiRequest } from '@/lib/queryClient'
+import { scheduleFiresOn } from '@/lib/subSchedule'
 import { quoCallUrl } from '@/lib/utils'
 import { Job, Subscription, Contractor, Contact, Quote, Lead } from '@/types'
 import {
@@ -68,57 +69,11 @@ function generateSubEvents(subs: Subscription[], year: number, month: number): M
     const daysInMonth = new Date(year, month + 1, 0).getDate()
 
     for (const sch of schedules) {
-      // Parse start year/month/day — avoid Date constructor timezone issues entirely
       const [sy, sm, sd] = sch.startDate.split('-').map(Number)
-      // sm and sd are 1-based (e.g. month 5 = May)
       const freq = (sch.frequency ?? '').toLowerCase()
-      const isDateBased = freq.includes('quarter') || freq.includes('annual')
-
       for (let day = 1; day <= daysInMonth; day++) {
-        // Skip days before the service start date
-        if (year < sy) continue
-        if (year === sy && month + 1 < sm) continue
-        if (year === sy && month + 1 === sm && day < sd) continue
-
-        if (isDateBased) {
-          // Quarterly / Annual: fires on the same calendar date, every N months
-          const totalMonths = (year - sy) * 12 + ((month + 1) - sm)
-          const interval = freq.includes('quarter') ? 3 : 12
-          if (totalMonths % interval !== 0) continue   // wrong month
-          if (day !== sd) continue                      // wrong day-of-month
-        } else {
-          // Week-based / Monthly: must land on the right day-of-week first
-          const dow = new Date(year, month, day).getDay()
-          if (dow !== sch.dayOfWeek) continue
-
-          if (freq.includes('bi') && freq.includes('week')) {
-            // Bi-weekly: same parity of week as the start date
-            const startDow = new Date(sy, sm - 1, sd).getDay()
-            const startSunday = new Date(sy, sm - 1, sd - startDow)
-            const thisSunday  = new Date(year, month, day - dow)
-            const weekDiff = Math.round((thisSunday.getTime() - startSunday.getTime()) / (7 * 86400000))
-            if (weekDiff % 2 !== 0) continue
-          } else if (freq.includes('month') || freq.includes('bi')) {
-            // Monthly (and bi-monthly): fire on the occurrence of this weekday closest
-            // to the original day-of-month within this month
-            const targetDom = sd
-            const occs: number[] = []
-            for (let d2 = 1; d2 <= daysInMonth; d2++) {
-              if (new Date(year, month, d2).getDay() === sch.dayOfWeek) occs.push(d2)
-            }
-            const best = occs.reduce((a, b) =>
-              Math.abs(a - targetDom) <= Math.abs(b - targetDom) ? a : b
-            )
-            if (day !== best) continue
-            if (freq.includes('bi') && !freq.includes('week')) {
-              // Bi-monthly: only every other month from start
-              const totalMonths = (year - sy) * 12 + ((month + 1) - sm)
-              if (totalMonths % 2 !== 0) continue
-            }
-          }
-          // Weekly: every matching weekday — no extra check needed
-        }
-
+        // Recurrence decision is shared with Finance via src/lib/subSchedule.ts.
+        if (!scheduleFiresOn({ y: sy, m: sm, d: sd }, freq, sch.dayOfWeek, { y: year, m: month + 1, d: day })) continue
         const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
         const arr = map.get(key) ?? []
         arr.push({
@@ -134,37 +89,17 @@ function generateSubEvents(subs: Subscription[], year: number, month: number): M
       }
     }
 
-    // Fallback for subs that have services[] but no serviceSchedules yet
+    // Fallback for subs that have services[] but no serviceSchedules yet.
+    // Now uses the shared scheduleFiresOn (dow derived from startDate) — this also fixes a
+    // latent bug where the old fallback treated monthly/bi-monthly as weekly, making the
+    // calendar disagree with the Finance occurrence count.
     if (schedules.length === 0 && (sub.services ?? []).length > 0) {
       const [sy, sm, sd] = (sub.startDate ?? '').split('-').map(Number)
       if (!sy) return
-
       for (const svc of sub.services) {
         const freq = (svc.frequency ?? '').toLowerCase()
-        const isDateBased = freq.includes('quarter') || freq.includes('annual')
-
         for (let day = 1; day <= daysInMonth; day++) {
-          if (year < sy) continue
-          if (year === sy && month + 1 < sm) continue
-          if (year === sy && month + 1 === sm && day < sd) continue
-
-          if (isDateBased) {
-            const totalMonths = (year - sy) * 12 + ((month + 1) - sm)
-            const interval = freq.includes('quarter') ? 3 : 12
-            if (totalMonths % interval !== 0) continue
-            if (day !== sd) continue
-          } else {
-            const startDow = new Date(sy, sm - 1, sd).getDay()
-            const dow = new Date(year, month, day).getDay()
-            if (dow !== startDow) continue
-            if (freq.includes('bi') && freq.includes('week')) {
-              const startSunday = new Date(sy, sm - 1, sd - startDow)
-              const thisSunday  = new Date(year, month, day - dow)
-              const weekDiff = Math.round((thisSunday.getTime() - startSunday.getTime()) / (7 * 86400000))
-              if (weekDiff % 2 !== 0) continue
-            }
-          }
-
+          if (!scheduleFiresOn({ y: sy, m: sm, d: sd }, freq, null, { y: year, m: month + 1, d: day })) continue
           const key = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
           const arr = map.get(key) ?? []
           arr.push({
