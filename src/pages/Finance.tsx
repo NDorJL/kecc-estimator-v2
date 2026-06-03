@@ -2844,10 +2844,14 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
       <div className="rounded-xl border bg-card p-4 mt-3">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Annual Revenue Projection</h3>
         <div className="space-y-2">
+          {/* Three MUTUALLY-EXCLUSIVE buckets so the breakdown sums without double-counting.
+              Previously the 3rd line was nextMonthForecast×12 = (activeMRR + last3MonthsOneTime)×12,
+              which re-included activeMRR×12 (= subARR) → subscription revenue counted twice.
+              Now: recurring (subARR) + booked one-time YTD + projected one-time run-rate ×12. */}
           {[
             { label: 'Projected Sub Revenue (ARR)', value: subARR, color: 'text-green-700 dark:text-green-400' },
             { label: 'Closed One-Time YTD', value: closedYTD, color: '' },
-            { label: 'Projected Next-Month × 12', value: nextMonthForecast * 12, color: 'text-blue-600 dark:text-blue-400' },
+            { label: 'Projected One-Time × 12', value: last3MonthsOneTime * 12, color: 'text-blue-600 dark:text-blue-400' },
           ].map(row => (
             <div key={row.label} className="flex justify-between items-center py-1.5 border-b last:border-0">
               <span className="text-sm text-muted-foreground">{row.label}</span>
@@ -2856,7 +2860,7 @@ function AnalyticsTab({ transactions }: { transactions: Transaction[] }) {
           ))}
           <div className="flex justify-between items-center pt-2">
             <span className="text-sm font-semibold">Optimistic Annual Estimate</span>
-            <span className="font-bold text-lg">{fmt$(subARR + closedYTD + nextMonthForecast * 12)}</span>
+            <span className="font-bold text-lg">{fmt$(subARR + closedYTD + last3MonthsOneTime * 12)}</span>
           </div>
         </div>
       </div>

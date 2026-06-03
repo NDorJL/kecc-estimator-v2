@@ -47,9 +47,11 @@ Accounting basis: **CASH** (owner decision). P&L revenue = money actually receiv
 - **Computed in:** `Finance.tsx` → shared `computeCreditBalance(acc, transactions)` = charges − payments on `t.account === acc.accountKey`, floored at 0 (Credit Lines tab + Balance Sheet both use it now).
 - **Risk:** only correct if every charge+payment was imported; partial imports → arbitrary balance. ⏳ Verify the linkage + that this single derived number is now the one source of truth for credit debt.
 
-### "Est. Annual Revenue" / forecast KPIs — ⬜ Not verified, suspected double-count
-- **Computed in:** `Finance.tsx` AnalyticsTab (~`subARR + closedYTD`, and an "optimistic" line adding `nextMonthForecast×12`).
-- **Risk:** subscription revenue likely counted ~twice in the optimistic line; `closedYTD` depends on `quoteType` containing literal `'onetime'`. → verify against actual closed quotes before trusting.
+### "Est. Annual Revenue" / forecast KPIs — ✅ Verified + fixed 2026-06-03
+- **Computed in:** `Finance.tsx` AnalyticsTab. `Est. Annual Rev.` KPI = `subARR + closedYTD` (no double-count — left as-is). The **Annual Revenue Projection** "Optimistic Annual Estimate" breakdown was the problem.
+- **Confirmed double-count (2026-06-03):** the optimistic line was `subARR + closedYTD + nextMonthForecast×12`, and `nextMonthForecast = activeMRR + last3MonthsOneTime` while `subARR = activeMRR×12` — so `nextMonthForecast×12` re-included `activeMRR×12`. Subscription ARR was counted **twice**. Live magnitude: overstated by exactly `activeMRR×12 = $982.26×12 = $11,787.12` (read ≈$70k, should read ≈$59k).
+- **Fix (staged 2026-06-03):** the 3rd breakdown line is now `Projected One-Time × 12 = last3MonthsOneTime×12` (one-time only), making the three components mutually exclusive (recurring ARR + booked one-time YTD + projected one-time run-rate). Total = `subARR + closedYTD + last3MonthsOneTime×12`. The standalone `Next-Month Forecast` KPI (MRR + avg one-time) is a legitimate single metric and is unchanged.
+- **Note:** `closedYTD` still depends on `quoteType` containing literal `'onetime'` (live: 7 accepted one-time quotes, $9,370.58 YTD). Canonicalizing quote types remains a separate Phase-1 item.
 
 ---
 
@@ -111,7 +113,7 @@ Accounting basis: **CASH** (owner decision). P&L revenue = money actually receiv
 | Finance — AR | ✅ | $0 outstanding; lingering-paid-rows finding |
 | Finance — balance sheet debt | ❌ | manual, doesn't auto-derive |
 | Finance — fixed/variable | ⚠️ | heuristic, untrustworthy |
-| Finance — forecasts | ⬜ | suspected double-count |
+| Finance — forecasts | ✅ | 2026-06-03: confirmed + fixed the optimistic-estimate MRR double-count ($11,787.12 overstatement) |
 | MRR / ARR | ✅ | 2026-06-02: $982.26 in-season MRR (5 active subs) → ~$11.8k ARR; $332.86 off-season; 0 active subs with $0 in-season |
 | Marketing — leads/scans logic | ✅ | 2026-06-02; logic sound, attribution mostly manual |
 | Marketing — clicks/organic | ⚠️ | phone/email clicks orphaned (null campaign); 0 page_view events (organic logs nothing) |
@@ -119,4 +121,4 @@ Accounting basis: **CASH** (owner decision). P&L revenue = money actually receiv
 | Marketing — spend | ✅ | 2026-06-02: $1,194 May / $590 June, tracked correctly; only the raw-vs-prorated DISPLAY inconsistency remains |
 | Balance sheet — credit debt derived | ✅ | 2026-06-02: Chase Ink links 80 tx → derives **$3,255.73**, but manual snapshot chase_ink = **$0** (balance sheet understated debt by ~$3.3k). Feature works. Amex card has no account_key (derives nothing) → link it. → safe to PROMOTE derived to primary |
 | Pipeline counts | ✅ | 2026-06-02: lost 12 / finished_paid 5 / recurring 5 / quoted 3 / contacted 3 — sensible |
-| Finance forecasts | ⬜ | suspected double-count — still to verify |
+| Finance forecasts | ✅ | 2026-06-03: optimistic-estimate double-count fixed (3 components now mutually exclusive) |
