@@ -111,8 +111,11 @@ Accounting basis: **CASH** (owner decision). P&L revenue = money actually receiv
 | Finance — balance sheet debt | ❌ | manual, doesn't auto-derive |
 | Finance — fixed/variable | ⚠️ | heuristic, untrustworthy |
 | Finance — forecasts | ⬜ | suspected double-count |
-| MRR / ARR | ⬜ | |
+| MRR / ARR | ✅ | 2026-06-02: $982.26 in-season MRR (5 active subs) → ~$11.8k ARR; $332.86 off-season; 0 active subs with $0 in-season |
 | Marketing — leads/scans logic | ✅ | 2026-06-02; logic sound, attribution mostly manual |
 | Marketing — clicks/organic | ⚠️ | phone/email clicks orphaned (null campaign); 0 page_view events (organic logs nothing) |
-| Marketing — spend/closed/revenue totals | ⬜ | PENDING — Supabase MCP was down; re-run form_submit-reality + spend + closed checks |
-| Pipeline counts | ⬜ | |
+| Marketing — form-submit reality | ⚠️ | 2026-06-02: 7 form_submit events but only **1 of 7 leads survives** → Contact Form "7 clicks" inflated by 6 orphaned test events (deleted test leads). → clean the 6 events |
+| Marketing — spend | ✅ | 2026-06-02: $1,194 May / $590 June, tracked correctly; only the raw-vs-prorated DISPLAY inconsistency remains |
+| Balance sheet — credit debt derived | ✅ | 2026-06-02: Chase Ink links 80 tx → derives **$3,255.73**, but manual snapshot chase_ink = **$0** (balance sheet understated debt by ~$3.3k). Feature works. Amex card has no account_key (derives nothing) → link it. → safe to PROMOTE derived to primary |
+| Pipeline counts | ✅ | 2026-06-02: lost 12 / finished_paid 5 / recurring 5 / quoted 3 / contacted 3 — sensible |
+| Finance forecasts | ⬜ | suspected double-count — still to verify |
