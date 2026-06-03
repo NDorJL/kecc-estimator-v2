@@ -55,11 +55,12 @@ Accounting basis: **CASH** (owner decision). P&L revenue = money actually receiv
 
 ## SUBSCRIPTIONS / RECURRING (MRR)
 
-### MRR — ⬜ Not yet verified
+### MRR — ✅ Verified 2026-06-02
 - **Source:** `subscriptions.in_season_monthly_total` (and `off_season_monthly_total`) for `status='ACTIVE'`.
-- **Note:** the leads→recurring auto-create path sets in-season only (off-season defaults 0) → off-season MRR can read low until re-saved. Churn uses `createdAt` as a paused-since proxy (unreliable; `pause_until`/`cancelled_at` are better). → verify sum of ACTIVE subs vs displayed MRR.
+- **Verified:** Active MRR = **$982.26** (5 active subs) → ARR ~$11,787; off-season $332.86. **0** active subs with $0 in-season (the leads→recurring auto-create off-season gap didn't corrupt MRR in practice). Churn still uses `createdAt` proxy (unreliable; prefer `pause_until`/`cancelled_at`).
 
-### ARR — ⬜ = MRR × 12 (depends on MRR above).
+### Subscription occurrences ("jobs done") — ✅ unified 2026-06-02 (staged)
+- Finance `countSubOccurrencesInBucket` and Calendar `generateSubEvents` now share one decision (`src/lib/subSchedule.ts` → `scheduleFiresOn`), so they can't drift. Verified by a 17,520-case differential test (0 mismatches) + fixed the Calendar fallback bug (treated monthly/bi-monthly as weekly). Only live fallback sub is Annual → zero behavior change.
 
 ---
 
