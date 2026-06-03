@@ -1,6 +1,7 @@
 import type { Handler } from '@netlify/functions'
 import { createClient } from '@supabase/supabase-js'
 import { rowToQuote, rowToSettings } from '../../src/types'
+import { getQuoteTerms, QUOTE_TERMS_TITLE } from '../../src/lib/quoteTerms'
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const PDFDocument = require('pdfkit')
 import { PDFDocument as LibPDF } from 'pdf-lib'
@@ -238,6 +239,28 @@ export const handler: Handler = async (event) => {
       y += 14
       doc.fontSize(9).font('Helvetica').fillColor('#333333').text(quote.notes, 50, y, { width: pageW })
       y += doc.heightOfString(quote.notes, { width: pageW }) + 16
+    }
+
+    // ── Terms & Conditions (fine print) ──────────────────────────────────────
+    // Single source of truth: src/lib/quoteTerms.ts (same text as the e-sign page).
+    {
+      const includeRecurringTerms = subItems.length > 0
+      const terms = getQuoteTerms(includeRecurringTerms)
+      if (y > 600) { doc.addPage(); y = 50 }
+      y += 10
+      doc.moveTo(50, y).lineTo(562, y).strokeColor('#dddddd').lineWidth(0.5).stroke()
+      y += 12
+      doc.fontSize(8).font('Helvetica-Bold').fillColor('#888888').text(QUOTE_TERMS_TITLE.toUpperCase(), 50, y, { width: pageW })
+      y += 14
+      for (const c of terms) {
+        const full = `${c.heading}. ${c.body}`
+        const h = doc.fontSize(7).font('Helvetica').heightOfString(full, { width: pageW })
+        if (y + h > 745) { doc.addPage(); y = 50 }
+        doc.fontSize(7).font('Helvetica-Bold').fillColor('#777777').text(`${c.heading}. `, 50, y, { width: pageW, continued: true })
+        doc.font('Helvetica').fillColor('#999999').text(c.body, { width: pageW })
+        y = doc.y + 4
+      }
+      y += 6
     }
 
     // ── Signature block ──────────────────────────────────────────────────────

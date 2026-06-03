@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto'
 import { advanceLeadStage } from './_leadSync'
 import { sendOpenPhoneSms } from './_smsHelper'
 import { sendEmail } from './_emailHelper'
+import { getQuoteTerms, QUOTE_TERMS_TITLE } from '../../src/lib/quoteTerms'
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
@@ -365,6 +366,16 @@ function buildQuotePage(opts: {
       </div>
       ${sigScript(token, '✓  I Accept This Estimate', funcUrl)}`
 
+  // Terms & Conditions fine print — on every quote (one-time and recurring).
+  // Single source of truth: src/lib/quoteTerms.ts (rendered identically in the quote PDF).
+  const includeRecurringTerms = isSubscriptionQuote || subItems.length > 0
+  const quoteTerms = getQuoteTerms(includeRecurringTerms)
+  const termsHtml = `
+      <div style="margin-top:24px;padding-top:16px;border-top:1px solid #f0f0f0;">
+        <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#9ca3af;text-transform:uppercase;letter-spacing:.06em;">${esc(QUOTE_TERMS_TITLE)}</p>
+        ${quoteTerms.map(c => `<p style="margin:0 0 6px;font-size:10px;line-height:1.5;color:#9ca3af;"><strong style="color:#6b7280;font-weight:600;">${esc(c.heading)}.</strong> ${esc(c.body)}</p>`).join('')}
+      </div>`
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -456,6 +467,8 @@ function buildQuotePage(opts: {
       ${quoteFooter ? `<div style="margin-top:20px;text-align:center;">
         <p style="margin:0;font-size:11px;color:#9ca3af;line-height:1.5;">${esc(quoteFooter)}</p>
       </div>` : ''}
+
+      ${termsHtml}
 
       <hr class="sig-divider"/>
       ${signatureSection}
